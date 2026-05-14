@@ -21,6 +21,15 @@
 
 #include "nv2a_int.h"
 
+#ifdef CONFIG_IOS
+static bool ios_nv2a_write_trace_enabled(void)
+{
+    const char *trace = getenv("XEMU_IOS_NV2A_WRITE_TRACE");
+
+    return trace && strcmp(trace, "0") != 0;
+}
+#endif
+
 typedef struct RAMHTEntry {
     uint32_t handle;
     hwaddr instance;
@@ -67,6 +76,15 @@ void pfifo_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
     NV2AState *d = (NV2AState *)opaque;
 
     nv2a_reg_log_write(NV_PFIFO, addr, size, val);
+#ifdef CONFIG_IOS
+    static unsigned ios_pfifo_write_logs;
+    if (ios_nv2a_write_trace_enabled() && ios_pfifo_write_logs < 96) {
+        fprintf(stderr,
+                "xemu_ios: pfifo write[%u] addr=0x%" HWADDR_PRIx
+                " size=%u val=0x%016" PRIx64 "\n",
+                ios_pfifo_write_logs++, addr, size, val);
+    }
+#endif
 
     qemu_mutex_lock(&d->pfifo.lock);
 

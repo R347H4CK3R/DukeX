@@ -116,6 +116,29 @@ uint32_t pci_host_config_read_common(PCIDevice *pci_dev, uint32_t addr,
     }
 
     ret = pci_dev->config_read(pci_dev, addr, MIN(len, limit - addr));
+#ifdef CONFIG_IOS
+    static bool ios_pci_trace_checked;
+    static bool ios_pci_trace_enabled;
+    static unsigned ios_pci_trace_logs;
+
+    if (!ios_pci_trace_checked) {
+        const char *trace = g_getenv("XEMU_IOS_PCI_TRACE");
+
+        ios_pci_trace_checked = true;
+        ios_pci_trace_enabled = trace && trace[0] == '1' && trace[1] == '\0';
+    }
+
+    if (ios_pci_trace_enabled &&
+        (ios_pci_trace_logs < 256 || (ios_pci_trace_logs % 2048) == 0)) {
+        fprintf(stderr,
+                "xemu_ios: pci cfg read[%u] dev=%s bus=%u slot=%u func=%u"
+                " addr=0x%03x len=%u ret=0x%08x\n",
+                ios_pci_trace_logs, pci_dev->name,
+                pci_dev_bus_num(pci_dev), PCI_SLOT(pci_dev->devfn),
+                PCI_FUNC(pci_dev->devfn), addr, len, ret);
+    }
+    ios_pci_trace_logs++;
+#endif
     trace_pci_cfg_read(pci_dev->name, pci_dev_bus_num(pci_dev),
                        PCI_SLOT(pci_dev->devfn),
                        PCI_FUNC(pci_dev->devfn), addr, ret);

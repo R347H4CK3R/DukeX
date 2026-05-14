@@ -54,3 +54,7 @@ void RenderFramebuffer(GLint tex, int width, int height, bool flip, float scale[
 bool RenderFramebufferToPng(GLuint tex, bool flip, std::vector<uint8_t> &png, int max_width = 0, int max_height = 0);
 void SaveScreenshot(GLuint tex, bool flip);
 void ScaleDimensions(int src_width, int src_height, int max_width, int max_height, int *out_width, int *out_height);
+void RegisterTextureDimensions(GLuint tex, int width, int height);
+bool GetTextureDimensions(GLuint tex, int *width, int *height);
+void GetBoundTextureDimensionsOr(int fallback_width, int fallback_height,
+                                 int *width, int *height);

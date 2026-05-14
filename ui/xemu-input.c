@@ -46,6 +46,16 @@
     do { } while (0)
 #endif
 
+#ifdef CONFIG_IOS
+#define IOS_INPUT_LOG(...) do { \
+    fprintf(stderr, "xemu_ios: input: " __VA_ARGS__); \
+    fputc('\n', stderr); \
+    fflush(stderr); \
+} while (0)
+#else
+#define IOS_INPUT_LOG(...) do { } while (0)
+#endif
+
 #define XEMU_INPUT_MIN_INPUT_UPDATE_INTERVAL_US  2500
 #define XEMU_INPUT_MIN_RUMBLE_UPDATE_INTERVAL_US 2500
 
@@ -260,11 +270,85 @@ static const char *get_bound_driver(int port)
 
 static const int port_map[4] = { 3, 4, 1, 2 };
 
+static ControllerState *xemu_input_find_sdl_gamepad(SDL_JoystickID instance_id)
+{
+    ControllerState *iter;
+
+    QTAILQ_FOREACH(iter, &available_controllers, entry) {
+        if (iter->type == INPUT_DEVICE_SDL_GAMEPAD &&
+            iter->sdl_joystick_id == instance_id) {
+            return iter;
+        }
+    }
+
+    return NULL;
+}
+
+#ifdef CONFIG_IOS
+static int64_t s_ios_last_gamepad_scan_ts;
+
+static bool xemu_input_has_sdl_gamepad(void)
+{
+    ControllerState *iter;
+
+    QTAILQ_FOREACH(iter, &available_controllers, entry) {
+        if (iter->type == INPUT_DEVICE_SDL_GAMEPAD) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void xemu_input_scan_existing_gamepads(bool verbose)
+{
+    int count = 0;
+    SDL_JoystickID *gamepads = SDL_GetGamepads(&count);
+
+    if (verbose || count > 0) {
+        IOS_INPUT_LOG("SDL gamepad scan found %d device(s)", count);
+    }
+
+    for (int i = 0; i < count; i++) {
+        SDL_Event event;
+
+        if (xemu_input_find_sdl_gamepad(gamepads[i])) {
+            continue;
+        }
+
+        memset(&event, 0, sizeof(event));
+        event.type = SDL_EVENT_GAMEPAD_ADDED;
+        event.gdevice.which = gamepads[i];
+        xemu_input_process_sdl_events(&event);
+    }
+
+    SDL_free(gamepads);
+}
+
+static void xemu_input_retry_gamepad_scan(void)
+{
+    int64_t now = qemu_clock_get_us(QEMU_CLOCK_REALTIME);
+
+    if (xemu_input_has_sdl_gamepad() ||
+        ABS(now - s_ios_last_gamepad_scan_ts) < 5000000) {
+        return;
+    }
+
+    s_ios_last_gamepad_scan_ts = now;
+    SDL_PumpEvents();
+    xemu_input_scan_existing_gamepads(false);
+}
+#endif
+
 void xemu_input_init(void)
 {
+#ifdef CONFIG_IOS
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+#else
     if (g_config.input.background_input_capture) {
         SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     }
+#endif
 
     if (!SDL_Init(SDL_INIT_GAMEPAD)) {
         fprintf(stderr, "Failed to initialize SDL gamepad subsystem: %s\n", SDL_GetError());
@@ -301,13 +385,21 @@ void xemu_input_init(void)
     int port = xemu_input_get_controller_default_bind_port(new_con, 0);
     if (port >= 0) {
         xemu_input_bind(port, new_con, 0);
+#ifndef CONFIG_IOS
         char buf[128];
         snprintf(buf, sizeof(buf), "Connected '%s' to port %d", new_con->name, port+1);
         xemu_queue_notification(buf);
+#endif
         xemu_input_rebind_xmu(port);
     }
 
     QTAILQ_INSERT_TAIL(&available_controllers, new_con, entry);
+
+#ifdef CONFIG_IOS
+    SDL_PumpEvents();
+    s_ios_last_gamepad_scan_ts = qemu_clock_get_us(QEMU_CLOCK_REALTIME);
+    xemu_input_scan_existing_gamepads(true);
+#endif
 }
 
 int xemu_input_get_controller_default_bind_port(ControllerState *state, int start)
@@ -350,12 +442,20 @@ void xemu_input_process_sdl_events(const SDL_Event *event)
 {
     if (event->type == SDL_EVENT_GAMEPAD_ADDED) {
         DPRINTF("Controller Added: %d\n", event->gdevice.which);
+        IOS_INPUT_LOG("controller added event id=%d", event->gdevice.which);
+
+        if (xemu_input_find_sdl_gamepad(event->gdevice.which)) {
+            IOS_INPUT_LOG("controller id=%d already open", event->gdevice.which);
+            return;
+        }
 
         // Attempt to open the added controller
         SDL_Gamepad *sdl_con;
         sdl_con = SDL_OpenGamepad(event->gdevice.which);
         if (sdl_con == NULL) {
             DPRINTF("Could not open joystick %d as a Gamepad\n", event->gdevice.which);
+            IOS_INPUT_LOG("could not open controller id=%d: %s",
+                          event->gdevice.which, SDL_GetError());
             return;
         }
 
@@ -377,6 +477,7 @@ void xemu_input_process_sdl_events(const SDL_Event *event)
         char guid_buf[35] = { 0 };
         SDL_GUIDToString(new_con->sdl_joystick_guid, guid_buf, sizeof(guid_buf));
         DPRINTF("Opened %s (%s)\n", new_con->name, guid_buf);
+        IOS_INPUT_LOG("opened %s (%s)", new_con->name, guid_buf);
 
         QTAILQ_INSERT_TAIL(&available_controllers, new_con, entry);
         xemu_input_bindings_reload_map(new_con);
@@ -424,13 +525,20 @@ void xemu_input_process_sdl_events(const SDL_Event *event)
         }
 
         if (did_bind) {
+#ifndef CONFIG_IOS
             char buf[128];
             snprintf(buf, sizeof(buf), "Connected '%s' to port %d", new_con->name, port+1);
             xemu_queue_notification(buf);
+#endif
             xemu_input_rebind_xmu(port);
+            IOS_INPUT_LOG("bound %s to port %d", new_con->name, port + 1);
+        } else {
+            IOS_INPUT_LOG("opened %s but did not bind to an Xbox port",
+                          new_con->name);
         }
     } else if (event->type == SDL_EVENT_GAMEPAD_REMOVED) {
         DPRINTF("Controller Removed: %d\n", event->gdevice.which);
+        IOS_INPUT_LOG("controller removed event id=%d", event->gdevice.which);
         int handled = 0;
         ControllerState *iter, *next;
         QTAILQ_FOREACH_SAFE(iter, &available_controllers, entry, next) {
@@ -441,12 +549,14 @@ void xemu_input_process_sdl_events(const SDL_Event *event)
 
                 // Disconnect
                 if (iter->bound >= 0) {
+#ifndef CONFIG_IOS
                     // Queue a notification to inform user controller disconnected
                     // FIXME: Probably replace with a callback registration thing,
                     // but this works well enough for now.
                     char buf[128];
                     snprintf(buf, sizeof(buf), "Port %d disconnected", iter->bound+1);
                     xemu_queue_notification(buf);
+#endif
 
                     // Unbind the controller, but don't save the unbinding in
                     // case the controller is reconnected
@@ -498,6 +608,10 @@ void xemu_input_update_controller(ControllerState *state)
 
 void xemu_input_update_controllers(void)
 {
+#ifdef CONFIG_IOS
+    xemu_input_retry_gamepad_scan();
+#endif
+
     ControllerState *iter;
     QTAILQ_FOREACH(iter, &available_controllers, entry) {
         xemu_input_update_controller(iter);

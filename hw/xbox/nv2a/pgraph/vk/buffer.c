@@ -49,6 +49,27 @@ void pgraph_vk_init_buffers(NV2AState *d)
     PGRAPHVkState *r = pg->vk_renderer_state;
 
     // FIXME: Profile buffer sizes
+#ifdef CONFIG_IOS
+    const size_t staging_buffer_size = 32ull * 1024 * 1024;
+    const size_t compute_buffer_size = 128ull * 1024 * 1024;
+    const size_t index_buffer_size = sizeof(pg->inline_elements) * 4;
+    const size_t vertex_inline_buffer_size =
+        NV2A_VERTEXSHADER_ATTRIBUTES * NV2A_MAX_BATCH_LENGTH_V2 *
+        4 * sizeof(float) * 2;
+
+    fprintf(stderr,
+            "xemu-ios: vk buffer sizes: staging=%zu compute=%zu index=%zu "
+            "vertex-inline=%zu\n",
+            staging_buffer_size, compute_buffer_size, index_buffer_size,
+            vertex_inline_buffer_size);
+#else
+    const size_t staging_buffer_size = 4096 * 4096 * 4;
+    const size_t compute_buffer_size = (1024 * 10) * (1024 * 10) * 8;
+    const size_t index_buffer_size = sizeof(pg->inline_elements) * 100;
+    const size_t vertex_inline_buffer_size =
+        NV2A_VERTEXSHADER_ATTRIBUTES * NV2A_MAX_BATCH_LENGTH *
+        4 * sizeof(float) * 10;
+#endif
 
     VmaAllocationCreateInfo host_alloc_create_info = {
         .usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
@@ -63,7 +84,7 @@ void pgraph_vk_init_buffers(NV2AState *d)
     r->storage_buffers[BUFFER_STAGING_DST] = (StorageBuffer){
         .alloc_info = host_alloc_create_info,
         .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        .buffer_size = 4096 * 4096 * 4,
+        .buffer_size = staging_buffer_size,
     };
 
     r->storage_buffers[BUFFER_STAGING_SRC] = (StorageBuffer){
@@ -76,7 +97,7 @@ void pgraph_vk_init_buffers(NV2AState *d)
         .alloc_info = device_alloc_create_info,
         .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-        .buffer_size = (1024 * 10) * (1024 * 10) * 8,
+        .buffer_size = compute_buffer_size,
     };
 
     r->storage_buffers[BUFFER_COMPUTE_SRC] = (StorageBuffer){
@@ -90,7 +111,7 @@ void pgraph_vk_init_buffers(NV2AState *d)
         .alloc_info = device_alloc_create_info,
         .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-        .buffer_size = sizeof(pg->inline_elements) * 100,
+        .buffer_size = index_buffer_size,
     };
 
     r->storage_buffers[BUFFER_INDEX_STAGING] = (StorageBuffer){
@@ -114,8 +135,7 @@ void pgraph_vk_init_buffers(NV2AState *d)
         .alloc_info = device_alloc_create_info,
         .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        .buffer_size = NV2A_VERTEXSHADER_ATTRIBUTES * NV2A_MAX_BATCH_LENGTH *
-                       4 * sizeof(float) * 10,
+        .buffer_size = vertex_inline_buffer_size,
     };
 
     r->storage_buffers[BUFFER_VERTEX_INLINE_STAGING] = (StorageBuffer){

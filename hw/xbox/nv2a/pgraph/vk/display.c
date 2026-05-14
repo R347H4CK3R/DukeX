@@ -18,7 +18,61 @@
  */
 
 #include "renderer.h"
+#include "ui/xemu-widescreen.h"
 #include <math.h>
+
+#ifdef CONFIG_IOS
+bool xemu_ios_vulkan_presenter_enabled(void);
+
+static bool ios_vk_swapchain_trace_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_VK_SWAPCHAIN_TRACE");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+#define IOS_SWAPCHAIN_LOG(...) \
+    do { \
+        if (ios_vk_swapchain_trace_enabled()) { \
+            fprintf(stderr, "xemu_ios: vk swapchain: " __VA_ARGS__); \
+            fputc('\n', stderr); \
+            fflush(stderr); \
+        } \
+    } while (0)
+
+static bool ios_pvideo_trace_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_PVIDEO_TRACE");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+#define IOS_PVIDEO_LOG(...) \
+    do { \
+        if (ios_pvideo_trace_enabled()) { \
+            fprintf(stderr, "xemu_ios: pvideo: " __VA_ARGS__); \
+            fputc('\n', stderr); \
+            fflush(stderr); \
+        } \
+    } while (0)
+#else
+#define IOS_SWAPCHAIN_LOG(...) \
+    do { \
+    } while (0)
+#define IOS_PVIDEO_LOG(...) \
+    do { \
+    } while (0)
+#endif
 
 static uint8_t *convert_texture_data__CR8YB8CB8YA8(uint8_t *data_out,
                                                    const uint8_t *data_in,
@@ -566,6 +620,769 @@ static void destroy_current_display_image(PGRAPHState *pg)
     d->draw_time = 0;
 }
 
+#ifdef CONFIG_IOS
+static VkExtent2D ios_clamp_swapchain_extent(VkSurfaceCapabilitiesKHR caps,
+                                             uint32_t width, uint32_t height)
+{
+    if (caps.currentExtent.width != UINT32_MAX) {
+        return caps.currentExtent;
+    }
+
+    VkExtent2D extent = {
+        .width = width,
+        .height = height,
+    };
+    extent.width = MAX(caps.minImageExtent.width,
+                       MIN(caps.maxImageExtent.width, extent.width));
+    extent.height = MAX(caps.minImageExtent.height,
+                        MIN(caps.maxImageExtent.height, extent.height));
+    return extent;
+}
+
+static float ios_presenter_env_float(const char *name, float fallback,
+                                     float min_value, float max_value)
+{
+    const char *env = getenv(name);
+    char *end = NULL;
+    float value;
+
+    if (!env || !*env) {
+        return fallback;
+    }
+
+    value = strtof(env, &end);
+    if (end == env || !isfinite(value)) {
+        return fallback;
+    }
+
+    return MIN(max_value, MAX(min_value, value));
+}
+
+static bool ios_presenter_env_bool(const char *name, bool fallback)
+{
+    const char *env = getenv(name);
+
+    if (!env || !*env) {
+        return fallback;
+    }
+
+    return strcmp(env, "0") != 0;
+}
+
+static float ios_presenter_aspect_ratio(PGRAPHVkDisplayState *d)
+{
+    const char *env = getenv("XEMU_IOS_PRESENTER_ASPECT");
+
+    if (env && *env) {
+        if (!strcmp(env, "16:9") || !strcmp(env, "16x9")) {
+            return 16.0f / 9.0f;
+        }
+        if (!strcmp(env, "4:3") || !strcmp(env, "4x3")) {
+            return 4.0f / 3.0f;
+        }
+        if (!strcmp(env, "native")) {
+            return d->height ? (float)d->width / (float)d->height :
+                               4.0f / 3.0f;
+        }
+    }
+
+    return xemu_get_widescreen() ? 16.0f / 9.0f : 4.0f / 3.0f;
+}
+
+static VkRect2D ios_presenter_fit_rect(PGRAPHVkDisplayState *d)
+{
+    const bool landscape = d->swapchain_extent.width >= d->swapchain_extent.height;
+    const float scale = landscape ?
+        ios_presenter_env_float("XEMU_IOS_PRESENTER_LANDSCAPE_SCALE",
+                                0.96f, 0.1f, 1.0f) :
+        ios_presenter_env_float("XEMU_IOS_PRESENTER_PORTRAIT_SCALE",
+                                0.96f, 0.1f, 1.0f);
+    const float align_x = landscape ?
+        ios_presenter_env_float("XEMU_IOS_PRESENTER_LANDSCAPE_ALIGN_X",
+                                0.5f, 0.0f, 1.0f) :
+        ios_presenter_env_float("XEMU_IOS_PRESENTER_PORTRAIT_ALIGN_X",
+                                0.5f, 0.0f, 1.0f);
+    const float align_y = landscape ?
+        ios_presenter_env_float("XEMU_IOS_PRESENTER_LANDSCAPE_ALIGN_Y",
+                                0.5f, 0.0f, 1.0f) :
+        ios_presenter_env_float("XEMU_IOS_PRESENTER_PORTRAIT_ALIGN_Y",
+                                0.5f, 0.0f, 1.0f);
+    const float src_aspect = ios_presenter_aspect_ratio(d);
+    const float max_width = (float)d->swapchain_extent.width * scale;
+    const float max_height = (float)d->swapchain_extent.height * scale;
+    float fit_width = max_width;
+    float fit_height = max_width / src_aspect;
+
+    if (fit_height > max_height) {
+        fit_height = max_height;
+        fit_width = fit_height * src_aspect;
+    }
+
+    VkRect2D rect = {
+        .offset = {
+            .x = (int32_t)(((float)d->swapchain_extent.width - fit_width) * align_x),
+            .y = (int32_t)(((float)d->swapchain_extent.height - fit_height) * align_y),
+        },
+        .extent = {
+            .width = MAX(1, (uint32_t)lroundf(fit_width)),
+            .height = MAX(1, (uint32_t)lroundf(fit_height)),
+        },
+    };
+
+    if ((uint32_t)rect.offset.x + rect.extent.width > d->swapchain_extent.width) {
+        rect.offset.x = MAX(0, (int32_t)d->swapchain_extent.width -
+                               (int32_t)rect.extent.width);
+    }
+    if ((uint32_t)rect.offset.y + rect.extent.height > d->swapchain_extent.height) {
+        rect.offset.y = MAX(0, (int32_t)d->swapchain_extent.height -
+                               (int32_t)rect.extent.height);
+    }
+
+    return rect;
+}
+
+static VkSurfaceFormatKHR ios_choose_swapchain_format(
+    VkSurfaceFormatKHR *formats, uint32_t format_count)
+{
+    if (format_count == 1 && formats[0].format == VK_FORMAT_UNDEFINED) {
+        return (VkSurfaceFormatKHR){
+            .format = VK_FORMAT_B8G8R8A8_UNORM,
+            .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+        };
+    }
+
+    for (uint32_t i = 0; i < format_count; i++) {
+        if ((formats[i].format == VK_FORMAT_B8G8R8A8_UNORM ||
+             formats[i].format == VK_FORMAT_R8G8B8A8_UNORM) &&
+            formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            return formats[i];
+        }
+    }
+
+    return formats[0];
+}
+
+static VkCompositeAlphaFlagBitsKHR ios_choose_composite_alpha(
+    VkCompositeAlphaFlagsKHR supported)
+{
+    const VkCompositeAlphaFlagBitsKHR candidates[] = {
+        VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
+        VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
+        VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
+    };
+
+    for (uint32_t i = 0; i < ARRAY_SIZE(candidates); i++) {
+        if (supported & candidates[i]) {
+            return candidates[i];
+        }
+    }
+
+    return VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+}
+
+static const char *ios_present_mode_name(VkPresentModeKHR mode)
+{
+    switch (mode) {
+    case VK_PRESENT_MODE_IMMEDIATE_KHR:
+        return "immediate";
+    case VK_PRESENT_MODE_MAILBOX_KHR:
+        return "mailbox";
+    case VK_PRESENT_MODE_FIFO_KHR:
+        return "fifo";
+    case VK_PRESENT_MODE_FIFO_RELAXED_KHR:
+        return "fifo_relaxed";
+    default:
+        return "unknown";
+    }
+}
+
+static bool ios_present_modes_contains(const VkPresentModeKHR *modes,
+                                       uint32_t mode_count,
+                                       VkPresentModeKHR mode)
+{
+    for (uint32_t i = 0; i < mode_count; i++) {
+        if (modes[i] == mode) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool ios_present_mode_from_name(const char *name,
+                                       VkPresentModeKHR *mode_out)
+{
+    if (!name || !*name) {
+        return false;
+    }
+
+    if (!strcasecmp(name, "immediate")) {
+        *mode_out = VK_PRESENT_MODE_IMMEDIATE_KHR;
+        return true;
+    }
+    if (!strcasecmp(name, "mailbox")) {
+        *mode_out = VK_PRESENT_MODE_MAILBOX_KHR;
+        return true;
+    }
+    if (!strcasecmp(name, "fifo_relaxed") || !strcasecmp(name, "relaxed")) {
+        *mode_out = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+        return true;
+    }
+    if (!strcasecmp(name, "fifo")) {
+        *mode_out = VK_PRESENT_MODE_FIFO_KHR;
+        return true;
+    }
+
+    return false;
+}
+
+static VkPresentModeKHR ios_choose_present_mode(PGRAPHState *pg,
+                                                VkSurfaceKHR surface)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    uint32_t mode_count = 0;
+    VkResult result = vkGetPhysicalDeviceSurfacePresentModesKHR(
+        r->physical_device, surface, &mode_count, NULL);
+    if (result != VK_SUCCESS || mode_count == 0) {
+        IOS_SWAPCHAIN_LOG("present modes unavailable result=%d count=%u; using fifo",
+                          result, mode_count);
+        return VK_PRESENT_MODE_FIFO_KHR;
+    }
+
+    g_autofree VkPresentModeKHR *modes =
+        g_malloc_n(mode_count, sizeof(VkPresentModeKHR));
+    result = vkGetPhysicalDeviceSurfacePresentModesKHR(
+        r->physical_device, surface, &mode_count, modes);
+    if (result != VK_SUCCESS || mode_count == 0) {
+        IOS_SWAPCHAIN_LOG("present mode query failed result=%d count=%u; using fifo",
+                          result, mode_count);
+        return VK_PRESENT_MODE_FIFO_KHR;
+    }
+
+    if (ios_vk_swapchain_trace_enabled()) {
+        fprintf(stderr, "xemu_ios: vk swapchain: present modes:");
+        for (uint32_t i = 0; i < mode_count; i++) {
+            fprintf(stderr, " %s", ios_present_mode_name(modes[i]));
+        }
+        fputc('\n', stderr);
+        fflush(stderr);
+    }
+
+    VkPresentModeKHR forced_mode;
+    const char *forced_name = getenv("XEMU_IOS_VK_PRESENT_MODE");
+    if (ios_present_mode_from_name(forced_name, &forced_mode)) {
+        if (ios_present_modes_contains(modes, mode_count, forced_mode)) {
+            IOS_SWAPCHAIN_LOG("using requested present mode %s",
+                              ios_present_mode_name(forced_mode));
+            return forced_mode;
+        }
+        IOS_SWAPCHAIN_LOG("requested present mode %s not available",
+                          forced_name);
+    }
+
+    const VkPresentModeKHR preferred[] = {
+        VK_PRESENT_MODE_IMMEDIATE_KHR,
+        VK_PRESENT_MODE_MAILBOX_KHR,
+        VK_PRESENT_MODE_FIFO_RELAXED_KHR,
+        VK_PRESENT_MODE_FIFO_KHR,
+    };
+
+    for (uint32_t i = 0; i < ARRAY_SIZE(preferred); i++) {
+        if (ios_present_modes_contains(modes, mode_count, preferred[i])) {
+            IOS_SWAPCHAIN_LOG("selected present mode %s",
+                              ios_present_mode_name(preferred[i]));
+            return preferred[i];
+        }
+    }
+
+    return VK_PRESENT_MODE_FIFO_KHR;
+}
+
+static void ios_destroy_swapchain(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    PGRAPHVkDisplayState *d = &r->display;
+
+    if (d->swapchain == VK_NULL_HANDLE &&
+        d->swapchain_acquire_fence == VK_NULL_HANDLE) {
+        return;
+    }
+
+    vkDeviceWaitIdle(r->device);
+
+    if (d->swapchain_acquire_fence != VK_NULL_HANDLE) {
+        vkDestroyFence(r->device, d->swapchain_acquire_fence, NULL);
+        d->swapchain_acquire_fence = VK_NULL_HANDLE;
+    }
+
+    for (uint32_t i = 0; i < d->swapchain_image_count; i++) {
+        if (d->swapchain_image_views[i] != VK_NULL_HANDLE) {
+            vkDestroyImageView(r->device, d->swapchain_image_views[i], NULL);
+            d->swapchain_image_views[i] = VK_NULL_HANDLE;
+        }
+        d->swapchain_images[i] = VK_NULL_HANDLE;
+        d->swapchain_image_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
+    }
+    d->swapchain_image_count = 0;
+
+    if (d->swapchain != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(r->device, d->swapchain, NULL);
+        d->swapchain = VK_NULL_HANDLE;
+    }
+}
+
+static void ios_wait_present_command(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    PGRAPHVkDisplayState *d = &r->display;
+
+    if (!d->present_command_in_flight ||
+        d->present_command_fence == VK_NULL_HANDLE) {
+        return;
+    }
+
+    VK_CHECK(vkWaitForFences(r->device, 1, &d->present_command_fence,
+                             VK_TRUE, UINT64_MAX));
+    VK_CHECK(vkResetFences(r->device, 1, &d->present_command_fence));
+    d->present_command_in_flight = false;
+}
+
+static void ios_create_present_command_resources(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    PGRAPHVkDisplayState *d = &r->display;
+
+    VkCommandBufferAllocateInfo alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = r->command_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    VK_CHECK(vkAllocateCommandBuffers(r->device, &alloc_info,
+                                      &d->present_command_buffer));
+
+    VkFenceCreateInfo fence_info = {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+    };
+    VK_CHECK(vkCreateFence(r->device, &fence_info, NULL,
+                           &d->present_command_fence));
+
+    VkSemaphoreCreateInfo semaphore_info = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+    };
+    VK_CHECK(vkCreateSemaphore(r->device, &semaphore_info, NULL,
+                               &d->present_complete_semaphore));
+}
+
+static void ios_destroy_present_command_resources(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    PGRAPHVkDisplayState *d = &r->display;
+
+    ios_wait_present_command(pg);
+
+    if (d->present_complete_semaphore != VK_NULL_HANDLE) {
+        vkDestroySemaphore(r->device, d->present_complete_semaphore, NULL);
+        d->present_complete_semaphore = VK_NULL_HANDLE;
+    }
+    if (d->present_command_fence != VK_NULL_HANDLE) {
+        vkDestroyFence(r->device, d->present_command_fence, NULL);
+        d->present_command_fence = VK_NULL_HANDLE;
+    }
+    if (d->present_command_buffer != VK_NULL_HANDLE) {
+        vkFreeCommandBuffers(r->device, r->command_pool, 1,
+                             &d->present_command_buffer);
+        d->present_command_buffer = VK_NULL_HANDLE;
+    }
+}
+
+static VkCommandBuffer ios_begin_present_command(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    PGRAPHVkDisplayState *d = &r->display;
+
+    ios_wait_present_command(pg);
+
+    VK_CHECK(vkResetCommandBuffer(d->present_command_buffer, 0));
+
+    VkCommandBufferBeginInfo begin_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    VK_CHECK(vkBeginCommandBuffer(d->present_command_buffer, &begin_info));
+
+    return d->present_command_buffer;
+}
+
+static void ios_submit_present_command(PGRAPHState *pg, VkCommandBuffer cmd)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    PGRAPHVkDisplayState *d = &r->display;
+
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    VkSubmitInfo submit_info = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &d->present_complete_semaphore,
+    };
+    VK_CHECK(vkQueueSubmit(r->queue, 1, &submit_info,
+                           d->present_command_fence));
+    d->present_command_in_flight = true;
+    nv2a_profile_inc_counter(NV2A_PROF_QUEUE_SUBMIT_AUX);
+}
+
+static bool ios_create_swapchain(PGRAPHState *pg, uint32_t width,
+                                 uint32_t height)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    PGRAPHVkDisplayState *d = &r->display;
+    VkSurfaceKHR surface = d->surface;
+
+    if (surface == VK_NULL_HANDLE) {
+        return false;
+    }
+
+    VkSurfaceCapabilitiesKHR caps;
+    VkResult result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+        r->physical_device, surface, &caps);
+    if (result != VK_SUCCESS) {
+        IOS_SWAPCHAIN_LOG("surface capabilities failed result=%d", result);
+        return false;
+    }
+
+    if (!(caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
+        IOS_SWAPCHAIN_LOG("surface does not support transfer-dst swapchain images");
+        return false;
+    }
+
+    uint32_t format_count = 0;
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(r->physical_device, surface,
+                                                  &format_count, NULL));
+    if (format_count == 0) {
+        IOS_SWAPCHAIN_LOG("surface reported no formats");
+        return false;
+    }
+
+    g_autofree VkSurfaceFormatKHR *formats =
+        g_malloc_n(format_count, sizeof(VkSurfaceFormatKHR));
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(r->physical_device, surface,
+                                                  &format_count, formats));
+    VkSurfaceFormatKHR surface_format =
+        ios_choose_swapchain_format(formats, format_count);
+
+    VkExtent2D extent = ios_clamp_swapchain_extent(caps, width, height);
+    if (extent.width == 0 || extent.height == 0) {
+        IOS_SWAPCHAIN_LOG("surface extent is empty");
+        return false;
+    }
+
+    uint32_t image_count = caps.minImageCount + 1;
+    if (caps.maxImageCount > 0) {
+        image_count = MIN(image_count, caps.maxImageCount);
+    }
+    image_count = MIN(image_count, XEMU_IOS_MAX_SWAPCHAIN_IMAGES);
+
+    VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    if (caps.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) {
+        usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    }
+    VkPresentModeKHR present_mode = ios_choose_present_mode(pg, surface);
+
+    VkSwapchainCreateInfoKHR create_info = {
+        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+        .surface = surface,
+        .minImageCount = image_count,
+        .imageFormat = surface_format.format,
+        .imageColorSpace = surface_format.colorSpace,
+        .imageExtent = extent,
+        .imageArrayLayers = 1,
+        .imageUsage = usage,
+        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .preTransform = caps.currentTransform,
+        .compositeAlpha = ios_choose_composite_alpha(caps.supportedCompositeAlpha),
+        .presentMode = present_mode,
+        .clipped = VK_TRUE,
+    };
+
+    ios_destroy_swapchain(pg);
+
+    result = vkCreateSwapchainKHR(r->device, &create_info, NULL, &d->swapchain);
+    if (result != VK_SUCCESS) {
+        IOS_SWAPCHAIN_LOG("vkCreateSwapchainKHR failed result=%d", result);
+        return false;
+    }
+
+    uint32_t actual_image_count = 0;
+    VK_CHECK(vkGetSwapchainImagesKHR(r->device, d->swapchain,
+                                     &actual_image_count, NULL));
+    g_autofree VkImage *swapchain_images =
+        g_malloc_n(actual_image_count, sizeof(VkImage));
+    VK_CHECK(vkGetSwapchainImagesKHR(r->device, d->swapchain,
+                                     &actual_image_count, swapchain_images));
+    d->swapchain_image_count =
+        MIN(actual_image_count, XEMU_IOS_MAX_SWAPCHAIN_IMAGES);
+    memcpy(d->swapchain_images, swapchain_images,
+           sizeof(VkImage) * d->swapchain_image_count);
+
+    for (uint32_t i = 0; i < d->swapchain_image_count; i++) {
+        VkImageViewCreateInfo view_info = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = d->swapchain_images[i],
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = surface_format.format,
+            .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .subresourceRange.levelCount = 1,
+            .subresourceRange.layerCount = 1,
+        };
+        VK_CHECK(vkCreateImageView(r->device, &view_info, NULL,
+                                   &d->swapchain_image_views[i]));
+        d->swapchain_image_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
+    }
+
+    VkFenceCreateInfo fence_info = {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+    };
+    VK_CHECK(vkCreateFence(r->device, &fence_info, NULL,
+                           &d->swapchain_acquire_fence));
+
+    d->swapchain_format = surface_format.format;
+    d->swapchain_color_space = surface_format.colorSpace;
+    d->swapchain_extent = extent;
+    VkRect2D presenter_rect = ios_presenter_fit_rect(d);
+
+    IOS_SWAPCHAIN_LOG("created images=%u extent=%ux%u display=%dx%d"
+                      " aspect=%.4f widescreen=%d rect=%d,%d %ux%u"
+                      " format=%d present=%s",
+                      d->swapchain_image_count, extent.width, extent.height,
+                      d->width, d->height, ios_presenter_aspect_ratio(d),
+                      xemu_get_widescreen(),
+                      presenter_rect.offset.x, presenter_rect.offset.y,
+                      presenter_rect.extent.width, presenter_rect.extent.height,
+                      surface_format.format,
+                      ios_present_mode_name(present_mode));
+    return true;
+}
+
+static void ios_transition_swapchain_image(VkCommandBuffer cmd, VkImage image,
+                                           VkImageLayout old_layout,
+                                           VkImageLayout new_layout)
+{
+    VkImageMemoryBarrier barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .oldLayout = old_layout,
+        .newLayout = new_layout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = image,
+        .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .subresourceRange.levelCount = 1,
+        .subresourceRange.layerCount = 1,
+    };
+    VkPipelineStageFlags src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    VkPipelineStageFlags dst_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+    if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
+        new_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = 0;
+        src_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        dst_stage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    } else if ((old_layout == VK_IMAGE_LAYOUT_UNDEFINED ||
+                old_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) &&
+               new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        src_stage = old_layout == VK_IMAGE_LAYOUT_UNDEFINED ?
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT :
+                        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        dst_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    } else {
+        assert(!"unsupported swapchain layout transition");
+    }
+
+    vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, NULL, 0, NULL, 1,
+                         &barrier);
+}
+
+static bool ios_swapchain_extent_matches(PGRAPHState *pg, uint32_t width,
+                                         uint32_t height)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    PGRAPHVkDisplayState *d = &r->display;
+    VkSurfaceCapabilitiesKHR caps;
+
+    if (d->surface == VK_NULL_HANDLE || d->swapchain == VK_NULL_HANDLE) {
+        return false;
+    }
+
+    VkResult result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+        r->physical_device, d->surface, &caps);
+    if (result != VK_SUCCESS) {
+        IOS_SWAPCHAIN_LOG("surface capabilities refresh failed result=%d", result);
+        return true;
+    }
+
+    VkExtent2D extent = ios_clamp_swapchain_extent(caps, width, height);
+    return extent.width == d->swapchain_extent.width &&
+           extent.height == d->swapchain_extent.height;
+}
+
+static bool ios_begin_present_swapchain(PGRAPHState *pg, uint32_t *image_index)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    PGRAPHVkDisplayState *d = &r->display;
+
+    if (!xemu_ios_vulkan_presenter_enabled() ||
+        d->surface == VK_NULL_HANDLE ||
+        d->image == VK_NULL_HANDLE) {
+        return false;
+    }
+
+    if (d->swapchain != VK_NULL_HANDLE &&
+        !ios_swapchain_extent_matches(pg, d->width, d->height)) {
+        IOS_SWAPCHAIN_LOG("surface extent changed, recreating swapchain");
+        ios_destroy_swapchain(pg);
+    }
+
+    if (d->swapchain == VK_NULL_HANDLE &&
+        !ios_create_swapchain(pg, d->width, d->height)) {
+        return false;
+    }
+
+    VkResult result = vkAcquireNextImageKHR(
+        r->device, d->swapchain, UINT64_MAX, VK_NULL_HANDLE,
+        d->swapchain_acquire_fence, image_index);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        ios_destroy_swapchain(pg);
+        return false;
+    }
+    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+        IOS_SWAPCHAIN_LOG("vkAcquireNextImageKHR failed result=%d", result);
+        return false;
+    }
+
+    VK_CHECK(vkWaitForFences(r->device, 1, &d->swapchain_acquire_fence,
+                             VK_TRUE, UINT64_MAX));
+    VK_CHECK(vkResetFences(r->device, 1, &d->swapchain_acquire_fence));
+
+    if (*image_index >= d->swapchain_image_count) {
+        IOS_SWAPCHAIN_LOG("acquired invalid image index=%u count=%u",
+                          *image_index, d->swapchain_image_count);
+        return false;
+    }
+
+    return true;
+}
+
+static void ios_record_present_swapchain(PGRAPHState *pg, VkCommandBuffer cmd,
+                                         uint32_t image_index)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    PGRAPHVkDisplayState *d = &r->display;
+    VkRect2D dst_rect = ios_presenter_fit_rect(d);
+    bool full_frame =
+        dst_rect.offset.x == 0 && dst_rect.offset.y == 0 &&
+        dst_rect.extent.width == d->swapchain_extent.width &&
+        dst_rect.extent.height == d->swapchain_extent.height;
+    bool flip_x = ios_presenter_env_bool("XEMU_IOS_PRESENTER_FLIP_X", true);
+    bool flip_y = ios_presenter_env_bool("XEMU_IOS_PRESENTER_FLIP_Y", true);
+
+    pgraph_vk_transition_image_layout(pg, cmd, d->image,
+                                      VK_FORMAT_R8G8B8A8_UNORM,
+                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    ios_transition_swapchain_image(cmd, d->swapchain_images[image_index],
+                                   d->swapchain_image_layouts[image_index],
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    if (!full_frame) {
+        VkClearColorValue clear_color = {
+            .float32 = { 0.0f, 0.0f, 0.0f, 1.0f },
+        };
+        VkImageSubresourceRange clear_range = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .levelCount = 1,
+            .layerCount = 1,
+        };
+        vkCmdClearColorImage(cmd, d->swapchain_images[image_index],
+                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                             &clear_color, 1, &clear_range);
+    }
+
+    VkImageBlit blit = {
+        .srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .srcSubresource.layerCount = 1,
+        .srcOffsets[0] = {
+            flip_x ? d->width : 0,
+            flip_y ? d->height : 0,
+            0,
+        },
+        .srcOffsets[1] = {
+            flip_x ? 0 : d->width,
+            flip_y ? 0 : d->height,
+            1,
+        },
+        .dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .dstSubresource.layerCount = 1,
+        .dstOffsets[0] = { dst_rect.offset.x, dst_rect.offset.y, 0 },
+        .dstOffsets[1] = {
+            dst_rect.offset.x + (int32_t)dst_rect.extent.width,
+            dst_rect.offset.y + (int32_t)dst_rect.extent.height,
+            1,
+        },
+    };
+    VkFilter filter =
+        ios_presenter_env_bool("XEMU_IOS_PRESENTER_LINEAR_FILTER", true) ?
+            VK_FILTER_LINEAR : VK_FILTER_NEAREST;
+
+    vkCmdBlitImage(cmd,
+                   d->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   d->swapchain_images[image_index],
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                   1, &blit, filter);
+
+    ios_transition_swapchain_image(cmd, d->swapchain_images[image_index],
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    pgraph_vk_transition_image_layout(pg, cmd, d->image,
+                                      VK_FORMAT_R8G8B8A8_UNORM,
+                                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    d->swapchain_image_layouts[image_index] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+}
+
+static void ios_end_present_swapchain(PGRAPHState *pg, uint32_t image_index,
+                                      VkSemaphore wait_semaphore)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    PGRAPHVkDisplayState *d = &r->display;
+    VkResult result;
+
+    VkPresentInfoKHR present_info = {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .swapchainCount = 1,
+        .pSwapchains = &d->swapchain,
+        .pImageIndices = &image_index,
+    };
+    if (wait_semaphore != VK_NULL_HANDLE) {
+        present_info.waitSemaphoreCount = 1;
+        present_info.pWaitSemaphores = &wait_semaphore;
+    }
+
+    result = vkQueuePresentKHR(r->queue, &present_info);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+        ios_destroy_swapchain(pg);
+    } else if (result != VK_SUCCESS) {
+        IOS_SWAPCHAIN_LOG("vkQueuePresentKHR failed result=%d", result);
+    }
+}
+#endif
+
 // FIXME: We may need to use two images. One for actually rendering display,
 // and another for GL in the correct tiling mode
 
@@ -578,10 +1395,10 @@ static void create_display_image(PGRAPHState *pg, int width, int height)
         destroy_current_display_image(pg);
     }
 
-    const GLint gl_internal_format = GL_RGBA8;
     bool use_optimal_tiling = true;
 
 #if HAVE_EXTERNAL_MEMORY
+    const GLint gl_internal_format = GL_RGBA8;
     GLint num_tiling_types;
     glGetInternalformativ(GL_TEXTURE_2D, gl_internal_format,
                           GL_NUM_TILING_TYPES_EXT, 1, &num_tiling_types);
@@ -600,6 +1417,14 @@ static void create_display_image(PGRAPHState *pg, int width, int height)
     }
 #endif
 
+    VkImageUsageFlags image_usage =
+        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+#ifdef CONFIG_IOS
+    if (xemu_ios_vulkan_presenter_enabled()) {
+        image_usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    }
+#endif
+
     // Create image
     VkImageCreateInfo image_create_info = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -612,11 +1437,12 @@ static void create_display_image(PGRAPHState *pg, int width, int height)
         .format = VK_FORMAT_R8G8B8A8_UNORM,
         .tiling = use_optimal_tiling ? VK_IMAGE_TILING_OPTIMAL : VK_IMAGE_TILING_LINEAR,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        .usage = image_usage,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
 
+#if HAVE_EXTERNAL_MEMORY
     VkExternalMemoryImageCreateInfo external_memory_image_create_info = {
         .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
 #ifdef WIN32
@@ -626,6 +1452,7 @@ static void create_display_image(PGRAPHState *pg, int width, int height)
 #endif
     };
     image_create_info.pNext = &external_memory_image_create_info;
+#endif
 
     VK_CHECK(vkCreateImage(r->device, &image_create_info, NULL, &d->image));
 
@@ -641,6 +1468,7 @@ static void create_display_image(PGRAPHState *pg, int width, int height)
                                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
     };
 
+#if HAVE_EXTERNAL_MEMORY
     VkExportMemoryAllocateInfo export_memory_alloc_info = {
         .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
         .handleTypes =
@@ -652,6 +1480,7 @@ static void create_display_image(PGRAPHState *pg, int width, int height)
             ,
     };
     alloc_info.pNext = &export_memory_alloc_info;
+#endif
 
     VK_CHECK(vkAllocateMemory(r->device, &alloc_info, NULL, &d->memory));
     VK_CHECK(vkBindImageMemory(r->device, d->image, d->memory, 0));
@@ -777,7 +1606,8 @@ static void update_descriptor_set(PGRAPHState *pg, SurfaceBinding *surface)
 static PvideoState get_pvideo_state(PGRAPHState *pg)
 {
     NV2AState *d = container_of(pg, NV2AState, pgraph);
-    PvideoState state;
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    PvideoState state = { 0 };
 
     // FIXME: This check against PVIDEO_SIZE_IN does not match HW behavior.
     // Many games seem to pass this value when initializing or tearing down
@@ -804,7 +1634,21 @@ static PvideoState get_pvideo_state(PGRAPHState *pg)
         GET_MASK(d->pvideo.regs[NV_PVIDEO_FORMAT], NV_PVIDEO_FORMAT_COLOR);
 
     /* TODO: support other color formats */
+#ifdef CONFIG_IOS
+    if (state.format != NV_PVIDEO_FORMAT_COLOR_LE_CR8YB8CB8YA8) {
+        static uint64_t invalid_format_count;
+        if (invalid_format_count++ < 32 || (invalid_format_count % 120) == 0) {
+            IOS_PVIDEO_LOG(
+                "disable unsupported format=0x%x base=0x%08" HWADDR_PRIx
+                " limit=0x%08" HWADDR_PRIx " offset=0x%08" HWADDR_PRIx,
+                state.format, state.base, state.limit, state.offset);
+        }
+        state.enabled = false;
+        return state;
+    }
+#else
     assert(state.format == NV_PVIDEO_FORMAT_COLOR_LE_CR8YB8CB8YA8);
+#endif
 
     state.in_width =
         GET_MASK(d->pvideo.regs[NV_PVIDEO_SIZE_IN], NV_PVIDEO_SIZE_IN_WIDTH);
@@ -815,6 +1659,23 @@ static PvideoState get_pvideo_state(PGRAPHState *pg)
         GET_MASK(d->pvideo.regs[NV_PVIDEO_SIZE_OUT], NV_PVIDEO_SIZE_OUT_WIDTH);
     state.out_height =
         GET_MASK(d->pvideo.regs[NV_PVIDEO_SIZE_OUT], NV_PVIDEO_SIZE_OUT_HEIGHT);
+
+#ifdef CONFIG_IOS
+    if (state.in_width <= 0 || state.in_height <= 0 ||
+        state.out_width <= 0 || state.out_height <= 0 ||
+        state.pitch <= 0) {
+        static uint64_t invalid_size_count;
+        if (invalid_size_count++ < 32 || (invalid_size_count % 120) == 0) {
+            IOS_PVIDEO_LOG(
+                "disable invalid raw size pitch=%d in=%dx%d out=%dx%d "
+                "base=0x%08" HWADDR_PRIx " offset=0x%08" HWADDR_PRIx,
+                state.pitch, state.in_width, state.in_height,
+                state.out_width, state.out_height, state.base, state.offset);
+        }
+        state.enabled = false;
+        return state;
+    }
+#endif
 
     state.in_s = GET_MASK(d->pvideo.regs[NV_PVIDEO_POINT_IN],
                         NV_PVIDEO_POINT_IN_S);
@@ -841,6 +1702,110 @@ static PvideoState get_pvideo_state(PGRAPHState *pg)
         state.in_height = floorf((float)state.out_height * state.scale_y + 0.5f);
     }
 
+#ifdef CONFIG_IOS
+    if (state.in_width <= 0 || state.in_height <= 0 ||
+        state.out_width <= 0 || state.out_height <= 0 ||
+        state.pitch <= 0) {
+        static uint64_t invalid_size_count;
+        if (invalid_size_count++ < 32 || (invalid_size_count % 120) == 0) {
+            IOS_PVIDEO_LOG(
+                "disable invalid size pitch=%d in=%dx%d out=%dx%d "
+                "base=0x%08" HWADDR_PRIx " offset=0x%08" HWADDR_PRIx,
+                state.pitch, state.in_width, state.in_height,
+                state.out_width, state.out_height, state.base, state.offset);
+        }
+        state.enabled = false;
+        return state;
+    }
+
+    uint64_t row_bytes = (uint64_t)state.in_width * 2;
+    if ((uint64_t)state.pitch < row_bytes) {
+        static uint64_t invalid_pitch_count;
+        if (invalid_pitch_count++ < 32 || (invalid_pitch_count % 120) == 0) {
+            IOS_PVIDEO_LOG(
+                "disable short pitch pitch=%d row_bytes=%" PRIu64
+                " in=%dx%d base=0x%08" HWADDR_PRIx
+                " offset=0x%08" HWADDR_PRIx,
+                state.pitch, row_bytes, state.in_width, state.in_height,
+                state.base, state.offset);
+        }
+        state.enabled = false;
+        return state;
+    }
+
+    if ((uint64_t)state.pitch > UINT64_MAX / (uint64_t)state.in_height) {
+        static uint64_t overflow_count;
+        if (overflow_count++ < 32 || (overflow_count % 120) == 0) {
+            IOS_PVIDEO_LOG("disable span overflow pitch=%d height=%d",
+                           state.pitch, state.in_height);
+        }
+        state.enabled = false;
+        return state;
+    }
+
+    uint64_t span = (uint64_t)state.pitch * (uint64_t)state.in_height;
+    uint64_t offset = (uint64_t)state.offset;
+    uint64_t limit = (uint64_t)state.limit;
+    if (offset > limit || span > limit - offset) {
+        static uint64_t dma_bounds_count;
+        if (dma_bounds_count++ < 32 || (dma_bounds_count % 120) == 0) {
+            IOS_PVIDEO_LOG(
+                "disable dma bounds base=0x%08" HWADDR_PRIx
+                " limit=0x%08" HWADDR_PRIx " offset=0x%08" HWADDR_PRIx
+                " span=%" PRIu64 " pitch=%d in=%dx%d",
+                state.base, state.limit, state.offset, span, state.pitch,
+                state.in_width, state.in_height);
+        }
+        state.enabled = false;
+        return state;
+    }
+
+    uint64_t base = (uint64_t)state.base;
+    uint64_t vram_size = memory_region_size(d->vram);
+    if (base > vram_size || offset > vram_size - base ||
+        span > vram_size - base - offset) {
+        static uint64_t vram_bounds_count;
+        if (vram_bounds_count++ < 32 || (vram_bounds_count % 120) == 0) {
+            IOS_PVIDEO_LOG(
+                "disable vram bounds base=0x%08" HWADDR_PRIx
+                " offset=0x%08" HWADDR_PRIx " span=%" PRIu64
+                " vram=%" PRIu64 " pitch=%d in=%dx%d",
+                state.base, state.offset, span, vram_size, state.pitch,
+                state.in_width, state.in_height);
+        }
+        state.enabled = false;
+        return state;
+    }
+
+    if ((uint64_t)state.in_width > UINT64_MAX / (uint64_t)state.in_height ||
+        (uint64_t)state.in_width * (uint64_t)state.in_height >
+            UINT64_MAX / 4) {
+        static uint64_t rgba_overflow_count;
+        if (rgba_overflow_count++ < 32 || (rgba_overflow_count % 120) == 0) {
+            IOS_PVIDEO_LOG("disable rgba overflow in=%dx%d",
+                           state.in_width, state.in_height);
+        }
+        state.enabled = false;
+        return state;
+    }
+
+    uint64_t rgba_size =
+        (uint64_t)state.in_width * (uint64_t)state.in_height * 4;
+    if (rgba_size > r->storage_buffers[BUFFER_STAGING_SRC].buffer_size) {
+        static uint64_t staging_bounds_count;
+        if (staging_bounds_count++ < 32 ||
+            (staging_bounds_count % 120) == 0) {
+            IOS_PVIDEO_LOG(
+                "disable staging overflow rgba=%" PRIu64 " staging=%zu "
+                "pitch=%d in=%dx%d",
+                rgba_size, r->storage_buffers[BUFFER_STAGING_SRC].buffer_size,
+                state.pitch, state.in_width, state.in_height);
+        }
+        state.enabled = false;
+        return state;
+    }
+#endif
+
     state.out_x =
         GET_MASK(d->pvideo.regs[NV_PVIDEO_POINT_OUT], NV_PVIDEO_POINT_OUT_X);
     state.out_y =
@@ -851,6 +1816,21 @@ static PvideoState get_pvideo_state(PGRAPHState *pg)
 
     // Note: PVIDEO color keying ignores alpha.
     state.color_key = d->pvideo.regs[NV_PVIDEO_COLOR_KEY] & 0xFFFFFF;
+
+#ifdef CONFIG_IOS
+    static uint64_t enabled_log_count;
+    if (enabled_log_count++ < 16 || (enabled_log_count % 120) == 0) {
+        IOS_PVIDEO_LOG(
+            "enabled #%llu base=0x%08" HWADDR_PRIx
+            " limit=0x%08" HWADDR_PRIx " offset=0x%08" HWADDR_PRIx
+            " pitch=%d format=0x%x in=%dx%d out=%dx%d pos=%d,%d "
+            "scale=%.3f,%.3f",
+            (unsigned long long)enabled_log_count, state.base, state.limit,
+            state.offset, state.pitch, state.format, state.in_width,
+            state.in_height, state.out_width, state.out_height, state.out_x,
+            state.out_y, state.scale_x, state.scale_y);
+    }
+#endif
 
     assert(state.offset + state.pitch * state.in_height <= state.limit);
     hwaddr end = state.base + state.offset + state.pitch * state.in_height;
@@ -901,6 +1881,12 @@ static void render_display(PGRAPHState *pg, SurfaceBinding *surface)
     PGRAPHVkState *r = pg->vk_renderer_state;
     PGRAPHVkDisplayState *disp = &r->display;
 
+#ifdef CONFIG_IOS
+    if (xemu_ios_vulkan_presenter_enabled()) {
+        ios_wait_present_command(pg);
+    }
+#endif
+
     if (r->in_command_buffer &&
         surface->draw_time >= r->command_buffer_start_time) {
         pgraph_vk_finish(pg, VK_FINISH_REASON_PRESENTING);
@@ -916,7 +1902,28 @@ static void render_display(PGRAPHState *pg, SurfaceBinding *surface)
     update_uniforms(pg, surface);
     update_descriptor_set(pg, surface);
 
+#ifdef CONFIG_IOS
+    bool ios_present_ready = false;
+    uint32_t ios_present_image_index = 0;
+    bool ios_native_present_command = false;
+    if (xemu_ios_vulkan_presenter_enabled()) {
+        ios_present_ready =
+            ios_begin_present_swapchain(pg, &ios_present_image_index);
+        ios_native_present_command =
+            ios_present_ready &&
+            disp->present_command_buffer != VK_NULL_HANDLE &&
+            disp->present_complete_semaphore != VK_NULL_HANDLE &&
+            disp->present_command_fence != VK_NULL_HANDLE;
+    }
+#endif
+
+#ifdef CONFIG_IOS
+    VkCommandBuffer cmd = ios_native_present_command ?
+        ios_begin_present_command(pg) :
+        pgraph_vk_begin_single_time_commands(pg);
+#else
     VkCommandBuffer cmd = pgraph_vk_begin_single_time_commands(pg);
+#endif
     pgraph_vk_begin_debug_marker(r, cmd, RGBA_YELLOW,
         "Display Surface %08"HWADDR_PRIx, surface->vram_addr);
 
@@ -994,8 +2001,30 @@ static void render_display(PGRAPHState *pg, SurfaceBinding *surface)
                                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
+#ifdef CONFIG_IOS
+    if (ios_present_ready) {
+        ios_record_present_swapchain(pg, cmd, ios_present_image_index);
+    }
+#endif
+
     pgraph_vk_end_debug_marker(r, cmd);
+
+#ifdef CONFIG_IOS
+    if (ios_native_present_command) {
+        ios_submit_present_command(pg, cmd);
+    } else {
+        pgraph_vk_end_single_time_commands(pg, cmd);
+    }
+
+    if (ios_present_ready) {
+        VkSemaphore wait_semaphore = ios_native_present_command ?
+            disp->present_complete_semaphore : VK_NULL_HANDLE;
+        ios_end_present_swapchain(pg, ios_present_image_index, wait_semaphore);
+    }
+#else
     pgraph_vk_end_single_time_commands(pg, cmd);
+#endif
+
     nv2a_profile_inc_counter(NV2A_PROF_QUEUE_SUBMIT_5);
 
     disp->draw_time = surface->draw_time;
@@ -1040,11 +2069,19 @@ void pgraph_vk_init_display(PGRAPHState *pg)
     create_render_pass(pg);
     create_display_pipeline(pg);
     create_surface_sampler(pg);
+#ifdef CONFIG_IOS
+    ios_create_present_command_resources(pg);
+#endif
 }
 
 void pgraph_vk_finalize_display(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
+
+#ifdef CONFIG_IOS
+    ios_destroy_present_command_resources(pg);
+    ios_destroy_swapchain(pg);
+#endif
 
     destroy_pvideo_image(pg);
 
@@ -1085,9 +2122,21 @@ void pgraph_vk_render_display(PGRAPHState *pg)
     pgraph_apply_scaling_factor(pg, &width, &height);
 
     PGRAPHVkDisplayState *disp = &r->display;
+    bool display_image_recreated = false;
     if (!disp->image || disp->width != width || disp->height != height) {
         create_display_image(pg, width, height);
+        display_image_recreated = true;
     }
+
+#ifdef CONFIG_IOS
+    PvideoState pvideo_state = get_pvideo_state(pg);
+    if (xemu_ios_vulkan_presenter_enabled() &&
+        !display_image_recreated &&
+        disp->draw_time == surface->draw_time &&
+        !pvideo_state.enabled) {
+        return;
+    }
+#endif
 
     render_display(pg, surface);
 }

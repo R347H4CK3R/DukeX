@@ -169,6 +169,31 @@ void nv2a_reg_log_read(int block, hwaddr addr, unsigned int size, uint64_t val)
     if (block < ARRAY_SIZE(blocktable) && blocktable[block].name) {
         block_name = blocktable[block].name;
     }
+#ifdef CONFIG_IOS
+    static bool ios_read_trace_checked;
+    static bool ios_read_trace_enabled;
+    static unsigned ios_read_trace_logs;
+
+    if (!ios_read_trace_checked) {
+        const char *trace = g_getenv("XEMU_IOS_NV2A_READ_TRACE");
+
+        ios_read_trace_checked = true;
+        ios_read_trace_enabled = trace && trace[0] == '1' && trace[1] == '\0';
+    }
+
+    if (ios_read_trace_enabled &&
+        (ios_read_trace_logs < 256 || (ios_read_trace_logs % 2048) == 0)) {
+        hwaddr absolute = addr;
+        if (block < ARRAY_SIZE(blocktable) && blocktable[block].name) {
+            absolute += blocktable[block].offset;
+        }
+        fprintf(stderr,
+                "xemu_ios: nv2a read[%u] block=%s addr=0x%" HWADDR_PRIx
+                " absolute=0x%" HWADDR_PRIx " size=%u val=0x%016" PRIx64 "\n",
+                ios_read_trace_logs, block_name, addr, absolute, size, val);
+    }
+    ios_read_trace_logs++;
+#endif
     trace_nv2a_reg_read(block_name, addr, size, val);
 }
 

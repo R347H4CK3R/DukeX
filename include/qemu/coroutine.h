@@ -284,6 +284,10 @@ void qemu_coroutine_inc_pool_size(unsigned int additional_pool_size);
  */
 void qemu_coroutine_dec_pool_size(unsigned int additional_pool_size);
 
+#ifdef CONFIG_IOS
+void xemu_ios_coroutine_prime_global_pool(unsigned int count);
+#endif
+
 /**
  * Sends a (part of) iovec down a socket, yielding when the socket is full, or
  * Receives data into a (part of) iovec from a socket,

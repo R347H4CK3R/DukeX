@@ -28,6 +28,7 @@
 #include "exec/translation-block.h"
 #include "qemu/cacheinfo.h"
 #include "qemu/target-info.h"
+#include "qemu/error-report.h"
 #include "exec/log.h"
 #include "exec/icount.h"
 #include "accel/tcg/cpu-ops.h"
@@ -38,6 +39,9 @@
 #include "internal-common.h"
 #include "tcg/perf.h"
 #include "tcg/insn-start-words.h"
+#ifdef CONFIG_IOS
+#include "tcg/ios-jit.h"
+#endif
 
 #if defined(CONFIG_VTUNE_JITPROFILING)
 #include <jitprofiling.h>
@@ -422,6 +426,16 @@ TranslationBlock *tb_gen_code(CPUState *cpu, TCGTBCPUState s)
     }
     tb->tc.size = gen_code_size;
 
+#ifdef CONFIG_IOS
+    if (xemu_ios_universal_jit_is_enabled() &&
+        !xemu_ios_universal_jit_copy_code((void *)tcg_splitwx_to_rx(gen_code_buf),
+                                          gen_code_buf,
+                                          gen_code_size + search_size)) {
+        error_report("Universal.js failed to copy TCG translation block into RX memory");
+        exit(1);
+    }
+#endif
+
     /*
      * For CF_PCREL, attribute all executions of the generated code
      * to its first mapping.
@@ -650,7 +664,8 @@ void cpu_io_recompile(CPUState *cpu, uintptr_t retaddr)
      * double instrument the instruction. Also don't let an IRQ sneak
      * in before we execute it.
      */
-    cpu->cflags_next_tb = curr_cflags(cpu) | CF_MEMI_ONLY | CF_NOIRQ | n;
+    cpu->cflags_next_tb = (curr_cflags(cpu) & ~CF_COUNT_MASK) |
+                          CF_MEMI_ONLY | CF_NOIRQ | n;
 
     if (qemu_loglevel_mask(CPU_LOG_EXEC)) {
         vaddr pc = cpu->cc->get_pc(cpu);

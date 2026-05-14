@@ -52,6 +52,24 @@ void pcrtc_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
     NV2AState *d = (NV2AState *)opaque;
 
     nv2a_reg_log_write(NV_PCRTC, addr, size, val);
+#ifdef CONFIG_IOS
+    static unsigned ios_pcrtc_write_logs;
+    static int ios_pcrtc_write_trace = -1;
+    if (ios_pcrtc_write_trace < 0) {
+        const char *trace = getenv("XEMU_IOS_NV2A_WRITE_TRACE");
+        ios_pcrtc_write_trace = trace && strcmp(trace, "1") == 0;
+    }
+    if (ios_pcrtc_write_trace &&
+        (ios_pcrtc_write_logs < 64 || addr == NV_PCRTC_START)) {
+        fprintf(stderr,
+                "xemu_ios: pcrtc write[%u] addr=0x%" HWADDR_PRIx
+                " size=%u val=0x%016" PRIx64 "\n",
+                ios_pcrtc_write_logs, addr, size, val);
+        if (ios_pcrtc_write_logs < 64) {
+            ios_pcrtc_write_logs++;
+        }
+    }
+#endif
 
     switch (addr) {
     case NV_PCRTC_INTR_0:

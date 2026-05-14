@@ -182,6 +182,7 @@ static void pgraph_gl_pre_shutdown_wait(NV2AState *d)
     qemu_event_wait(&r->shader_cache_writeback_complete);
 }
 
+#ifndef CONFIG_IOS
 static PGRAPHRenderer pgraph_gl_renderer = {
     .type = CONFIG_DISPLAY_RENDERER_OPENGL,
     .name = "OpenGL",
@@ -215,3 +216,4 @@ static void __attribute__((constructor)) register_renderer(void)
 {
     pgraph_renderer_register(&pgraph_gl_renderer);
 }
+#endif

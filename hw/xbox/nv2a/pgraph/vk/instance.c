@@ -22,6 +22,20 @@
 #include "renderer.h"
 #include "xemu-version.h"
 
+#ifdef CONFIG_IOS
+#include <dlfcn.h>
+#include <mach-o/dyld.h>
+#include <vulkan/vulkan_metal.h>
+bool xemu_ios_vulkan_presenter_enabled(void);
+void *xemu_ios_get_metal_layer(void);
+#define IOS_VK_INIT_LOG(stage) \
+    fprintf(stderr, "xemu-ios: vk init: %s\n", stage)
+#else
+#define IOS_VK_INIT_LOG(stage) \
+    do {                       \
+    } while (0)
+#endif
+
 #define VkExtensionPropertiesArray GArray
 #define StringArray GArray
 
@@ -31,6 +45,10 @@ static char const *const validation_layers[] = {
     "VK_LAYER_KHRONOS_validation",
 };
 
+#ifdef CONFIG_IOS
+static char const *const required_device_extensions[1] = { NULL };
+#define REQUIRED_DEVICE_EXTENSION_COUNT 0
+#else
 static char const *const required_device_extensions[] = {
 #ifdef WIN32
     VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
@@ -40,6 +58,77 @@ static char const *const required_device_extensions[] = {
     VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
 #endif
 };
+#define REQUIRED_DEVICE_EXTENSION_COUNT ARRAY_SIZE(required_device_extensions)
+#endif
+
+#ifdef CONFIG_IOS
+static void *moltenvk_handle;
+
+static VkResult ios_volk_initialize(Error **errp)
+{
+    const char *env_path = getenv("XEMU_IOS_MOLTENVK_PATH");
+    char executable_framework_path[PATH_MAX] = { 0 };
+    const char *paths[4];
+    int path_count = 0;
+
+    if (env_path && env_path[0]) {
+        paths[path_count++] = env_path;
+    }
+    paths[path_count++] = "@rpath/MoltenVK.framework/MoltenVK";
+    paths[path_count++] = "MoltenVK.framework/MoltenVK";
+
+    char executable_path[PATH_MAX];
+    uint32_t executable_path_size = sizeof(executable_path);
+    if (_NSGetExecutablePath(executable_path, &executable_path_size) == 0) {
+        char *last_slash = strrchr(executable_path, '/');
+        if (last_slash) {
+            *last_slash = '\0';
+            snprintf(executable_framework_path, sizeof(executable_framework_path),
+                     "%s/Frameworks/MoltenVK.framework/MoltenVK",
+                     executable_path);
+            paths[path_count++] = executable_framework_path;
+        }
+    }
+
+    const char *last_error = NULL;
+    for (int i = 0; i < path_count; i++) {
+        moltenvk_handle = dlopen(paths[i], RTLD_NOW | RTLD_LOCAL);
+        if (moltenvk_handle) {
+            fprintf(stderr, "Loaded MoltenVK from %s\n", paths[i]);
+            break;
+        }
+        last_error = dlerror();
+    }
+
+    if (!moltenvk_handle) {
+        error_setg(errp, "Unable to load MoltenVK framework%s%s",
+                   last_error ? ": " : "", last_error ? last_error : "");
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    PFN_vkGetInstanceProcAddr get_instance_proc_addr =
+        (PFN_vkGetInstanceProcAddr)dlsym(moltenvk_handle,
+                                         "vkGetInstanceProcAddr");
+    if (!get_instance_proc_addr) {
+        error_setg(errp, "MoltenVK does not export vkGetInstanceProcAddr");
+        dlclose(moltenvk_handle);
+        moltenvk_handle = NULL;
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    volkInitializeCustom(get_instance_proc_addr);
+    return VK_SUCCESS;
+}
+
+static void ios_volk_finalize(void)
+{
+    volkFinalize();
+    if (moltenvk_handle) {
+        dlclose(moltenvk_handle);
+        moltenvk_handle = NULL;
+    }
+}
+#endif
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
@@ -117,10 +206,29 @@ is_extension_available(VkExtensionPropertiesArray *available_extensions,
 }
 
 static bool
+is_extension_enabled(StringArray *enabled_extension_names,
+                     const char *extension_name)
+{
+    for (int i = 0; i < enabled_extension_names->len; i++) {
+        const char *enabled =
+            g_array_index(enabled_extension_names, const char *, i);
+        if (!strcmp(enabled, extension_name)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool
 add_extension_if_available(VkExtensionPropertiesArray *available_extensions,
                            StringArray *enabled_extension_names,
                            const char *desired_extension_name)
 {
+    if (is_extension_enabled(enabled_extension_names, desired_extension_name)) {
+        return true;
+    }
+
     if (is_extension_available(available_extensions, desired_extension_name)) {
         g_array_append_val(enabled_extension_names, desired_extension_name);
         return true;
@@ -130,6 +238,22 @@ add_extension_if_available(VkExtensionPropertiesArray *available_extensions,
             desired_extension_name);
     return false;
 }
+
+#ifdef CONFIG_IOS
+static void add_ios_metal_instance_extension_names(
+    VkExtensionPropertiesArray *available_extensions,
+    StringArray *enabled_extension_names)
+{
+    if (!xemu_ios_vulkan_presenter_enabled()) {
+        return;
+    }
+
+    add_extension_if_available(available_extensions, enabled_extension_names,
+                               VK_KHR_SURFACE_EXTENSION_NAME);
+    add_extension_if_available(available_extensions, enabled_extension_names,
+                               VK_EXT_METAL_SURFACE_EXTENSION_NAME);
+}
+#endif
 
 static void
 add_optional_instance_extension_names(PGRAPHState *pg,
@@ -142,6 +266,13 @@ add_optional_instance_extension_names(PGRAPHState *pg,
         g_config.display.vulkan.validation_layers &&
         add_extension_if_available(available_extensions, enabled_extension_names,
                                    VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+#ifdef CONFIG_IOS
+    add_ios_metal_instance_extension_names(available_extensions,
+                                           enabled_extension_names);
+    r->portability_enumeration_extension_enabled =
+        add_extension_if_available(available_extensions, enabled_extension_names,
+                                   VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+#endif
 }
 
 static bool create_instance(PGRAPHState *pg, Error **errp)
@@ -149,9 +280,15 @@ static bool create_instance(PGRAPHState *pg, Error **errp)
     PGRAPHVkState *r = pg->vk_renderer_state;
     VkResult result;
 
+#ifdef CONFIG_IOS
+    result = ios_volk_initialize(errp);
+#else
     result = volkInitialize();
+#endif
     if (result != VK_SUCCESS) {
-        error_setg(errp, "volkInitialize failed");
+        if (!*errp) {
+            error_setg(errp, "volkInitialize failed");
+        }
         return false;
     }
 
@@ -193,13 +330,23 @@ static bool create_instance(PGRAPHState *pg, Error **errp)
         }
     }
 
+    const char **enabled_instance_extension_names =
+        enabled_extension_names->len ?
+            &g_array_index(enabled_extension_names, const char *, 0) :
+            NULL;
+
     VkInstanceCreateInfo create_info = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pApplicationInfo = &app_info,
         .enabledExtensionCount = enabled_extension_names->len,
-        .ppEnabledExtensionNames =
-            &g_array_index(enabled_extension_names, const char *, 0),
+        .ppEnabledExtensionNames = enabled_instance_extension_names,
     };
+
+#ifdef CONFIG_IOS
+    if (r->portability_enumeration_extension_enabled) {
+        create_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    }
+#endif
 
     enable_validation = g_config.display.vulkan.validation_layers;
 
@@ -310,10 +457,17 @@ static StringArray *get_required_device_extension_names(void)
 {
     StringArray *extensions =
         g_array_sized_new(FALSE, FALSE, sizeof(char *),
-                          ARRAY_SIZE(required_device_extensions));
+                          REQUIRED_DEVICE_EXTENSION_COUNT);
 
     g_array_append_vals(extensions, required_device_extensions,
-                        ARRAY_SIZE(required_device_extensions));
+                        REQUIRED_DEVICE_EXTENSION_COUNT);
+
+#ifdef CONFIG_IOS
+    if (xemu_ios_vulkan_presenter_enabled()) {
+        const char *swapchain_extension = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+        g_array_append_val(extensions, swapchain_extension);
+    }
+#endif
 
     return extensions;
 }
@@ -331,6 +485,10 @@ static void add_optional_device_extension_names(
     r->memory_budget_extension_enabled = add_extension_if_available(
         available_extensions, enabled_extension_names,
         VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+#ifdef CONFIG_IOS
+    add_extension_if_available(available_extensions, enabled_extension_names,
+                               VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+#endif
 }
 
 static bool check_device_support_required_extensions(VkPhysicalDevice device)
@@ -338,7 +496,7 @@ static bool check_device_support_required_extensions(VkPhysicalDevice device)
     g_autoptr(VkExtensionPropertiesArray) available_extensions =
         get_available_device_extensions(device);
 
-    for (int i = 0; i < ARRAY_SIZE(required_device_extensions); i++) {
+    for (int i = 0; i < REQUIRED_DEVICE_EXTENSION_COUNT; i++) {
         if (!is_extension_available(available_extensions,
                                     required_device_extensions[i])) {
             fprintf(stderr, "required device extension not found: %s\n",
@@ -346,6 +504,16 @@ static bool check_device_support_required_extensions(VkPhysicalDevice device)
             return false;
         }
     }
+
+#ifdef CONFIG_IOS
+    if (xemu_ios_vulkan_presenter_enabled() &&
+        !is_extension_available(available_extensions,
+                                VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
+        fprintf(stderr, "required device extension not found: %s\n",
+                VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+        return false;
+    }
+#endif
 
     return true;
 }
@@ -489,11 +657,19 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
         }
         F(depthClamp, true),
         F(fillModeNonSolid, true),
+#ifdef CONFIG_IOS
+        F(geometryShader, false),
+#else
         F(geometryShader, true),
+#endif
         F(occlusionQueryPrecise, true),
         F(samplerAnisotropy, false),
         F(shaderClipDistance, true),
+#ifdef CONFIG_IOS
+        F(shaderTessellationAndGeometryPointSize, false),
+#else
         F(shaderTessellationAndGeometryPointSize, true),
+#endif
         F(wideLines, false),
         #undef F
         // clang-format on
@@ -529,14 +705,18 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
         next_struct = &custom_border_features;
     }
 
+    const char **enabled_device_extension_names =
+        enabled_extension_names->len ?
+            &g_array_index(enabled_extension_names, const char *, 0) :
+            NULL;
+
     VkDeviceCreateInfo device_create_info = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &queue_create_info,
         .pEnabledFeatures = &r->enabled_physical_device_features,
         .enabledExtensionCount = enabled_extension_names->len,
-        .ppEnabledExtensionNames =
-            &g_array_index(enabled_extension_names, const char *, 0),
+        .ppEnabledExtensionNames = enabled_device_extension_names,
         .pNext = next_struct,
     };
 
@@ -551,6 +731,8 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
         error_setg(errp, "Failed to create logical device (%d)", result);
         return false;
     }
+
+    volkLoadDevice(r->device);
 
     vkGetDeviceQueue(r->device, indices.queue_family, 0, &r->queue);
     return true;
@@ -577,6 +759,7 @@ static bool init_allocator(PGRAPHState *pg, Error **errp)
     PGRAPHVkState *r = pg->vk_renderer_state;
     VkResult result;
 
+    IOS_VK_INIT_LOG("allocator import functions begin");
     VmaAllocatorCreateInfo create_info = {
         .flags = (r->memory_budget_extension_enabled ?
                       VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT :
@@ -593,26 +776,90 @@ static bool init_allocator(PGRAPHState *pg, Error **errp)
         error_setg(errp, "vmaImportVulkanFunctionsFromVolk failed");
         return false;
     }
+    IOS_VK_INIT_LOG("allocator import functions complete");
     create_info.pVulkanFunctions = &vulkan_functions;
 
+    IOS_VK_INIT_LOG("allocator create begin");
     result = vmaCreateAllocator(&create_info, &r->allocator);
     if (result != VK_SUCCESS) {
         error_setg(errp, "vmaCreateAllocator failed");
         return false;
     }
+    IOS_VK_INIT_LOG("allocator create complete");
 
     return true;
 }
 
+#ifdef CONFIG_IOS
+static bool ios_create_metal_surface(PGRAPHState *pg, Error **errp)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    void *metal_layer = xemu_ios_get_metal_layer();
+
+    if (!metal_layer) {
+        error_setg(errp, "Failed to get CAMetalLayer");
+        return false;
+    }
+
+    if (!vkCreateMetalSurfaceEXT) {
+        error_setg(errp, "MoltenVK does not expose vkCreateMetalSurfaceEXT");
+        return false;
+    }
+
+    VkMetalSurfaceCreateInfoEXT create_info = {
+        .sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
+        .pLayer = (const CAMetalLayer *)metal_layer,
+    };
+
+    VkResult result = vkCreateMetalSurfaceEXT(r->instance, &create_info, NULL,
+                                              &r->display.surface);
+    if (result != VK_SUCCESS) {
+        error_setg(errp, "Failed to create CAMetalLayer Vulkan surface (%d)",
+                   result);
+        return false;
+    }
+
+    fprintf(stderr, "xemu-ios: CAMetalLayer Vulkan surface created\n");
+    return true;
+}
+#endif
+
 void pgraph_vk_init_instance(PGRAPHState *pg, Error **errp)
 {
-    if (create_instance(pg, errp) &&
-        select_physical_device(pg, errp) &&
-        create_logical_device(pg, errp) &&
-        init_allocator(pg, errp)) {
+    IOS_VK_INIT_LOG("instance create begin");
+    if (!create_instance(pg, errp)) {
+        goto fail;
+    }
+    IOS_VK_INIT_LOG("instance create complete");
+
+#ifdef CONFIG_IOS
+    if (xemu_ios_vulkan_presenter_enabled()) {
+        IOS_VK_INIT_LOG("CAMetalLayer Vulkan surface create begin");
+        if (!ios_create_metal_surface(pg, errp)) {
+            goto fail;
+        }
+        IOS_VK_INIT_LOG("CAMetalLayer Vulkan surface create complete");
+    }
+#endif
+
+    IOS_VK_INIT_LOG("physical device select begin");
+    if (!select_physical_device(pg, errp)) {
+        goto fail;
+    }
+    IOS_VK_INIT_LOG("physical device select complete");
+
+    IOS_VK_INIT_LOG("logical device create begin");
+    if (!create_logical_device(pg, errp)) {
+        goto fail;
+    }
+    IOS_VK_INIT_LOG("logical device create complete");
+
+    if (init_allocator(pg, errp)) {
+        IOS_VK_INIT_LOG("instance init complete");
         return;
     }
 
+fail:
     pgraph_vk_finalize_instance(pg);
 
     const char *msg = "Failed to initialize Vulkan renderer";
@@ -642,10 +889,21 @@ void pgraph_vk_finalize_instance(PGRAPHState *pg)
         r->debug_messenger = VK_NULL_HANDLE;
     }
 
+#ifdef CONFIG_IOS
+    if (r->display.surface != VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(r->instance, r->display.surface, NULL);
+        r->display.surface = VK_NULL_HANDLE;
+    }
+#endif
+
     if (r->instance != VK_NULL_HANDLE) {
         vkDestroyInstance(r->instance, NULL);
         r->instance = VK_NULL_HANDLE;
     }
 
+#ifdef CONFIG_IOS
+    ios_volk_finalize();
+#else
     volkFinalize();
+#endif
 }

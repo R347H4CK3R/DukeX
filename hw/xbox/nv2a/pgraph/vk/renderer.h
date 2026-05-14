@@ -41,7 +41,11 @@
 #include "constants.h"
 #include "glsl.h"
 
+#ifdef CONFIG_IOS
+#define HAVE_EXTERNAL_MEMORY 0
+#else
 #define HAVE_EXTERNAL_MEMORY 1
+#endif
 
 typedef struct QueueFamilyIndices {
     int queue_family;
@@ -286,7 +290,26 @@ typedef struct PGRAPHVkDisplayState {
     int width, height;
     int draw_time;
 
-    // OpenGL Interop
+#ifdef CONFIG_IOS
+#define XEMU_IOS_MAX_SWAPCHAIN_IMAGES 8
+    VkSurfaceKHR surface;
+    VkSwapchainKHR swapchain;
+    VkFormat swapchain_format;
+    VkColorSpaceKHR swapchain_color_space;
+    VkExtent2D swapchain_extent;
+    uint32_t swapchain_image_count;
+    VkImage swapchain_images[XEMU_IOS_MAX_SWAPCHAIN_IMAGES];
+    VkImageView swapchain_image_views[XEMU_IOS_MAX_SWAPCHAIN_IMAGES];
+    VkImageLayout swapchain_image_layouts[XEMU_IOS_MAX_SWAPCHAIN_IMAGES];
+    VkFence swapchain_acquire_fence;
+    VkCommandBuffer present_command_buffer;
+    VkFence present_command_fence;
+    VkSemaphore present_complete_semaphore;
+    bool present_command_in_flight;
+#endif
+
+    // OpenGL interop
+#if HAVE_EXTERNAL_MEMORY
 #ifdef WIN32
     HANDLE handle;
 #else
@@ -294,6 +317,7 @@ typedef struct PGRAPHVkDisplayState {
 #endif
     GLuint gl_memory_obj;
     GLuint gl_texture_id;
+#endif
 } PGRAPHVkDisplayState;
 
 typedef struct ComputePipelineKey {
@@ -327,6 +351,9 @@ typedef struct PGRAPHVkState {
     bool debug_utils_extension_enabled;
     bool custom_border_color_extension_enabled;
     bool memory_budget_extension_enabled;
+#ifdef CONFIG_IOS
+    bool portability_enumeration_extension_enabled;
+#endif
 
     VkPhysicalDevice physical_device;
     VkPhysicalDeviceFeatures enabled_physical_device_features;
@@ -360,6 +387,8 @@ typedef struct PGRAPHVkState {
 
     Lru pipeline_cache;
     VkPipelineCache vk_pipeline_cache;
+    gint64 vk_pipeline_cache_last_save_us;
+    uint32_t vk_pipeline_cache_dirty_count;
     PipelineBinding *pipeline_cache_entries;
     PipelineBinding *pipeline_binding;
     bool pipeline_binding_changed;

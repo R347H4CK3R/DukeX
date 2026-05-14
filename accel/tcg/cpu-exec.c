@@ -32,6 +32,9 @@
 #include "exec/mmap-lock.h"
 #include "exec/translation-block.h"
 #include "tcg/tcg.h"
+#ifdef CONFIG_IOS
+#include "tcg/ios-jit.h"
+#endif
 #include "qemu/atomic.h"
 #include "qemu/rcu.h"
 #include "exec/log.h"
@@ -47,6 +50,176 @@
 #include "tb-context.h"
 #include "tb-internal.h"
 #include "internal-common.h"
+
+#ifdef CONFIG_IOS
+static void ios_tcg_log_guest_bytes(CPUState *cpu, vaddr pc)
+{
+    uint8_t bytes[32];
+    int ret;
+
+    ret = cpu_memory_rw_debug(cpu, pc, bytes, sizeof(bytes), false);
+    if (ret != 0) {
+        fprintf(stderr,
+                "xemu_ios: tcg guest bytes pc=0x%016" VADDR_PRIx
+                " unavailable ret=%d\n",
+                pc, ret);
+        return;
+    }
+
+    fprintf(stderr,
+            "xemu_ios: tcg guest bytes pc=0x%016" VADDR_PRIx
+            " %02x %02x %02x %02x %02x %02x %02x %02x"
+            " %02x %02x %02x %02x %02x %02x %02x %02x"
+            " %02x %02x %02x %02x %02x %02x %02x %02x"
+            " %02x %02x %02x %02x %02x %02x %02x %02x\n",
+            pc,
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15],
+            bytes[16], bytes[17], bytes[18], bytes[19],
+            bytes[20], bytes[21], bytes[22], bytes[23],
+            bytes[24], bytes[25], bytes[26], bytes[27],
+            bytes[28], bytes[29], bytes[30], bytes[31]);
+}
+
+static uint32_t ios_tcg_env_limit(const char *name, uint32_t fallback)
+{
+    const char *value = getenv(name);
+    char *end = NULL;
+    unsigned long parsed;
+
+    if (!value || !*value) {
+        return fallback;
+    }
+
+    parsed = strtoul(value, &end, 10);
+    if (end == value || parsed == 0) {
+        return fallback;
+    }
+
+    if (parsed > CF_COUNT_MASK) {
+        parsed = CF_COUNT_MASK;
+    }
+
+    return (uint32_t)parsed;
+}
+
+static bool ios_tcg_env_enabled(const char *name)
+{
+    const char *value = getenv(name);
+
+    return value && *value &&
+           g_ascii_strcasecmp(value, "0") != 0 &&
+           g_ascii_strcasecmp(value, "false") != 0 &&
+           g_ascii_strcasecmp(value, "off") != 0 &&
+           g_ascii_strcasecmp(value, "no") != 0;
+}
+
+static bool ios_tcg_env_present(const char *name)
+{
+    const char *value = getenv(name);
+
+    return value && *value;
+}
+
+static uint32_t ios_tcg_insn_limit(CPUState *cpu)
+{
+    static uint32_t normal_limit;
+    static uint32_t interrupt_limit;
+    static gsize initialized;
+
+    if (g_once_init_enter(&initialized)) {
+        normal_limit = ios_tcg_env_limit("XEMU_IOS_TCG_MAX_INSNS", 1);
+        interrupt_limit = ios_tcg_env_limit("XEMU_IOS_TCG_IRQ_INSNS", 1);
+        fprintf(stderr,
+                "xemu_ios: tcg insn limits normal=%u interrupt=%u\n",
+                normal_limit, interrupt_limit);
+        g_once_init_leave(&initialized, 1);
+    }
+
+    if (qatomic_read(&cpu->interrupt_request) ||
+        qatomic_read(&cpu->exit_request)) {
+        return interrupt_limit;
+    }
+
+    return normal_limit;
+}
+
+static bool ios_tcg_limit_blocks_enabled(void)
+{
+    return ios_tcg_env_present("XEMU_IOS_TCG_MAX_INSNS") ||
+           ios_tcg_env_present("XEMU_IOS_TCG_IRQ_INSNS");
+}
+
+static void ios_tcg_log_tb(CPUState *cpu, const TCGTBCPUState *s,
+                           const TranslationBlock *tb, bool generated)
+{
+    static int trace_enabled = -1;
+    static uint64_t tb_exec_count;
+    static uint64_t tb_gen_count;
+    static int64_t last_log_us;
+    static bool dumped_spin_area;
+
+    if (trace_enabled < 0) {
+        const char *value = getenv("XEMU_IOS_TCG_TRACE");
+        trace_enabled = value && g_str_equal(value, "1");
+    }
+    if (!trace_enabled) {
+        return;
+    }
+
+    uint64_t exec_count = ++tb_exec_count;
+
+    if (generated) {
+        tb_gen_count++;
+    }
+
+    if (generated && !dumped_spin_area &&
+        s->pc >= 0x0000000080024000ULL && s->pc < 0x0000000080024800ULL) {
+        dumped_spin_area = true;
+        ios_tcg_log_guest_bytes(cpu, s->pc);
+    }
+
+    if (exec_count > 16 && (exec_count & 0x3ffff) != 0) {
+        return;
+    }
+
+    int64_t now = g_get_monotonic_time();
+    if (exec_count > 16 && now - last_log_us < G_USEC_PER_SEC) {
+        return;
+    }
+
+    last_log_us = now;
+    fprintf(stderr,
+            "xemu_ios: tcg heartbeat cpu=%d exec=%" PRIu64
+            " gen=%" PRIu64 " new=%d pc=0x%016" VADDR_PRIx
+            " tb_pc=0x%016" VADDR_PRIx " cs=0x%016" PRIx64
+            " flags=0x%08x cflags=0x%08x size=%u icount=%u"
+            " halted=%d irq=0x%x\n",
+            cpu->cpu_index, exec_count, tb_gen_count, generated ? 1 : 0,
+            s->pc, tb->pc, tb->cs_base, tb->flags, tb_cflags(tb),
+            tb->size, tb->icount, cpu->halted,
+            qatomic_read(&cpu->interrupt_request));
+}
+
+static bool ios_tcg_trace_tb_exit(vaddr pc)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_TCG_EXIT_TRACE");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled &&
+           (pc == 0x00000000800550bcULL ||
+            (pc >= 0x000000008002ed00ULL &&
+             pc <= 0x000000008002f450ULL) ||
+            (pc >= 0x0000000080053100ULL &&
+             pc <= 0x0000000080053300ULL));
+}
+#endif
 
 /* -icount align implementation. */
 
@@ -632,7 +805,23 @@ void tb_set_jmp_target(TranslationBlock *tb, int n, uintptr_t addr)
     uintptr_t jmp_rw = jmp_rx - tcg_splitwx_diff;
 
     tb->jmp_target_addr[n] = addr;
+#ifdef CONFIG_IOS
+    if (xemu_ios_universal_jit_is_enabled() &&
+        !xemu_ios_universal_jit_copy_code(
+            (void *)tcg_splitwx_to_rx(&tb->jmp_target_addr[n]),
+            &tb->jmp_target_addr[n], sizeof(tb->jmp_target_addr[n]))) {
+        error_report("Universal.js failed to copy TCG branch metadata into RX memory");
+        exit(1);
+    }
+#endif
     tb_target_set_jmp_target(c_tb, n, jmp_rx, jmp_rw);
+#ifdef CONFIG_IOS
+    if (xemu_ios_universal_jit_is_enabled() &&
+        !xemu_ios_universal_jit_copy_code((void *)jmp_rx, (void *)jmp_rw, 4)) {
+        error_report("Universal.js failed to copy TCG branch patch into RX memory");
+        exit(1);
+    }
+#endif
 }
 
 static inline void tb_add_jump(TranslationBlock *tb, int n,
@@ -965,7 +1154,9 @@ cpu_exec_loop(CPUState *cpu, SyncClocks *sc)
 
         while (!cpu_handle_interrupt(cpu, &last_tb)) {
             TranslationBlock *tb;
+            bool generated = false;
             TCGTBCPUState s = cpu->cc->tcg_ops->get_tb_cpu_state(cpu);
+            bool exact_cflags;
             s.cflags = cpu->cflags_next_tb;
 
             /*
@@ -975,11 +1166,22 @@ cpu_exec_loop(CPUState *cpu, SyncClocks *sc)
              * have CF_INVALID set, -1 is a convenient invalid value that
              * does not require tcg headers for cpu_common_reset.
              */
-            if (s.cflags == -1) {
+            exact_cflags = s.cflags != -1;
+            if (!exact_cflags) {
                 s.cflags = curr_cflags(cpu);
             } else {
                 cpu->cflags_next_tb = -1;
             }
+
+#ifdef CONFIG_IOS
+            if (ios_tcg_env_enabled("XEMU_IOS_TCG_NOCHAIN")) {
+                s.cflags |= CF_NO_GOTO_TB | CF_NO_GOTO_PTR;
+            }
+            if (ios_tcg_limit_blocks_enabled() && !exact_cflags) {
+                s.cflags = (s.cflags & ~CF_COUNT_MASK) |
+                           ios_tcg_insn_limit(cpu);
+            }
+#endif
 
             if (check_for_breakpoints(cpu, s.pc, &s.cflags)) {
                 break;
@@ -993,6 +1195,7 @@ cpu_exec_loop(CPUState *cpu, SyncClocks *sc)
                 mmap_lock();
                 tb = tb_gen_code(cpu, s);
                 mmap_unlock();
+                generated = true;
 
                 /*
                  * We add the TB in the virtual pc hash table
@@ -1020,7 +1223,36 @@ cpu_exec_loop(CPUState *cpu, SyncClocks *sc)
                 tb_add_jump(last_tb, tb_exit, tb);
             }
 
+#ifdef CONFIG_IOS
+            ios_tcg_log_tb(cpu, &s, tb, generated);
+#endif
             cpu_loop_exec_tb(cpu, tb, s.pc, &last_tb, &tb_exit);
+#ifdef CONFIG_IOS
+            if (ios_tcg_trace_tb_exit(s.pc)) {
+                static uint64_t ios_stable_tb_exits;
+                uint64_t n = ++ios_stable_tb_exits;
+
+                if (n <= 64 || (n & 0xfffff) == 0) {
+                    vaddr current_pc = cpu->cc->get_pc ?
+                                       cpu->cc->get_pc(cpu) : 0;
+
+                    fprintf(stderr,
+                            "xemu_ios: stable tb exit #%" PRIu64
+                            " pc=0x%016" VADDR_PRIx
+                            " current_pc=0x%016" VADDR_PRIx
+                            " exit=%d exception=%d irq=0x%x"
+                            " exit_req=%d cflags_next=0x%x"
+                            " can_io=%d icount_low=%u halted=%d\n",
+                            n, s.pc, current_pc, tb_exit, cpu->exception_index,
+                            qatomic_read(&cpu->interrupt_request),
+                            qatomic_read(&cpu->exit_request),
+                            cpu->cflags_next_tb,
+                            cpu->neg.can_do_io,
+                            cpu->neg.icount_decr.u16.low,
+                            cpu->halted);
+                }
+            }
+#endif
 
             /* Try to align the host and virtual clocks
                if the guest is in advance */

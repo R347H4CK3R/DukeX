@@ -31,6 +31,41 @@
 #include "hw/irq.h"
 #include "system/kvm.h"
 
+#ifdef CONFIG_IOS
+static void ios_x86_log_pic_interrupt_source(const char *source,
+                                             CPUX86State *env, int intno)
+{
+    static int trace_enabled = -1;
+    static uint64_t count;
+    static int64_t last_log_us;
+    int64_t now = g_get_monotonic_time();
+    uint64_t pc = (uint64_t)(env->eip + env->segs[R_CS].base);
+    CPUState *cs = CPU(env_archcpu(env));
+
+    if (trace_enabled < 0) {
+        const char *value = getenv("XEMU_IOS_IRQ_TRACE");
+        trace_enabled = value && g_str_equal(value, "1");
+    }
+    if (!trace_enabled) {
+        return;
+    }
+
+    count++;
+    if (count > 64 && intno >= 0 && (count % 4096) != 0 &&
+        now - last_log_us < G_USEC_PER_SEC) {
+        return;
+    }
+    last_log_us = now;
+
+    fprintf(stderr,
+            "xemu_ios: irq source #%" PRIu64 " source=%s intno=%d"
+            " pc=0x%016" PRIx64 " irq=0x%x exit=%d\n",
+            count, source, intno, pc,
+            qatomic_read(&cs->interrupt_request),
+            qatomic_read(&cs->exit_request));
+}
+#endif
+
 /* TSC handling */
 uint64_t cpu_get_tsc(CPUX86State *env)
 {
@@ -79,15 +114,24 @@ int cpu_get_pic_interrupt(CPUX86State *env)
     if (!kvm_irqchip_in_kernel() && !whpx_apic_in_platform()) {
         intno = apic_get_interrupt(cpu->apic_state);
         if (intno >= 0) {
+#ifdef CONFIG_IOS
+            ios_x86_log_pic_interrupt_source("apic", env, intno);
+#endif
             return intno;
         }
         /* read the irq from the PIC */
         if (!apic_accept_pic_intr(cpu->apic_state)) {
+#ifdef CONFIG_IOS
+            ios_x86_log_pic_interrupt_source("blocked-pic", env, -1);
+#endif
             return -1;
         }
     }
 
     intno = pic_read_irq(isa_pic);
+#ifdef CONFIG_IOS
+    ios_x86_log_pic_interrupt_source("pic", env, intno);
+#endif
     return intno;
 }
 

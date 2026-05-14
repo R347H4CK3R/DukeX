@@ -45,6 +45,26 @@
 #include "block/aio_task.h"
 #include "block/dirty-bitmap.h"
 
+#ifdef CONFIG_IOS
+static bool ios_qcow2_trace_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_QCOW2_TRACE");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+static bool ios_qcow2_should_log(uint64_t count)
+{
+    return ios_qcow2_trace_enabled() &&
+           (count <= 64 || (count % 1024) == 0);
+}
+#endif
+
 /*
   Differences with QCOW:
 
@@ -2418,6 +2438,20 @@ qcow2_co_preadv_task(BlockDriverState *bs, QCow2SubclusterType subc_type,
                      QEMUIOVector *qiov, size_t qiov_offset)
 {
     BDRVQcow2State *s = bs->opaque;
+#ifdef CONFIG_IOS
+    static uint64_t ios_qcow2_task_count;
+    uint64_t ios_qcow2_task_n = ++ios_qcow2_task_count;
+
+    if (ios_qcow2_should_log(ios_qcow2_task_n)) {
+        fprintf(stderr,
+                "xemu_ios: qcow2 read-task enter #%" PRIu64
+                " subc=%d host=0x%016" PRIx64
+                " guest=0x%016" PRIx64 " bytes=0x%016" PRIx64
+                " qiov_off=0x%016" PRIx64 "\n",
+                ios_qcow2_task_n, subc_type, host_offset, offset, bytes,
+                (uint64_t)qiov_offset);
+    }
+#endif
 
     switch (subc_type) {
     case QCOW2_SUBCLUSTER_ZERO_PLAIN:
@@ -2444,8 +2478,27 @@ qcow2_co_preadv_task(BlockDriverState *bs, QCow2SubclusterType subc_type,
         }
 
         BLKDBG_CO_EVENT(bs->file, BLKDBG_READ_AIO);
-        return bdrv_co_preadv_part(s->data_file, host_offset,
-                                   bytes, qiov, qiov_offset, 0);
+        {
+            int ret;
+#ifdef CONFIG_IOS
+            if (ios_qcow2_should_log(ios_qcow2_task_n)) {
+                fprintf(stderr,
+                        "xemu_ios: qcow2 read-task child-call #%" PRIu64 "\n",
+                        ios_qcow2_task_n);
+            }
+#endif
+            ret = bdrv_co_preadv_part(s->data_file, host_offset,
+                                      bytes, qiov, qiov_offset, 0);
+#ifdef CONFIG_IOS
+            if (ios_qcow2_should_log(ios_qcow2_task_n)) {
+                fprintf(stderr,
+                        "xemu_ios: qcow2 read-task child-return #%" PRIu64
+                        " ret=%d\n",
+                        ios_qcow2_task_n, ret);
+            }
+#endif
+            return ret;
+        }
 
     default:
         g_assert_not_reached();
@@ -2480,6 +2533,21 @@ qcow2_co_preadv_part(BlockDriverState *bs, int64_t offset, int64_t bytes,
     uint64_t host_offset = 0;
     QCow2SubclusterType type;
     AioTaskPool *aio = NULL;
+#ifdef CONFIG_IOS
+    static uint64_t ios_qcow2_read_count;
+    uint64_t ios_qcow2_read_n = ++ios_qcow2_read_count;
+    int64_t ios_qcow2_start_offset = offset;
+    int64_t ios_qcow2_start_bytes = bytes;
+
+    if (ios_qcow2_should_log(ios_qcow2_read_n)) {
+        fprintf(stderr,
+                "xemu_ios: qcow2 read enter #%" PRIu64
+                " guest=0x%016" PRIx64 " bytes=0x%016" PRIx64
+                " qiov_off=0x%016" PRIx64 " flags=0x%x\n",
+                ios_qcow2_read_n, (uint64_t)offset, (uint64_t)bytes,
+                (uint64_t)qiov_offset, flags);
+    }
+#endif
 
     while (bytes != 0 && aio_task_pool_status(aio) == 0) {
         /* prepare next request */
@@ -2489,10 +2557,33 @@ qcow2_co_preadv_part(BlockDriverState *bs, int64_t offset, int64_t bytes,
                             QCOW_MAX_CRYPT_CLUSTERS * s->cluster_size);
         }
 
+#ifdef CONFIG_IOS
+        if (ios_qcow2_should_log(ios_qcow2_read_n)) {
+            fprintf(stderr,
+                    "xemu_ios: qcow2 read lock #%" PRIu64
+                    " guest=0x%016" PRIx64 " cur=0x%08x\n",
+                    ios_qcow2_read_n, (uint64_t)offset, cur_bytes);
+        }
+#endif
         qemu_co_mutex_lock(&s->lock);
+#ifdef CONFIG_IOS
+        if (ios_qcow2_should_log(ios_qcow2_read_n)) {
+            fprintf(stderr, "xemu_ios: qcow2 read lookup #%" PRIu64 "\n",
+                    ios_qcow2_read_n);
+        }
+#endif
         ret = qcow2_get_host_offset(bs, offset, &cur_bytes,
                                     &host_offset, &type);
         qemu_co_mutex_unlock(&s->lock);
+#ifdef CONFIG_IOS
+        if (ios_qcow2_should_log(ios_qcow2_read_n)) {
+            fprintf(stderr,
+                    "xemu_ios: qcow2 read lookup-return #%" PRIu64
+                    " ret=%d type=%d host=0x%016" PRIx64
+                    " cur=0x%08x\n",
+                    ios_qcow2_read_n, ret, type, host_offset, cur_bytes);
+        }
+#endif
         if (ret < 0) {
             goto out;
         }
@@ -2507,9 +2598,25 @@ qcow2_co_preadv_part(BlockDriverState *bs, int64_t offset, int64_t bytes,
             if (!aio && cur_bytes != bytes) {
                 aio = aio_task_pool_new(QCOW2_MAX_WORKERS);
             }
+#ifdef CONFIG_IOS
+            if (ios_qcow2_should_log(ios_qcow2_read_n)) {
+                fprintf(stderr,
+                        "xemu_ios: qcow2 read add-task #%" PRIu64
+                        " host=0x%016" PRIx64 " cur=0x%08x type=%d\n",
+                        ios_qcow2_read_n, host_offset, cur_bytes, type);
+            }
+#endif
             ret = qcow2_add_task(bs, aio, qcow2_co_preadv_task_entry, type,
                                  host_offset, offset, cur_bytes,
                                  qiov, qiov_offset, NULL);
+#ifdef CONFIG_IOS
+            if (ios_qcow2_should_log(ios_qcow2_read_n)) {
+                fprintf(stderr,
+                        "xemu_ios: qcow2 read add-task-return #%" PRIu64
+                        " ret=%d\n",
+                        ios_qcow2_read_n, ret);
+            }
+#endif
             if (ret < 0) {
                 goto out;
             }
@@ -2529,6 +2636,16 @@ out:
         g_free(aio);
     }
 
+#ifdef CONFIG_IOS
+    if (ios_qcow2_should_log(ios_qcow2_read_n)) {
+        fprintf(stderr,
+                "xemu_ios: qcow2 read exit #%" PRIu64
+                " ret=%d start=0x%016" PRIx64
+                " bytes=0x%016" PRIx64 "\n",
+                ios_qcow2_read_n, ret, (uint64_t)ios_qcow2_start_offset,
+                (uint64_t)ios_qcow2_start_bytes);
+    }
+#endif
     return ret;
 }
 

@@ -12,7 +12,9 @@ if have_renderdoc
 endif
 subdir('thirdparty')
 subdir('null')
-subdir('gl')
+if not host_is_ios
+	subdir('gl')
+endif
 subdir('glsl')
 subdir('vk')
 specific_ss.add(nv2a_vsh_cpu)

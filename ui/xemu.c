@@ -32,6 +32,7 @@
 #include "qemu/thread.h"
 #include "qemu/main-loop.h"
 #include "qemu/rcu.h"
+#include "qemu/coroutine.h"
 #include "qemu-version.h"
 #include "qapi/error.h"
 #include "qapi/qapi-commands-block.h"
@@ -53,12 +54,23 @@
 
 #include "hw/xbox/smbus.h" // For eject, drive tray
 #include "hw/xbox/nv2a/nv2a.h"
+#ifdef CONFIG_IOS
+#include "hw/xbox/nv2a/debug.h"
+#endif
 #include "ui/xemu-notifications.h"
 
 #include <stb_image.h>
 #include <locale.h>
 #include <math.h>
+#ifdef CONFIG_IOS
+#define SDL_MAIN_HANDLED 1
+#include <SDL3/SDL_main.h>
+#include <mach-o/dyld.h>
+#endif
 #include <SDL3/SDL.h>
+#ifdef CONFIG_IOS
+#include <SDL3/SDL_metal.h>
+#endif
 
 #ifndef DEBUG_XEMU_C
 #define DEBUG_XEMU_C 0
@@ -68,6 +80,189 @@
 #define DPRINTF(...) fprintf(stderr, __VA_ARGS__)
 #else
 #define DPRINTF(...)
+#endif
+
+static SDL_Window *m_window;
+
+#ifdef CONFIG_IOS
+#define IOS_LOG(...) do { \
+    fprintf(stderr, "xemu_ios: " __VA_ARGS__); \
+    fputc('\n', stderr); \
+    fflush(stderr); \
+} while (0)
+
+bool xemu_ios_vulkan_presenter_enabled(void);
+void *xemu_ios_get_metal_layer(void);
+void xemu_ios_set_external_metal_layer(void *metal_layer);
+void xemu_ios_destroy_metal_view(void);
+
+bool xemu_ios_vulkan_presenter_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_VK_SWAPCHAIN");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+static SDL_MetalView ios_metal_view;
+static void *ios_external_metal_layer;
+
+void xemu_ios_set_external_metal_layer(void *metal_layer)
+{
+    ios_external_metal_layer = metal_layer;
+    IOS_LOG("external CAMetalLayer %s %p",
+            metal_layer ? "set" : "cleared", metal_layer);
+}
+
+void *xemu_ios_get_metal_layer(void)
+{
+    if (ios_external_metal_layer) {
+        xemu_ios_configure_presenter_metal_layer(ios_external_metal_layer);
+        return ios_external_metal_layer;
+    }
+
+    if (!m_window) {
+        IOS_LOG("Metal layer requested before window creation");
+        return NULL;
+    }
+
+    if (!ios_metal_view) {
+        ios_metal_view = SDL_Metal_CreateView(m_window);
+        if (!ios_metal_view) {
+            IOS_LOG("SDL_Metal_CreateView failed: %s", SDL_GetError());
+            return NULL;
+        }
+        int window_w = 0;
+        int window_h = 0;
+        int pixel_w = 0;
+        int pixel_h = 0;
+        SDL_GetWindowSize(m_window, &window_w, &window_h);
+        SDL_GetWindowSizeInPixels(m_window, &pixel_w, &pixel_h);
+        IOS_LOG("SDL Metal view created window=%dx%d pixels=%dx%d density=%.2f",
+                window_w, window_h, pixel_w, pixel_h,
+                SDL_GetWindowPixelDensity(m_window));
+    }
+
+    void *layer = SDL_Metal_GetLayer(ios_metal_view);
+    if (!layer) {
+        IOS_LOG("SDL_Metal_GetLayer failed");
+        return NULL;
+    }
+    xemu_ios_configure_presenter_metal_layer(layer);
+
+    return layer;
+}
+
+void xemu_ios_destroy_metal_view(void)
+{
+    if (!ios_metal_view) {
+        return;
+    }
+
+    SDL_Metal_DestroyView(ios_metal_view);
+    ios_metal_view = NULL;
+    IOS_LOG("SDL Metal view destroyed");
+}
+
+static void ios_refresh_metal_layer_hud(void)
+{
+    static uint64_t frame_count;
+
+    frame_count++;
+    if (frame_count > 1 && (frame_count % 120) != 0) {
+        return;
+    }
+
+    void *layer = ios_external_metal_layer;
+    if (!layer && ios_metal_view) {
+        layer = SDL_Metal_GetLayer(ios_metal_view);
+    }
+    if (layer) {
+        xemu_ios_configure_presenter_metal_layer(layer);
+    }
+}
+
+static unsigned int ios_coroutine_prime_count(void)
+{
+    const char *value = getenv("XEMU_IOS_COROUTINE_PRIME_COUNT");
+    char *end = NULL;
+    unsigned long parsed;
+
+    if (!value || !*value) {
+        return 640;
+    }
+
+    parsed = strtoul(value, &end, 10);
+    if (end == value || parsed > 4096) {
+        return 640;
+    }
+
+    return (unsigned int)parsed;
+}
+
+static void ios_log_gl_error(const char *where)
+{
+    GLenum err;
+    static int log_count;
+
+    while ((err = glGetError()) != GL_NO_ERROR) {
+        if (log_count < 96) {
+            IOS_LOG("OpenGL ES error after %s: 0x%x", where, err);
+        } else if (log_count == 96) {
+            IOS_LOG("OpenGL ES error logging suppressed");
+        }
+        log_count++;
+    }
+}
+
+#define XEMU_GL_CHECK(where) ios_log_gl_error(where)
+
+static int64_t ios_vulkan_presenter_frame_interval_ns(void)
+{
+    static int64_t interval_ns = -1;
+
+    if (interval_ns < 0) {
+        const char *env = getenv("XEMU_IOS_VK_PRESENT_FPS");
+        char *end = NULL;
+        long fps = env && *env ? strtol(env, &end, 10) : 0;
+
+        if (end == env || fps <= 0) {
+            interval_ns = 0;
+        } else {
+            fps = MIN(fps, 120);
+            interval_ns = NANOSECONDS_PER_SECOND / fps;
+        }
+    }
+
+    return interval_ns;
+}
+
+static void ios_vulkan_presenter_wait(void)
+{
+    static int64_t last_frame_ns;
+    int64_t interval_ns = ios_vulkan_presenter_frame_interval_ns();
+
+    if (interval_ns <= 0) {
+        return;
+    }
+
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+    if (last_frame_ns) {
+        int64_t next_frame_ns = last_frame_ns + interval_ns;
+        if (now < next_frame_ns) {
+            SDL_DelayPrecise(next_frame_ns - now);
+            now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+        }
+    }
+    last_frame_ns = now;
+}
+#else
+#define IOS_LOG(...) do { } while (0)
+#define XEMU_GL_CHECK(where) assert(glGetError() == GL_NO_ERROR)
 #endif
 
 uint64_t vblank_interval_ns = 16666666LL;
@@ -83,6 +278,11 @@ struct xemu_console {
     int ignore_hotkeys;
     SDL_GLContext winctx;
     QKbdState *kbd;
+#ifdef CONFIG_IOS
+    bool surface_dirty;
+    uint64_t surface_dirty_generation;
+    uint64_t fallback_uploaded_generation;
+#endif
 };
 
 #ifdef _WIN32
@@ -110,7 +310,6 @@ static int guest_cursor;
 static int guest_x, guest_y;
 static SDL_Cursor *guest_sprite;
 static Notifier mouse_mode_notifier;
-static SDL_Window *m_window;
 static SDL_GLContext m_context;
 static QemuSemaphore display_init_sem;
 static QemuSemaphore display_shutdown_sem;
@@ -629,6 +828,32 @@ static void mouse_define(DisplayChangeListener *dcl,
     }
 }
 
+#ifdef CONFIG_IOS
+static GLuint ios_fallback_texture;
+static int ios_fallback_texture_width;
+static int ios_fallback_texture_height;
+static GLenum ios_fallback_texture_internal_format;
+static GLenum ios_fallback_texture_format;
+static GLenum ios_fallback_texture_type;
+
+static bool ios_attach_existing_fallback_texture(DisplaySurface *surface)
+{
+    if (!surface || !ios_fallback_texture ||
+        ios_fallback_texture_width != surface_width(surface) ||
+        ios_fallback_texture_height != surface_height(surface)) {
+        return false;
+    }
+
+    surface->texture = ios_fallback_texture;
+    surface->texture_width = ios_fallback_texture_width;
+    surface->texture_height = ios_fallback_texture_height;
+    surface->texture_internal_format = ios_fallback_texture_internal_format;
+    surface->texture_format = ios_fallback_texture_format;
+    surface->texture_type = ios_fallback_texture_type;
+    return true;
+}
+#endif
+
 static void xb_surface_gl_create_texture(DisplaySurface *surface)
 {
     assert(QEMU_IS_ALIGNED(surface_stride(surface), surface_bytes_per_pixel(surface)));
@@ -652,17 +877,78 @@ static void xb_surface_gl_create_texture(DisplaySurface *surface)
         g_assert_not_reached();
     }
 
-    if (!surface->texture) {
+#ifdef CONFIG_IOS
+    bool new_texture = !ios_fallback_texture;
+    if (new_texture) {
+        glGenTextures(1, &ios_fallback_texture);
+        IOS_LOG("fallback framebuffer persistent texture: tex=%u",
+                ios_fallback_texture);
+    }
+    surface->texture = ios_fallback_texture;
+#else
+    bool new_texture = !surface->texture;
+    if (new_texture) {
         glGenTextures(1, &surface->texture);
     }
+#endif
     glBindTexture(GL_TEXTURE_2D, surface->texture);
     glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT,
                   surface_stride(surface) / surface_bytes_per_pixel(surface));
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB,
+    GLenum internal_format = GL_RGB;
+#ifdef CONFIG_IOS
+    if (surface->gltype == GL_UNSIGNED_BYTE) {
+        internal_format = GL_RGBA;
+    }
+
+    static bool logged_upload_format;
+    if (!logged_upload_format) {
+        IOS_LOG("fallback framebuffer upload: %dx%d stride=%d bpp=%d format=0x%x type=0x%x internal=0x%x",
+                surface_width(surface), surface_height(surface),
+                surface_stride(surface), surface_bytes_per_pixel(surface),
+                surface->glformat, surface->gltype, internal_format);
+        logged_upload_format = true;
+    }
+#endif
+
+#ifdef CONFIG_IOS
+    bool can_update_existing =
+        !new_texture &&
+        ios_fallback_texture_width == surface_width(surface) &&
+        ios_fallback_texture_height == surface_height(surface) &&
+        ios_fallback_texture_internal_format == internal_format &&
+        ios_fallback_texture_format == surface->glformat &&
+        ios_fallback_texture_type == surface->gltype;
+
+    if (can_update_existing) {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
+                        surface_width(surface),
+                        surface_height(surface),
+                        surface->glformat, surface->gltype,
+                        surface_data(surface));
+    } else {
+        glTexImage2D(GL_TEXTURE_2D, 0, internal_format,
+                     surface_width(surface),
+                     surface_height(surface),
+                     0, surface->glformat, surface->gltype,
+                     surface_data(surface));
+        ios_fallback_texture_width = surface_width(surface);
+        ios_fallback_texture_height = surface_height(surface);
+        ios_fallback_texture_internal_format = internal_format;
+        ios_fallback_texture_format = surface->glformat;
+        ios_fallback_texture_type = surface->gltype;
+    }
+    surface->texture_width = ios_fallback_texture_width;
+    surface->texture_height = ios_fallback_texture_height;
+    surface->texture_internal_format = ios_fallback_texture_internal_format;
+    surface->texture_format = ios_fallback_texture_format;
+    surface->texture_type = ios_fallback_texture_type;
+#else
+    glTexImage2D(GL_TEXTURE_2D, 0, internal_format,
                  surface_width(surface),
                  surface_height(surface),
                  0, surface->glformat, surface->gltype,
                  surface_data(surface));
+#endif
     glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, 0);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -674,8 +960,24 @@ static void xb_surface_gl_destroy_texture(DisplaySurface *surface)
     if (!surface || !surface->texture) {
         return;
     }
+#ifdef CONFIG_IOS
+    if (surface->texture == ios_fallback_texture) {
+        surface->texture = 0;
+        surface->texture_width = 0;
+        surface->texture_height = 0;
+        surface->texture_internal_format = 0;
+        surface->texture_format = 0;
+        surface->texture_type = 0;
+        return;
+    }
+#endif
     glDeleteTextures(1, &surface->texture);
     surface->texture = 0;
+    surface->texture_width = 0;
+    surface->texture_height = 0;
+    surface->texture_internal_format = 0;
+    surface->texture_format = 0;
+    surface->texture_type = 0;
 }
 
 static bool xb_console_gl_check_format(DisplayChangeListener *dcl,
@@ -696,7 +998,22 @@ static void gl_switch(DisplayChangeListener *dcl,
 {
     struct xemu_console *scon = container_of(dcl, struct xemu_console, dcl);
     scon->surface = new_surface;
+#ifdef CONFIG_IOS
+    scon->surface_dirty = true;
+    scon->surface_dirty_generation =
+        qatomic_read(&xemu_ios_framebuffer_download_generation);
+#endif
 }
+
+#ifdef CONFIG_IOS
+static void gl_update(DisplayChangeListener *dcl, int x, int y, int w, int h)
+{
+    struct xemu_console *scon = container_of(dcl, struct xemu_console, dcl);
+    scon->surface_dirty = true;
+    scon->surface_dirty_generation =
+        qatomic_read(&xemu_ios_framebuffer_download_generation);
+}
+#endif
 
 static float update_avg(float avg, float ms, float r) {
     if (fabs(avg-ms) > 0.25*avg) avg = ms;
@@ -720,6 +1037,113 @@ static void update_fps(void)
     avg = update_avg(avg, ms, 0.5);
     fps = 1000.0/avg;
 }
+
+#ifdef CONFIG_IOS
+static bool ios_render_trace_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_RENDER_TRACE");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+static bool ios_fallback_generation_filter_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_FALLBACK_GENERATION_FILTER");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+static bool ios_skip_gl_finish_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_SKIP_GL_FINISH");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+static void ios_log_render_stats(struct xemu_console *scon, bool used_nv2a_texture,
+                                 bool uploaded_fallback_texture, GLuint tex)
+{
+    static uint64_t last_reported_ms;
+    static uint64_t presenter_frames;
+    static uint64_t nv2a_texture_frames;
+    static uint64_t fallback_frames;
+    static uint64_t fallback_upload_frames;
+
+    uint64_t now_ms = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
+
+    presenter_frames++;
+    if (used_nv2a_texture) {
+        nv2a_texture_frames++;
+    } else {
+        fallback_frames++;
+        if (uploaded_fallback_texture) {
+            fallback_upload_frames++;
+        }
+    }
+
+    if (!last_reported_ms) {
+        last_reported_ms = now_ms;
+        return;
+    }
+
+    if (now_ms - last_reported_ms < 2000) {
+        return;
+    }
+
+    unsigned int frame_idx =
+        (g_nv2a_stats.frame_ptr + NV2A_PROF_NUM_FRAMES - 1) %
+        NV2A_PROF_NUM_FRAMES;
+    int mspf = g_nv2a_stats.frame_history[frame_idx].mspf;
+
+    IOS_LOG("render stats: presenter_fps=%.1f nv2a_fps=%u mspf=%d"
+            " frames=%" PRIu64 " nv2a_tex=%" PRIu64 " fallback=%" PRIu64
+            " fallback_upload=%" PRIu64 " tex=%u surface=%dx%d placeholder=%d"
+            " fb_gen=%" PRIu64 " uploaded_gen=%" PRIu64
+            " pipeline_gen=%d shader_gen=%d shader_bind=%d tex_upload=%d"
+            " surf_upload=%d surf_download=%d queue_submit=%d",
+            fps,
+            g_nv2a_stats.increment_fps,
+            mspf,
+            presenter_frames,
+            nv2a_texture_frames,
+            fallback_frames,
+            fallback_upload_frames,
+            tex,
+            surface_width(scon->surface),
+            surface_height(scon->surface),
+            surface_is_placeholder(scon->surface),
+            qatomic_read(&xemu_ios_framebuffer_download_generation),
+            scon->fallback_uploaded_generation,
+            nv2a_profile_get_counter_value(NV2A_PROF_PIPELINE_GEN),
+            nv2a_profile_get_counter_value(NV2A_PROF_SHADER_GEN),
+            nv2a_profile_get_counter_value(NV2A_PROF_SHADER_BIND),
+            nv2a_profile_get_counter_value(NV2A_PROF_TEX_UPLOAD),
+            nv2a_profile_get_counter_value(NV2A_PROF_SURF_UPLOAD),
+            nv2a_profile_get_counter_value(NV2A_PROF_SURF_DOWNLOAD),
+            nv2a_profile_get_counter_value(NV2A_PROF_QUEUE_SUBMIT));
+
+    last_reported_ms = now_ms;
+    presenter_frames = 0;
+    nv2a_texture_frames = 0;
+    fallback_frames = 0;
+    fallback_upload_frames = 0;
+}
+#endif
 
 static void process_vblank(struct xemu_console *scon)
 {
@@ -823,21 +1247,84 @@ static void gl_render_frame(struct xemu_console *scon)
      * to the framebuffer, fall back to the VGA path.
      */
     GLuint tex = nv2a_get_framebuffer_surface();
+#ifdef CONFIG_IOS
+    bool ios_used_nv2a_texture = tex != 0;
+    bool ios_uploaded_fallback_texture = false;
+#endif
 
-    assert(glGetError() == GL_NO_ERROR);
+    XEMU_GL_CHECK("nv2a framebuffer surface lookup");
 
     if (tex == 0) {
+#ifdef CONFIG_IOS
+        static uint64_t ios_fallback_frame_count;
+        uint64_t fallback_frame = ++ios_fallback_frame_count;
+        if (ios_render_trace_enabled() &&
+            (fallback_frame <= 16 || (fallback_frame % 300) == 0)) {
+            IOS_LOG("render fallback #%" PRIu64 ": surface=%dx%d placeholder=%d",
+                    fallback_frame,
+                    surface_width(scon->surface),
+                    surface_height(scon->surface),
+                    surface_is_placeholder(scon->surface));
+        }
+#endif
         xemu_main_loop_lock();
-        // FIXME: Don't upload if notdirty
+#ifdef CONFIG_IOS
+        uint64_t framebuffer_generation =
+            qatomic_read(&xemu_ios_framebuffer_download_generation);
+        bool use_generation_filter =
+            framebuffer_generation != 0 &&
+            ios_fallback_generation_filter_enabled();
+        bool has_fallback_texture =
+            scon->surface->texture ||
+            ios_attach_existing_fallback_texture(scon->surface);
+        bool needs_fallback_upload = !has_fallback_texture;
+
+        if (use_generation_filter) {
+            needs_fallback_upload |=
+                framebuffer_generation != scon->fallback_uploaded_generation;
+        } else {
+            needs_fallback_upload |= scon->surface_dirty;
+        }
+
+        if (needs_fallback_upload) {
+            xb_surface_gl_create_texture(scon->surface);
+            if (use_generation_filter) {
+                scon->fallback_uploaded_generation = framebuffer_generation;
+            }
+            scon->surface_dirty = false;
+            ios_uploaded_fallback_texture = true;
+        } else if (use_generation_filter) {
+            scon->surface_dirty = false;
+        }
+#else
         xb_surface_gl_create_texture(scon->surface);
+#endif
         tex = scon->surface->texture;
         flip_required = true;
+#ifndef CONFIG_IOS
         release_surface_texture = true;
+#endif
         xemu_main_loop_unlock();
+        XEMU_GL_CHECK("fallback framebuffer upload");
+#ifdef CONFIG_IOS
+    } else {
+        static uint64_t ios_nv2a_frame_count;
+        uint64_t nv2a_frame = ++ios_nv2a_frame_count;
+        if (nv2a_frame <= 16 || (nv2a_frame % 120) == 0) {
+            IOS_LOG("render nv2a texture #%" PRIu64 ": tex=%u",
+                    nv2a_frame, tex);
+        }
+#endif
     }
+
+#ifdef CONFIG_IOS
+    ios_log_render_stats(scon, ios_used_nv2a_texture,
+                         ios_uploaded_fallback_texture, tex);
+#endif
 
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT);
+    XEMU_GL_CHECK("backbuffer clear");
     xemu_snapshots_set_framebuffer_texture(tex, flip_required);
     xemu_hud_set_framebuffer_texture(tex, flip_required);
 
@@ -849,19 +1336,29 @@ static void gl_render_frame(struct xemu_console *scon)
     xemu_main_loop_lock();
     xemu_hud_update();
     xemu_main_loop_unlock();
+    XEMU_GL_CHECK("xemu_hud_update");
 
     xemu_hud_render();
+    XEMU_GL_CHECK("xemu_hud_render");
+#ifdef CONFIG_IOS
+    if (!ios_skip_gl_finish_enabled()) {
+        glFinish();
+    }
+#else
     glFinish();
+#endif
+    XEMU_GL_CHECK("glFinish");
 
     if (release_surface_texture) {
         xemu_main_loop_lock();
         xb_surface_gl_destroy_texture(scon->surface);
         xemu_main_loop_unlock();
+        XEMU_GL_CHECK("fallback framebuffer release");
     }
 
     nv2a_release_framebuffer_surface();
     SDL_GL_SwapWindow(scon->real_window);
-    assert(glGetError() == GL_NO_ERROR);
+    XEMU_GL_CHECK("SDL_GL_SwapWindow");
 
     qatomic_set(&rendering, false);
 
@@ -873,6 +1370,12 @@ static void gl_render_frame(struct xemu_console *scon)
 static bool event_watch_callback(void *userdata, SDL_Event *event)
 {
     struct xemu_console *scon = (struct xemu_console *)userdata;
+
+#ifdef CONFIG_IOS
+    if (xemu_ios_vulkan_presenter_enabled()) {
+        return true;
+    }
+#endif
 
     if (event->type == SDL_EVENT_WINDOW_EXPOSED ||
         event->type == SDL_EVENT_WINDOW_RESIZED) {
@@ -888,14 +1391,26 @@ static void poll_events(struct xemu_console *scon)
     bool allow_close = true;
 
     int kbd = 0, mouse = 0;
+#ifdef CONFIG_IOS
+    if (!xemu_ios_vulkan_presenter_enabled()) {
+        xemu_hud_should_capture_kbd_mouse(&kbd, &mouse);
+    }
+#else
     xemu_hud_should_capture_kbd_mouse(&kbd, &mouse);
+#endif
 
     while (SDL_PollEvent(ev)) {
         xemu_main_loop_lock();
 
+#ifdef CONFIG_IOS
+        if (!xemu_ios_vulkan_presenter_enabled()) {
+            xemu_hud_process_sdl_events(ev);
+        }
+#else
         // HUD must process events first so that if a controller is detached,
         // a latent rebind request can cancel before the state is freed
         xemu_hud_process_sdl_events(ev);
+#endif
         xemu_input_process_sdl_events(ev);
 
         switch (ev->type) {
@@ -946,6 +1461,8 @@ static void poll_events(struct xemu_console *scon)
 
 static void display_very_early_init(DisplayOptions *o)
 {
+    IOS_LOG("display_very_early_init");
+
 #ifdef __linux__
     /* on Linux, SDL may use fbcon|directfb|svgalib when run without
      * accessible $DISPLAY to open X11 window.  This is often the case
@@ -964,25 +1481,41 @@ static void display_very_early_init(DisplayOptions *o)
                 SDL_GetError());
         exit(1);
     }
+    IOS_LOG("SDL video initialized");
 
 #ifdef SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR /* only available since SDL 2.0.8 */
     SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
 #endif
     SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
 
-    // Initialize rendering context
-    SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
-    SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
-    SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
-    SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-    SDL_GL_SetAttribute(
-        SDL_GL_CONTEXT_PROFILE_MASK,
-        SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+#ifdef CONFIG_IOS
+    bool use_vulkan_presenter = xemu_ios_vulkan_presenter_enabled();
+#else
+    bool use_vulkan_presenter = false;
+#endif
+    if (!use_vulkan_presenter) {
+        // Initialize rendering context
+        SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
+        SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
+        SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
+        SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
+        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+        SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+#ifdef CONFIG_IOS
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+        SDL_GL_SetAttribute(
+            SDL_GL_CONTEXT_PROFILE_MASK,
+            SDL_GL_CONTEXT_PROFILE_ES);
+#else
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+        SDL_GL_SetAttribute(
+            SDL_GL_CONTEXT_PROFILE_MASK,
+            SDL_GL_CONTEXT_PROFILE_CORE);
+#endif
+        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    }
 
     char *title = g_strdup_printf("xemu | v%s"
 #ifdef XEMU_DEBUG_BUILD
@@ -1024,7 +1557,9 @@ static void display_very_early_init(DisplayOptions *o)
         window_height = min_window_height;
     }
 
-    SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    SDL_WindowFlags window_flags = (SDL_WindowFlags)(
+        (use_vulkan_presenter ? SDL_WINDOW_METAL : SDL_WINDOW_OPENGL) |
+        SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
 
     // Create main window
     m_window = SDL_CreateWindow(
@@ -1036,6 +1571,16 @@ static void display_very_early_init(DisplayOptions *o)
         exit(1);
     }
     g_free(title);
+
+#ifdef CONFIG_IOS
+    if (use_vulkan_presenter && !xemu_ios_get_metal_layer()) {
+        fprintf(stderr, "Failed to create CAMetalLayer for iOS presenter\n");
+        SDL_DestroyWindow(m_window);
+        SDL_Quit();
+        exit(1);
+    }
+#endif
+
     SDL_SetWindowMinimumSize(m_window, min_window_width, min_window_height);
 
     const SDL_DisplayMode *disp_mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(m_window));
@@ -1044,15 +1589,23 @@ static void display_very_early_init(DisplayOptions *o)
         SDL_SetWindowPosition(m_window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     }
 
-    m_context = SDL_GL_CreateContext(m_window);
+    if (!use_vulkan_presenter) {
+        m_context = SDL_GL_CreateContext(m_window);
+    }
 
+#ifndef CONFIG_IOS
     if (m_context != NULL && epoxy_gl_version() < 40) {
         SDL_GL_MakeCurrent(NULL, NULL);
         SDL_GL_DestroyContext(m_context);
         m_context = NULL;
     }
+#endif
 
-    if (m_context == NULL) {
+    if (!use_vulkan_presenter && m_context == NULL) {
+#ifdef CONFIG_IOS
+        fprintf(stderr, "Unable to create OpenGL ES context: %s\n",
+                SDL_GetError());
+#else
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,
             "Unable to create OpenGL context",
             "Unable to create OpenGL context. This usually means the\r\n"
@@ -1060,6 +1613,7 @@ static void display_very_early_init(DisplayOptions *o)
             "\r\n"
             "xemu cannot continue and will now exit.",
             m_window);
+#endif
         SDL_DestroyWindow(m_window);
         SDL_Quit();
         exit(1);
@@ -1079,19 +1633,31 @@ static void display_very_early_init(DisplayOptions *o)
 
     fprintf(stderr, "CPU: %s\n", xemu_get_cpu_info());
     fprintf(stderr, "OS_Version: %s\n", xemu_get_os_info());
-    fprintf(stderr, "GL_VENDOR: %s\n", glGetString(GL_VENDOR));
-    fprintf(stderr, "GL_RENDERER: %s\n", glGetString(GL_RENDERER));
-    fprintf(stderr, "GL_VERSION: %s\n", glGetString(GL_VERSION));
-    fprintf(stderr, "GL_SHADING_LANGUAGE_VERSION: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
+    if (!use_vulkan_presenter) {
+        fprintf(stderr, "GL_VENDOR: %s\n", glGetString(GL_VENDOR));
+        fprintf(stderr, "GL_RENDERER: %s\n", glGetString(GL_RENDERER));
+        fprintf(stderr, "GL_VERSION: %s\n", glGetString(GL_VERSION));
+        fprintf(stderr, "GL_SHADING_LANGUAGE_VERSION: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
+    } else {
+        IOS_LOG("using CAMetalLayer Vulkan swapchain presenter");
+    }
 
     // Initialize offscreen rendering context now
     nv2a_context_init();
-    SDL_GL_MakeCurrent(NULL, NULL);
+    if (!use_vulkan_presenter) {
+        SDL_GL_MakeCurrent(NULL, NULL);
+    }
 }
 
 static void display_early_init(DisplayOptions *o)
 {
     assert(o->type == DISPLAY_TYPE_XEMU);
+#ifdef CONFIG_IOS
+    if (xemu_ios_vulkan_presenter_enabled()) {
+        display_opengl = 0;
+        return;
+    }
+#endif
     display_opengl = 1;
 
     SDL_GL_MakeCurrent(m_window, m_context);
@@ -1102,6 +1668,9 @@ static void display_early_init(DisplayOptions *o)
 static const DisplayChangeListenerOps dcl_gl_ops = {
     .dpy_name                = "xemu-gl",
     .dpy_gfx_switch          = gl_switch,
+#ifdef CONFIG_IOS
+    .dpy_gfx_update          = gl_update,
+#endif
     .dpy_gfx_check_format    = xb_console_gl_check_format,
     .dpy_mouse_set           = mouse_warp,
     .dpy_cursor_define       = mouse_define,
@@ -1109,11 +1678,20 @@ static const DisplayChangeListenerOps dcl_gl_ops = {
 
 static void display_init(DisplayState *ds, DisplayOptions *o)
 {
+    IOS_LOG("display_init");
+
     uint8_t data = 0;
     int i;
 
     assert(o->type == DISPLAY_TYPE_XEMU);
-    SDL_GL_MakeCurrent(m_window, m_context);
+#ifdef CONFIG_IOS
+    bool use_vulkan_presenter = xemu_ios_vulkan_presenter_enabled();
+#else
+    bool use_vulkan_presenter = false;
+#endif
+    if (!use_vulkan_presenter) {
+        SDL_GL_MakeCurrent(m_window, m_context);
+    }
 
     gui_fullscreen = o->has_full_screen && o->full_screen;
     gui_fullscreen |= g_config.display.window.fullscreen_on_startup;
@@ -1158,7 +1736,9 @@ static void display_init(DisplayState *ds, DisplayOptions *o)
 
     // SDL_PollEvent may block during main window resize or drag operations.
     // Register event watch to handle rendering during these operations.
-    SDL_AddEventWatch(event_watch_callback, &scon_list[0]);
+    if (!use_vulkan_presenter) {
+        SDL_AddEventWatch(event_watch_callback, &scon_list[0]);
+    }
 
     if (use_vblank_timer_thread) {
         qemu_thread_create(&vblank_thread, "vblank-timer", vblank_timer_thread,
@@ -1169,19 +1749,35 @@ static void display_init(DisplayState *ds, DisplayOptions *o)
     }
 
     /* Tell main thread to go ahead and create the app and enter the run loop */
-    SDL_GL_MakeCurrent(NULL, NULL);
+    if (!use_vulkan_presenter) {
+        SDL_GL_MakeCurrent(NULL, NULL);
+    }
     qemu_sem_post(&display_init_sem);
 }
 
 static void display_finalize(void)
 {
+    IOS_LOG("display_finalize");
+
     if (use_vblank_timer_thread) {
         qemu_thread_join(&vblank_thread);
     }
 
-    SDL_RemoveEventWatch(event_watch_callback, &scon_list[0]);
-    SDL_GL_MakeCurrent(NULL, NULL);
-    SDL_GL_DestroyContext(m_context);
+#ifdef CONFIG_IOS
+    bool use_vulkan_presenter = xemu_ios_vulkan_presenter_enabled();
+#else
+    bool use_vulkan_presenter = false;
+#endif
+    if (!use_vulkan_presenter) {
+        SDL_RemoveEventWatch(event_watch_callback, &scon_list[0]);
+        SDL_GL_MakeCurrent(NULL, NULL);
+        SDL_GL_DestroyContext(m_context);
+    }
+#ifdef CONFIG_IOS
+    if (use_vulkan_presenter) {
+        xemu_ios_destroy_metal_view();
+    }
+#endif
     SDL_DestroyWindow(m_window);
     SDL_Quit();
 }
@@ -1202,6 +1798,7 @@ type_init(register_xemu_display);
 int gArgc;
 char **gArgv;
 
+#ifndef CONFIG_IOS
 static void *qemu_main(void *opaque)
 {
     qemu_init(gArgc, gArgv);
@@ -1217,6 +1814,35 @@ static void *qemu_main(void *opaque)
 
     return NULL;
 }
+#endif
+
+#ifdef CONFIG_IOS
+static void *qemu_main_loop_after_ios_init(void *opaque)
+{
+    IOS_LOG("qemu_main_loop_after_ios_init: set aio context");
+    qemu_set_current_aio_context(qemu_get_aio_context());
+    IOS_LOG("qemu_main_loop_after_ios_init: lock");
+    qemu_mutex_lock_main_loop();
+    bql_lock();
+
+    IOS_LOG("qemu_main_loop_after_ios_init: enter qemu_main_loop");
+    exit_status = qemu_main_loop();
+    IOS_LOG("qemu_main_loop_after_ios_init: qemu_main_loop returned %d",
+            exit_status);
+    qatomic_set(&qemu_exiting, true);
+
+    bql_unlock();
+    qemu_mutex_unlock_main_loop();
+
+    qemu_sem_wait(&display_shutdown_sem);
+    IOS_LOG("qemu_main_loop_after_ios_init: cleanup");
+    bql_lock();
+    qemu_cleanup(exit_status);
+    bql_unlock();
+
+    return NULL;
+}
+#endif
 
 #ifdef _WIN32
 static const wchar_t *get_executable_name(void)
@@ -1275,11 +1901,71 @@ static void init_sdl_app_metadata(void)
                                "https://xemu.app");
 }
 
+#ifdef CONFIG_IOS
+#include <execinfo.h>
+#include <signal.h>
+#include <sys/ucontext.h>
+#include <unistd.h>
+
+int xemu_ios_main(int argc, char **argv);
+
+static void xemu_ios_fatal_signal_handler(int sig, siginfo_t *info,
+                                          void *ucontext)
+{
+    void *frames[64];
+    int frame_count;
+#if defined(__aarch64__)
+    ucontext_t *uc = (ucontext_t *)ucontext;
+    uintptr_t pc = uc ? (uintptr_t)uc->uc_mcontext->__ss.__pc : 0;
+    uintptr_t lr = uc ? (uintptr_t)uc->uc_mcontext->__ss.__lr : 0;
+#endif
+
+#if defined(__aarch64__)
+    dprintf(STDERR_FILENO,
+            "\nxemu_ios: fatal signal %d addr=%p code=%d pc=%p lr=%p\n",
+            sig, info ? info->si_addr : NULL, info ? info->si_code : 0,
+            (void *)pc, (void *)lr);
+#else
+    (void)ucontext;
+    dprintf(STDERR_FILENO,
+            "\nxemu_ios: fatal signal %d addr=%p code=%d\n",
+            sig, info ? info->si_addr : NULL, info ? info->si_code : 0);
+#endif
+    frame_count = backtrace(frames, G_N_ELEMENTS(frames));
+    backtrace_symbols_fd(frames, frame_count, STDERR_FILENO);
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+static void xemu_ios_install_fatal_signal_handlers(void)
+{
+    const int signals[] = { SIGABRT, SIGSEGV, SIGILL, SIGFPE, SIGBUS, SIGTRAP };
+    struct sigaction action = {
+        .sa_sigaction = xemu_ios_fatal_signal_handler,
+        .sa_flags = SA_SIGINFO | SA_RESETHAND,
+    };
+
+    sigemptyset(&action.sa_mask);
+    for (int i = 0; i < G_N_ELEMENTS(signals); i++) {
+        sigaction(signals[i], &action, NULL);
+    }
+}
+#endif
+
+#ifdef CONFIG_IOS
+__attribute__((visibility("default")))
+int xemu_ios_main(int argc, char **argv)
+#else
 int main(int argc, char **argv)
+#endif
 {
     QemuThread thread;
 
     setlocale(LC_NUMERIC, "C");
+
+#ifdef CONFIG_IOS
+    xemu_ios_install_fatal_signal_handlers();
+#endif
 
 #ifdef _WIN32
     if (AttachConsole(ATTACH_PARENT_PROCESS)) {
@@ -1309,6 +1995,11 @@ int main(int argc, char **argv)
     fprintf(stderr, "xemu_commit: %s\n", xemu_commit);
     fprintf(stderr, "xemu_date: %s\n", xemu_date);
 
+#ifdef CONFIG_IOS
+    SDL_SetMainReady();
+    IOS_LOG("SDL main marked ready");
+#endif
+
     init_sdl_app_metadata();
 
     gArgc = argc;
@@ -1335,6 +2026,7 @@ int main(int argc, char **argv)
         exit(1);
     }
     atexit(xemu_settings_save);
+    IOS_LOG("settings loaded");
 
 #ifdef _WIN32
     if (g_config.display.setup_nvidia_profile) {
@@ -1343,12 +2035,37 @@ int main(int argc, char **argv)
 #endif
 
     display_very_early_init(NULL);
+    IOS_LOG("display very early init complete");
 
     qemu_sem_init(&display_init_sem, 0);
     qemu_sem_init(&display_shutdown_sem, 0);
+#ifdef CONFIG_IOS
+    /*
+     * UIKit-backed SDL window/context creation must happen on the iOS main
+     * thread. qemu_init() synchronously reaches qemu_init_displays(), so run
+     * it here, then transfer the QEMU main loop locks to the worker thread.
+     */
+    /*
+     * The sigaltstack coroutine backend creates new stacks by delivering
+     * SIGUSR2 to the current thread. Universal.js/StikDebug can intercept that
+     * signal once JIT is active, so keep a deeper pre-JIT reserve for the vCPU
+     * and block I/O paths.
+     */
+    xemu_ios_coroutine_prime_global_pool(ios_coroutine_prime_count());
+    IOS_LOG("qemu_init: enter");
+    qemu_init(gArgc, gArgv);
+    IOS_LOG("qemu_init: returned");
+    bql_unlock();
+    qemu_mutex_unlock_main_loop();
+    IOS_LOG("qemu main-loop locks transferred");
+    qemu_thread_create(&thread, "qemu_main", qemu_main_loop_after_ios_init,
+                       NULL, QEMU_THREAD_JOINABLE);
+#else
     qemu_thread_create(&thread, "qemu_main", qemu_main,
                        NULL, QEMU_THREAD_JOINABLE);
+#endif
     qemu_sem_wait(&display_init_sem);
+    IOS_LOG("display init semaphore received");
 
     gui_grab = 0;
     if (gui_fullscreen) {
@@ -1361,20 +2078,36 @@ int main(int argc, char **argv)
      * to just run functions to avoid TLS bugs and locking issues.
      */
     tcg_register_init_ctx();
+#ifndef CONFIG_IOS
     qemu_set_current_aio_context(qemu_get_aio_context());
+#endif
 
     xemu_main_loop_lock();
     xemu_input_init();
     xemu_main_loop_unlock();
+    IOS_LOG("input initialized");
 
     struct xemu_console *scon = &scon_list[0];
+    IOS_LOG("enter render loop");
     while (!qatomic_read(&qemu_exiting)) {
         poll_events(scon);
-        gl_render_frame(scon);
+#ifdef CONFIG_IOS
+        if (xemu_ios_vulkan_presenter_enabled()) {
+            ios_refresh_metal_layer_hud();
+            nv2a_get_framebuffer_surface();
+            nv2a_release_framebuffer_surface();
+            ios_vulkan_presenter_wait();
+        } else
+#endif
+        {
+            gl_render_frame(scon);
+        }
     }
+    IOS_LOG("render loop exited");
     qemu_sem_post(&display_shutdown_sem);
     qemu_thread_join(&thread);
     display_finalize();
+    IOS_LOG("xemu_ios_main returning %d", exit_status);
     return exit_status;
 }
 

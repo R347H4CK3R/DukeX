@@ -1305,6 +1305,11 @@ bool blk_in_drain(BlockBackend *blk)
     return qatomic_read(&blk->quiesce_counter);
 }
 
+#ifdef CONFIG_IOS
+static void ios_blk_log(BlockBackend *blk, const char *phase, int ret,
+                        int64_t offset, int64_t bytes, QEMUIOVector *qiov);
+#endif
+
 /* To be called between exactly one pair of blk_inc/dec_in_flight() */
 static void coroutine_fn blk_wait_while_drained(BlockBackend *blk)
 {
@@ -1335,8 +1340,17 @@ blk_co_do_preadv_part(BlockBackend *blk, int64_t offset, int64_t bytes,
     BlockDriverState *bs;
     IO_CODE();
 
+#ifdef CONFIG_IOS
+    ios_blk_log(blk, "co-read enter", 0, offset, bytes, qiov);
+#endif
     blk_wait_while_drained(blk);
+#ifdef CONFIG_IOS
+    ios_blk_log(blk, "co-read after-drain", 0, offset, bytes, qiov);
+#endif
     GRAPH_RDLOCK_GUARD();
+#ifdef CONFIG_IOS
+    ios_blk_log(blk, "co-read after-rdlock", 0, offset, bytes, qiov);
+#endif
 
     /* Call blk_bs() only after waiting, the graph may have changed */
     bs = blk_bs(blk);
@@ -1344,10 +1358,16 @@ blk_co_do_preadv_part(BlockBackend *blk, int64_t offset, int64_t bytes,
 
     ret = blk_check_byte_request(blk, offset, bytes);
     if (ret < 0) {
+#ifdef CONFIG_IOS
+        ios_blk_log(blk, "co-read bad-request", ret, offset, bytes, qiov);
+#endif
         return ret;
     }
 
     bdrv_inc_in_flight(bs);
+#ifdef CONFIG_IOS
+    ios_blk_log(blk, "co-read bdrv-call", 0, offset, bytes, qiov);
+#endif
 
     /* throttling disk I/O */
     if (blk->public.throttle_group_member.throttle_state) {
@@ -1357,6 +1377,9 @@ blk_co_do_preadv_part(BlockBackend *blk, int64_t offset, int64_t bytes,
 
     ret = bdrv_co_preadv_part(blk->root, offset, bytes, qiov, qiov_offset,
                               flags);
+#ifdef CONFIG_IOS
+    ios_blk_log(blk, "co-read bdrv-return", ret, offset, bytes, qiov);
+#endif
     bdrv_dec_in_flight(bs);
     return ret;
 }
@@ -1504,6 +1527,47 @@ typedef struct BlkRwCo {
     BdrvRequestFlags flags;
 } BlkRwCo;
 
+#ifdef CONFIG_IOS
+static bool ios_blk_trace_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_BLK_TRACE");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+static bool ios_blk_should_log(uint64_t count)
+{
+    return ios_blk_trace_enabled() &&
+           (count <= 96 || (count % 1024) == 0);
+}
+
+static void ios_blk_log(BlockBackend *blk, const char *phase, int ret,
+                        int64_t offset, int64_t bytes, QEMUIOVector *qiov)
+{
+    static uint64_t count;
+    uint64_t n = ++count;
+
+    if (!ios_blk_should_log(n)) {
+        return;
+    }
+
+    fprintf(stderr,
+            "xemu_ios: blk %s #%" PRIu64
+            " ret=%d blk=%p ctx=%p curctx=%p in_co=%d"
+            " offset=0x%016" PRIx64 " bytes=0x%016" PRIx64
+            " qiov=%p qiov_size=0x%016" PRIx64 "\n",
+            phase, n, ret, blk, blk ? blk_get_aio_context(blk) : NULL,
+            qemu_get_current_aio_context(), qemu_in_coroutine(),
+            (uint64_t)offset, (uint64_t)bytes, qiov,
+            qiov ? (uint64_t)qiov->size : 0);
+}
+#endif
+
 int blk_make_zero(BlockBackend *blk, BdrvRequestFlags flags)
 {
     GLOBAL_STATE_CODE();
@@ -1585,8 +1649,17 @@ static BlockAIOCB *blk_aio_prwv(BlockBackend *blk, int64_t offset,
     BlkAioEmAIOCB *acb;
     Coroutine *co;
 
+#ifdef CONFIG_IOS
+    ios_blk_log(blk, "aio-prwv enter", 0, offset, bytes, iobuf);
+#endif
     blk_inc_in_flight(blk);
+#ifdef CONFIG_IOS
+    ios_blk_log(blk, "aio-prwv after-inc", 0, offset, bytes, iobuf);
+#endif
     acb = blk_aio_get(&blk_aio_em_aiocb_info, blk, cb, opaque);
+#ifdef CONFIG_IOS
+    ios_blk_log(blk, "aio-prwv after-get", 0, offset, bytes, iobuf);
+#endif
     acb->rwco = (BlkRwCo) {
         .blk    = blk,
         .offset = offset,
@@ -1596,9 +1669,20 @@ static BlockAIOCB *blk_aio_prwv(BlockBackend *blk, int64_t offset,
     };
     acb->bytes = bytes;
     acb->has_returned = false;
+#ifdef CONFIG_IOS
+    ios_blk_log(blk, "aio-prwv after-init", 0, offset, bytes, iobuf);
+    ios_blk_log(blk, "aio-prwv before-co-create", 0, offset, bytes, iobuf);
+#endif
 
     co = qemu_coroutine_create(co_entry, acb);
+#ifdef CONFIG_IOS
+    ios_blk_log(blk, "aio-prwv co-created", 0, offset, bytes, iobuf);
+#endif
     aio_co_enter(qemu_get_current_aio_context(), co);
+#ifdef CONFIG_IOS
+    ios_blk_log(blk, "aio-prwv after-enter", acb->rwco.ret, offset, bytes,
+                iobuf);
+#endif
 
     acb->has_returned = true;
     if (acb->rwco.ret != NOT_DONE) {
@@ -1606,6 +1690,9 @@ static BlockAIOCB *blk_aio_prwv(BlockBackend *blk, int64_t offset,
                                          blk_aio_complete_bh, acb);
     }
 
+#ifdef CONFIG_IOS
+    ios_blk_log(blk, "aio-prwv return", acb->rwco.ret, offset, bytes, iobuf);
+#endif
     return &acb->common;
 }
 
@@ -1616,8 +1703,16 @@ static void coroutine_fn blk_aio_read_entry(void *opaque)
     QEMUIOVector *qiov = rwco->iobuf;
 
     assert(qiov->size == acb->bytes);
+#ifdef CONFIG_IOS
+    ios_blk_log(rwco->blk, "aio-read-entry enter", rwco->ret, rwco->offset,
+                acb->bytes, qiov);
+#endif
     rwco->ret = blk_co_do_preadv_part(rwco->blk, rwco->offset, acb->bytes, qiov,
                                       0, rwco->flags);
+#ifdef CONFIG_IOS
+    ios_blk_log(rwco->blk, "aio-read-entry return", rwco->ret, rwco->offset,
+                acb->bytes, qiov);
+#endif
     blk_aio_complete(acb);
 }
 

@@ -893,6 +893,24 @@ static void ide_dma_cb(void *opaque, int ret)
     bool stay_active = false;
     int32_t prep_size = 0;
 
+#ifdef CONFIG_IOS
+    static uint64_t ios_ide_dma_cb_count;
+    uint64_t ios_dma_cb_n = ++ios_ide_dma_cb_count;
+    const char *ios_ide_trace = getenv("XEMU_IOS_IDE_TRACE");
+    bool ios_dma_cb_log = ios_ide_trace && strcmp(ios_ide_trace, "0") != 0 &&
+                          (ios_dma_cb_n <= 48 || (ios_dma_cb_n % 1024) == 0);
+    if (ios_dma_cb_log) {
+        fprintf(stderr,
+                "xemu_ios: ide dma cb enter #%" PRIu64
+                " ret=%d bus=%d unit=%u cmd=%d status=0x%02x"
+                " nsector=%u io_size=%d sg=0x%016" PRIx64 " aiocb=%p\n",
+                ios_dma_cb_n, ret, s->bus ? s->bus->bus_id : -1,
+                s->unit, s->dma_cmd, s->status, s->nsector,
+                s->io_buffer_size, (uint64_t)s->sg.size,
+                s->bus && s->bus->dma ? s->bus->dma->aiocb : NULL);
+    }
+#endif
+
     if (ret == -EINVAL) {
         ide_dma_error(s);
         return;
@@ -937,7 +955,24 @@ static void ide_dma_cb(void *opaque, int ret)
     n = s->nsector;
     s->io_buffer_index = 0;
     s->io_buffer_size = n * 512;
+#ifdef CONFIG_IOS
+    if (ios_dma_cb_log) {
+        fprintf(stderr,
+                "xemu_ios: ide dma cb prepare-begin #%" PRIu64
+                " n=%d io_size=%d\n",
+                ios_dma_cb_n, n, s->io_buffer_size);
+    }
+#endif
     prep_size = s->bus->dma->ops->prepare_buf(s->bus->dma, s->io_buffer_size);
+#ifdef CONFIG_IOS
+    if (ios_dma_cb_log) {
+        fprintf(stderr,
+                "xemu_ios: ide dma cb prepare-end #%" PRIu64
+                " prep=%d io_size=%d sg=0x%016" PRIx64 "\n",
+                ios_dma_cb_n, prep_size, s->io_buffer_size,
+                (uint64_t)s->sg.size);
+    }
+#endif
     /* prepare_buf() must succeed and respect the limit */
     assert(prep_size >= 0 && prep_size <= n * 512);
 
@@ -968,10 +1003,26 @@ static void ide_dma_cb(void *opaque, int ret)
     offset = sector_num << BDRV_SECTOR_BITS;
     switch (s->dma_cmd) {
     case IDE_DMA_READ:
+#ifdef CONFIG_IOS
+        if (ios_dma_cb_log) {
+            fprintf(stderr,
+                    "xemu_ios: ide dma cb queue-read #%" PRIu64
+                    " offset=0x%016" PRIx64 " n=%d sg=0x%016" PRIx64 "\n",
+                    ios_dma_cb_n, offset, n, (uint64_t)s->sg.size);
+        }
+#endif
         s->bus->dma->aiocb = dma_blk_read(s->blk, &s->sg, offset,
                                           BDRV_SECTOR_SIZE, ide_dma_cb, s);
         break;
     case IDE_DMA_WRITE:
+#ifdef CONFIG_IOS
+        if (ios_dma_cb_log) {
+            fprintf(stderr,
+                    "xemu_ios: ide dma cb queue-write #%" PRIu64
+                    " offset=0x%016" PRIx64 " n=%d sg=0x%016" PRIx64 "\n",
+                    ios_dma_cb_n, offset, n, (uint64_t)s->sg.size);
+        }
+#endif
         s->bus->dma->aiocb = dma_blk_write(s->blk, &s->sg, offset,
                                            BDRV_SECTOR_SIZE, ide_dma_cb, s);
         break;
@@ -983,6 +1034,16 @@ static void ide_dma_cb(void *opaque, int ret)
     default:
         abort();
     }
+#ifdef CONFIG_IOS
+    if (ios_dma_cb_log) {
+        fprintf(stderr,
+                "xemu_ios: ide dma cb queued #%" PRIu64
+                " offset=0x%016" PRIx64 " n=%d sg=0x%016" PRIx64
+                " aiocb=%p\n",
+                ios_dma_cb_n, offset, n, (uint64_t)s->sg.size,
+                s->bus->dma->aiocb);
+    }
+#endif
     return;
 
 eot:
@@ -990,6 +1051,14 @@ eot:
         block_acct_done(blk_get_stats(s->blk), &s->acct);
     }
     ide_set_inactive(s, stay_active);
+#ifdef CONFIG_IOS
+    if (ios_dma_cb_log) {
+        fprintf(stderr,
+                "xemu_ios: ide dma cb eot #%" PRIu64
+                " status=0x%02x remaining=%u stay=%d\n",
+                ios_dma_cb_n, s->status, s->nsector, stay_active);
+    }
+#endif
 }
 
 static void ide_sector_start_dma(IDEState *s, enum ide_dma_cmd dma_cmd)
@@ -2839,6 +2908,19 @@ void ide_bus_init_output_irq(IDEBus *bus, qemu_irq irq_out)
 void ide_bus_set_irq(IDEBus *bus)
 {
     if (!(bus->cmd & IDE_CTRL_DISABLE_IRQ)) {
+#ifdef CONFIG_IOS
+        static uint64_t ios_ide_irq_count;
+        uint64_t n = ++ios_ide_irq_count;
+        const char *ios_ide_trace = getenv("XEMU_IOS_IDE_TRACE");
+        if (ios_ide_trace && strcmp(ios_ide_trace, "0") != 0 &&
+            (n <= 64 || (n % 1024) == 0)) {
+            fprintf(stderr,
+                    "xemu_ios: ide irq raise #%" PRIu64
+                    " bus=%d unit=%u cmd=0x%02x retry=%u err=0x%x\n",
+                    n, bus->bus_id, bus->unit, bus->cmd, bus->retry_unit,
+                    bus->error_status);
+        }
+#endif
         qemu_irq_raise(bus->irq);
     }
 }

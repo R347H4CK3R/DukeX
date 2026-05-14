@@ -25,6 +25,7 @@ ss = import('sourceset')
 fs = import('fs')
 
 host_os = host_machine.system()
+host_is_ios = false
 config_host = keyval.load(meson.current_build_dir() / 'config-host.mak')
 
 # Temporary directory used for files created while
@@ -81,6 +82,15 @@ cmake_macos_arch = host_machine.cpu() == 'aarch64' ? 'arm64' : host_machine.cpu(
 cc = meson.get_compiler('c')
 cxx = meson.get_compiler('cpp')
 all_languages = ['c', 'cpp']
+if host_os == 'darwin'
+  host_is_ios = cc.compiles('''
+    #include <TargetConditionals.h>
+    #if !TARGET_OS_IPHONE || TARGET_OS_SIMULATOR
+    #error Not an iPhoneOS device target
+    #endif
+    int main(void) { return 0; }''',
+    name: 'iPhoneOS device target')
+endif
 if host_os == 'darwin' and \
    add_languages('objc', required: true, native: false)
   all_languages += ['objc']
@@ -521,6 +531,7 @@ endif
 
 coroutine_backend = get_option('coroutine_backend')
 ucontext_probe = '''
+  #define _XOPEN_SOURCE 700
   #include <ucontext.h>
   #ifdef __stub_makecontext
   #error Ignoring glibc stub makecontext which will always fail
@@ -536,7 +547,7 @@ if host_os == 'windows'
 elif host_os == 'emscripten'
   supported_backends += ['wasm']
 else
-  if host_os != 'darwin' and cc.links(ucontext_probe)
+  if cc.links(ucontext_probe)
     supported_backends += ['ucontext']
   endif
   supported_backends += ['sigaltstack']
@@ -1879,7 +1890,7 @@ opengl = not_found
 if not get_option('opengl').auto() or have_system or have_vhost_user_gpu
   # FIXME: Use meson's 'gl' dep
   if host_os == 'darwin'
-    opengl_libs=['-framework', 'OpenGL']
+    opengl_libs = host_is_ios ? ['-framework', 'OpenGLES'] : ['-framework', 'OpenGL']
   elif host_os == 'windows'
     opengl_libs=['-lopengl32', '-lgdi32']
   elif host_os == 'linux'
@@ -1889,6 +1900,9 @@ if not get_option('opengl').auto() or have_system or have_vhost_user_gpu
   endif
 
   opengl = declare_dependency(link_args: opengl_libs, dependencies: epoxy)
+  if host_is_ios
+    meson.override_dependency('gl', declare_dependency(link_args: opengl_libs))
+  endif
 endif
 
 gbm = not_found
@@ -2380,6 +2394,16 @@ libglslang = not_found
 
 if host_os == 'windows'
   vulkan = declare_dependency(compile_args: ['-DVK_USE_PLATFORM_WIN32_KHR'])
+elif host_is_ios
+  vulkan_dep = dependency('vulkan', method: 'pkg-config', required: false)
+  if vulkan_dep.found()
+    vulkan = declare_dependency(
+      compile_args: [
+        '-DVK_ENABLE_BETA_EXTENSIONS=1',
+        '-DVK_USE_PLATFORM_METAL_EXT=1',
+      ],
+      dependencies: vulkan_dep)
+  endif
 elif host_os == 'linux'
   vulkan = dependency('vulkan')
 endif
@@ -2404,6 +2428,9 @@ if vulkan.found()
   volk_opts.add_cmake_defines({'VOLK_STATIC_DEFINES': 'VK_NO_PROTOTYPES'})
   if host_os == 'windows'
     volk_opts.append_compile_args('c', '-DVK_USE_PLATFORM_WIN32_KHR=1')
+  elif host_is_ios
+    volk_opts.append_compile_args('c', '-DVK_ENABLE_BETA_EXTENSIONS=1')
+    volk_opts.append_compile_args('c', '-DVK_USE_PLATFORM_METAL_EXT=1')
   endif
   volk_subproj = cmake.subproject('volk', options: volk_opts)
   volk = declare_dependency(compile_args: ['-DVK_NO_PROTOTYPES'],
@@ -2636,6 +2663,7 @@ config_host_data.set('CONFIG_FREEBSD', host_os == 'freebsd')
 config_host_data.set('CONFIG_CAPSTONE', capstone.found())
 config_host_data.set('CONFIG_COCOA', cocoa.found())
 config_host_data.set('CONFIG_DARWIN', host_os == 'darwin')
+config_host_data.set('CONFIG_IOS', host_is_ios)
 config_host_data.set('CONFIG_FDT', fdt.found())
 config_host_data.set('CONFIG_FUZZ', get_option('fuzzing'))
 config_host_data.set('CONFIG_GCOV', get_option('b_coverage'))
@@ -4609,7 +4637,7 @@ foreach target : target_dirs
     execs = [{
       'name': 'qemu-system-' + target_name,
       'win_subsystem': 'console',
-      'sources': files('system/main.c'),
+      'sources': host_is_ios ? files('ios/xemu-ios-main.c') : files('system/main.c'),
       'dependencies': [sdl]
     }]
     if host_os == 'windows' and (sdl.found() or gtk.found())
@@ -4651,6 +4679,18 @@ foreach target : target_dirs
                link_depends: [block_syms, qemu_syms],
                link_args: link_args,
                win_subsystem: exe['win_subsystem'])
+
+    if host_is_ios and target == 'i386-softmmu' and exe['name'] == 'qemu-system-i386'
+      shared_library('xemu-ios-core',
+                     files('ios/xemu-ios-core.c'),
+                     install: false,
+                     build_by_default: false,
+                     c_args: c_args,
+                     dependencies: arch_deps + exe['dependencies'],
+                     objects: lib.extract_all_objects(recursive: true),
+                     link_depends: [block_syms, qemu_syms],
+                     link_args: link_args + ['-Wl,-install_name,@rpath/libxemu-ios-core.dylib'])
+    endif
 
     if host_os == 'darwin'
       icon = 'pc-bios/qemu.rsrc'

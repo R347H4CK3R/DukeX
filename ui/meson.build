@@ -40,7 +40,7 @@ endif
 
 subdir('xui')
 
-if host_os == 'darwin'
+if host_os == 'darwin' and not host_is_ios
   xemu_cocoa = dependency('appleframeworks', modules: 'Cocoa')
   xemu_ss.add(xemu_cocoa)
 endif
@@ -49,6 +49,8 @@ if host_os == 'linux'
   xemu_ss.add([gtk, files('xemu-os-utils-linux.c')])
 elif host_os == 'windows'
   xemu_ss.add(files('xemu-os-utils-windows.c'))
+elif host_os == 'darwin' and host_is_ios
+  xemu_ss.add(files('xemu-os-utils-ios.m'))
 elif host_os == 'darwin'
   xemu_ss.add(files('xemu-os-utils-macos.m'))
 endif

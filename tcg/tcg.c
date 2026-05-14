@@ -39,6 +39,9 @@
 #include "exec/tlb-common.h"
 #include "tcg/startup.h"
 #include "tcg/tcg-op-common.h"
+#ifdef CONFIG_IOS
+#include "tcg/ios-jit.h"
+#endif
 
 #if UINTPTR_MAX == UINT32_MAX
 # define ELF_CLASS  ELFCLASS32
@@ -1933,6 +1936,14 @@ void tcg_prologue_init(void)
     perf_report_prologue(s->code_gen_ptr, prologue_size);
 
 #ifndef CONFIG_TCG_INTERPRETER
+#ifdef CONFIG_IOS
+    if (xemu_ios_universal_jit_is_enabled() &&
+        !xemu_ios_universal_jit_copy_code((void *)tcg_splitwx_to_rx(s->code_buf),
+                                          s->code_buf, prologue_size)) {
+        error_report("Universal.js failed to copy TCG prologue into RX memory");
+        exit(1);
+    }
+#endif
     flush_idcache_range((uintptr_t)tcg_splitwx_to_rx(s->code_buf),
                         (uintptr_t)s->code_buf, prologue_size);
 #endif

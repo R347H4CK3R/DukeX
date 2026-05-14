@@ -37,6 +37,114 @@
 #include "tcg-accel-ops-rr.h"
 #include "tcg-accel-ops-icount.h"
 
+#ifdef CONFIG_IOS
+static void ios_rr_watchdog_log(const char *fmt, ...)
+{
+    char buf[512];
+    va_list ap;
+    int len;
+
+    va_start(ap, fmt);
+    len = vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+
+    if (len <= 0) {
+        return;
+    }
+    if (len >= (int)sizeof(buf)) {
+        len = (int)sizeof(buf) - 1;
+    }
+    (void)write(STDERR_FILENO, buf, len);
+}
+
+static bool ios_rr_return_trace_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_RR_RETURN_TRACE");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+static gpointer ios_rr_watchdog_thread(gpointer opaque)
+{
+    CPUState *cpu = opaque;
+    const char *mode = getenv("XEMU_IOS_TCG_WATCHDOG");
+    bool kick_cpu = !mode || (g_ascii_strcasecmp(mode, "log") != 0 &&
+                              g_ascii_strcasecmp(mode, "log-only") != 0);
+    uint64_t ticks = 0;
+    vaddr last_pc = 0;
+    unsigned stable_ticks = 0;
+
+    ios_rr_watchdog_log("xemu_ios: rr watchdog mode=%s\n",
+                        kick_cpu ? "kick" : "log-only");
+    g_usleep(10 * G_USEC_PER_SEC);
+
+    for (;;) {
+        vaddr pc = 0;
+
+        g_usleep(250 * 1000);
+        if (kick_cpu) {
+            cpu_exit(cpu);
+        }
+        ticks++;
+
+        if ((ticks % 4) != 0) {
+            continue;
+        }
+
+        if (cpu->cc->get_pc) {
+            pc = cpu->cc->get_pc(cpu);
+        }
+
+        if (pc == last_pc) {
+            stable_ticks++;
+        } else {
+            last_pc = pc;
+            stable_ticks = 0;
+        }
+
+        ios_rr_watchdog_log(
+            "xemu_ios: rr watchdog tick cpu=%d ticks=%" PRIu64
+            " pc=0x%016" VADDR_PRIx " stable=%u can_run=%d"
+            " halted=%d stop=%d exit=%d irq=0x%x\n",
+            cpu->cpu_index, ticks, pc, stable_ticks,
+            cpu_can_run(cpu), cpu->halted, cpu->stop,
+            qatomic_read(&cpu->exit_request),
+            qatomic_read(&cpu->interrupt_request));
+    }
+
+    return NULL;
+}
+
+static void ios_rr_start_watchdog(CPUState *cpu)
+{
+    static gsize started;
+    const char *mode = getenv("XEMU_IOS_TCG_WATCHDOG");
+
+    if (mode && (g_ascii_strcasecmp(mode, "0") == 0 ||
+                 g_ascii_strcasecmp(mode, "false") == 0 ||
+                 g_ascii_strcasecmp(mode, "off") == 0 ||
+                 g_ascii_strcasecmp(mode, "no") == 0)) {
+        ios_rr_watchdog_log("xemu_ios: rr watchdog disabled cpu=%d\n",
+                            cpu->cpu_index);
+        return;
+    }
+
+    if (g_once_init_enter(&started)) {
+        GThread *thread = g_thread_new("ios-rr-watchdog",
+                                       ios_rr_watchdog_thread, cpu);
+        g_thread_unref(thread);
+        g_once_init_leave(&started, 1);
+        ios_rr_watchdog_log("xemu_ios: rr watchdog started cpu=%d\n",
+                            cpu->cpu_index);
+    }
+}
+#endif
+
 /* Kick all RR vCPUs */
 void rr_kick_vcpu_thread(CPUState *unused)
 {
@@ -195,6 +303,11 @@ static void *rr_cpu_thread_fn(void *arg)
     cpu->neg.can_do_io = true;
     cpu_thread_signal_created(cpu);
     qemu_guest_random_seed_thread_part2(cpu->random_seed);
+#ifdef CONFIG_IOS
+    fprintf(stderr, "xemu_ios: rr cpu thread started cpu=%d tid=%" PRId64 "\n",
+            cpu->cpu_index, (int64_t)cpu->thread_id);
+    ios_rr_start_watchdog(cpu);
+#endif
 
     /* wait for initial kick-off after machine start */
     while (cpu_is_stopped(first_cpu)) {
@@ -277,6 +390,9 @@ static void *rr_cpu_thread_fn(void *arg)
 
             if (cpu_can_run(cpu)) {
                 int r;
+#ifdef CONFIG_IOS
+                static int64_t last_return_log_us;
+#endif
 
                 bql_unlock();
                 if (icount_enabled()) {
@@ -287,6 +403,21 @@ static void *rr_cpu_thread_fn(void *arg)
                     icount_process_data(cpu);
                 }
                 bql_lock();
+
+#ifdef CONFIG_IOS
+                int64_t now = g_get_monotonic_time();
+                if (ios_rr_return_trace_enabled() &&
+                    (now - last_return_log_us >= G_USEC_PER_SEC ||
+                     r != EXCP_INTERRUPT)) {
+                    last_return_log_us = now;
+                    fprintf(stderr,
+                            "xemu_ios: rr tcg_cpu_exec returned cpu=%d"
+                            " r=%d halted=%d irq=0x%x exit=%d\n",
+                            cpu->cpu_index, r, cpu->halted,
+                            qatomic_read(&cpu->interrupt_request),
+                            qatomic_read(&cpu->exit_request));
+                }
+#endif
 
                 if (r == EXCP_DEBUG) {
                     cpu_handle_guest_debug(cpu);

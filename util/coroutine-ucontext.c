@@ -23,6 +23,9 @@
 #define _FORTIFY_SOURCE 0
 
 #include "qemu/osdep.h"
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
 #include <ucontext.h>
 #include "qemu/coroutine_int.h"
 #include "qemu/coroutine-tls.h"

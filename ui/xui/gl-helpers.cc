@@ -29,9 +29,36 @@
 #include <fpng.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
+#include <unordered_map>
 #include <vector>
 
 #include "ui/shader/xemu-logo-frag.h"
+
+#ifdef CONFIG_IOS
+#define XEMU_GL_TEXTURE_WRAP_CLAMP GL_CLAMP_TO_EDGE
+static const char xemu_ios_glsl_header[] =
+    "#version 300 es\n"
+    "precision highp float;\n"
+    "precision highp int;\n";
+
+static const char *SkipGlslVersionLine(const char *src)
+{
+    const char *p = src;
+    while (*p == '\n' || *p == '\r' || *p == ' ' || *p == '\t') {
+        p++;
+    }
+
+    if (strncmp(p, "#version", 8) != 0) {
+        return src;
+    }
+
+    const char *line_end = strchr(p, '\n');
+    return line_end ? line_end + 1 : p;
+}
+#else
+#define XEMU_GL_TEXTURE_WRAP_CLAMP GL_CLAMP_TO_BORDER
+#endif
 
 Fbo *controller_fbo, *xmu_fbo, *logo_fbo;
 GLuint g_controller_duke_tex, g_controller_s_tex, g_logo_tex, g_icon_tex, g_xmu_tex;
@@ -69,8 +96,56 @@ GLint Fbo::vp[4];
 GLint Fbo::original_fbo;
 bool Fbo::blend;
 
+static std::unordered_map<GLuint, std::pair<int, int>> g_texture_dimensions;
+
 DecalShader *NewDecalShader(enum ShaderType type);
 void DeleteDecalShader(DecalShader *s);
+
+void RegisterTextureDimensions(GLuint tex, int width, int height)
+{
+    if (tex == 0 || width <= 0 || height <= 0) {
+        return;
+    }
+
+    g_texture_dimensions[tex] = { width, height };
+}
+
+static void UnregisterTextureDimensions(GLuint tex)
+{
+    if (tex != 0) {
+        g_texture_dimensions.erase(tex);
+    }
+}
+
+bool GetTextureDimensions(GLuint tex, int *width, int *height)
+{
+    auto it = g_texture_dimensions.find(tex);
+    if (it == g_texture_dimensions.end()) {
+        return false;
+    }
+
+    *width = it->second.first;
+    *height = it->second.second;
+    return true;
+}
+
+void GetBoundTextureDimensionsOr(int fallback_width, int fallback_height,
+                                 int *width, int *height)
+{
+#ifdef CONFIG_IOS
+    GLint tex = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex);
+    if (GetTextureDimensions((GLuint)tex, width, height)) {
+        return;
+    }
+
+    *width = fallback_width > 0 ? fallback_width : 1;
+    *height = fallback_height > 0 ? fallback_height : 1;
+#else
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, width);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, height);
+#endif
+}
 
 static GLint GetCurrentFbo()
 {
@@ -88,12 +163,15 @@ Fbo::Fbo(int width, int height)
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
+                    XEMU_GL_TEXTURE_WRAP_CLAMP);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
+                    XEMU_GL_TEXTURE_WRAP_CLAMP);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA,
                  GL_UNSIGNED_BYTE, NULL);
+    RegisterTextureDimensions(tex, w, h);
 
     GLint original = GetCurrentFbo();
 
@@ -110,6 +188,7 @@ Fbo::Fbo(int width, int height)
 
 Fbo::~Fbo()
 {
+    UnregisterTextureDimensions(tex);
     glDeleteTextures(1, &tex);
     glDeleteFramebuffers(1, &fbo);
 }
@@ -150,11 +229,12 @@ static GLuint InitTexture(unsigned char *data, int width, int height,
     assert(tex != 0);
     glBindTexture(GL_TEXTURE_2D, tex);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL,  0);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     XEMU_GL_TEXTURE_WRAP_CLAMP);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     XEMU_GL_TEXTURE_WRAP_CLAMP);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    RegisterTextureDimensions(tex, width, height);
     return tex;
 }
 
@@ -179,18 +259,32 @@ static GLuint Shader(GLenum type, const char *src)
     GLuint shader = glCreateShader(type);
     assert(shader && "Failed to create shader");
 
+#ifdef CONFIG_IOS
+    const char *body = SkipGlslVersionLine(src);
+    const char *ios_src[] = { xemu_ios_glsl_header, body };
+    glShaderSource(shader, 2, ios_src, NULL);
+#else
     glShaderSource(shader, 1, &src, NULL);
+#endif
     glCompileShader(shader);
 
     GLint status;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
     if (status != GL_TRUE) {
         glGetShaderInfoLog(shader, sizeof(err_buf), NULL, err_buf);
+#ifdef CONFIG_IOS
+        fprintf(stderr,
+                "Shader compilation failed: %s\n\n"
+                "[Shader Source]\n"
+                "%s%s\n",
+                err_buf, xemu_ios_glsl_header, body);
+#else
         fprintf(stderr,
                 "Shader compilation failed: %s\n\n"
                 "[Shader Source]\n"
                 "%s\n",
                 err_buf, src);
+#endif
         assert(0);
     }
 
@@ -216,7 +310,7 @@ in vec2 in_Texcoord;
 out vec2 Texcoord;
 void main() {
     vec2 t = in_Texcoord;
-    if (in_FlipY) t.y = 1-t.y;
+    if (in_FlipY) t.y = 1.0 - t.y;
     Texcoord = t*in_TexScaleOffset.xy + in_TexScaleOffset.zw;
     gl_Position = vec4(in_Position*in_ScaleOffset.xy+in_ScaleOffset.zw, 0.0, 1.0);
 }
@@ -240,7 +334,8 @@ uniform sampler2D tex;
 uniform uint palette[256];
 float gamma_ch(int ch, float col)
 {
-    return float(bitfieldExtract(palette[uint(col * 255.0)], ch*8, 8)) / 255.0;
+    uint channel = (palette[int(col * 255.0)] >> uint(ch * 8)) & 255u;
+    return float(channel) / 255.0;
 }
 
 vec4 gamma(vec4 col)
@@ -291,7 +386,9 @@ void main() {
     s->prog = glCreateProgram();
     glAttachShader(s->prog, vert);
     glAttachShader(s->prog, frag);
+#ifndef CONFIG_IOS
     glBindFragDataLocation(s->prog, 0, "out_Color");
+#endif
     glLinkProgram(s->prog);
     glUseProgram(s->prog);
 
@@ -368,8 +465,9 @@ static void RenderDecal(DecalShader *s, float x, float y, float w, float h,
     tex_h = (int)tex_h;
 
     int tw_i, th_i;
-    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH,  &tw_i);
-    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &th_i);
+    GetBoundTextureDimensionsOr((int)(tex_x + tex_w),
+                                (int)(tex_y + tex_h),
+                                &tw_i, &th_i);
     float tw = tw_i, th = th_i;
 
 #define COL(color, c) (float)(((color) >> ((c)*8)) & 0xff) / 255.0
@@ -947,8 +1045,7 @@ void RenderFramebuffer(GLint tex, int width, int height, bool flip)
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex);
-    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tw);
-    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &th);
+    GetBoundTextureDimensionsOr(width, height, &tw, &th);
 
     // Calculate scaling factors
     if (g_config.display.ui.fit == CONFIG_DISPLAY_UI_FIT_STRETCH) {
@@ -981,8 +1078,9 @@ bool RenderFramebufferToPng(GLuint tex, bool flip, std::vector<uint8_t> &png, in
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex);
-    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
-    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+    GetBoundTextureDimensionsOr(max_width ? max_width : 640,
+                                max_height ? max_height : 480,
+                                &width, &height);
 
     width = height * GetDisplayAspectRatio(width, height);
 

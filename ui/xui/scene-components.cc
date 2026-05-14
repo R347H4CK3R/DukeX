@@ -23,6 +23,12 @@
 #include "input-manager.hh"
 #include "viewport-manager.hh"
 
+#ifdef CONFIG_IOS
+#define XEMU_GL_TEXTURE_WRAP_CLAMP GL_CLAMP_TO_EDGE
+#else
+#define XEMU_GL_TEXTURE_WRAP_CLAMP GL_CLAMP_TO_BORDER
+#endif
+
 BackgroundGradient::BackgroundGradient()
 : m_animation(0.2, 0.2) {}
 
@@ -220,8 +226,8 @@ public:
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, screenshot);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL,  0);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     GL_CLAMP_TO_BORDER);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     GL_CLAMP_TO_BORDER);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     XEMU_GL_TEXTURE_WRAP_CLAMP);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     XEMU_GL_TEXTURE_WRAP_CLAMP);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);

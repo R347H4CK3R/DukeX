@@ -995,7 +995,11 @@ static MString* psh_convert(struct PixelShader *ps)
                              "}\n");
     }
 
-    if (ps->state->z_perspective) {
+    if (ps->opts.use_host_depth_interpolation) {
+        mstring_append(
+            clip,
+            "precise float zvalue = gl_FragCoord.z * clipRange.y;\n");
+    } else if (ps->state->z_perspective) {
         mstring_append(
             clip,
             "vec2 unscaled_xy = gl_FragCoord.xy / surfaceScale;\n"

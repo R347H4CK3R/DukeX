@@ -23,6 +23,11 @@ typedef struct DisplaySurface {
     GLenum gltype;
     GLuint texture;
     GLuint mem_obj;
+    int texture_width;
+    int texture_height;
+    GLenum texture_internal_format;
+    GLenum texture_format;
+    GLenum texture_type;
 #endif
     qemu_pixman_shareable share_handle;
     uint32_t share_handle_offset;

@@ -27,6 +27,90 @@
 #include "tcg/helper-tcg.h"
 #include "../seg_helper.h"
 
+#ifdef CONFIG_IOS
+static void ios_x86_log_exec_interrupt(CPUState *cs, CPUX86State *env,
+                                       const char *phase, int raw,
+                                       int pending, int intno)
+{
+    static int trace_enabled = -1;
+    static uint64_t count;
+    static int64_t last_log_us;
+    uint64_t pc = (uint64_t)(env->eip + env->segs[R_CS].base);
+    bool low_boot_pc = pc >= 0x0000000000400000ULL &&
+                       pc < 0x0000000000410000ULL;
+    int64_t now;
+
+    if (trace_enabled < 0) {
+        const char *value = getenv("XEMU_IOS_IRQ_TRACE");
+        trace_enabled = value && g_str_equal(value, "1");
+    }
+    if (!trace_enabled ||
+        (!(raw & CPU_INTERRUPT_HARD) && pending != CPU_INTERRUPT_HARD)) {
+        return;
+    }
+
+    count++;
+    if (count > 32 && (count % 4096) != 0 && intno >= 0 && !low_boot_pc) {
+        return;
+    }
+    now = g_get_monotonic_time();
+    if (count > 32 && (count % 4096) != 0 &&
+        now - last_log_us < 500 * 1000) {
+        return;
+    }
+    last_log_us = now;
+
+    fprintf(stderr,
+            "xemu_ios: irq exec %s #%" PRIu64
+            " raw=0x%x pending=0x%x intno=%d pc=0x%016" PRIx64
+            " eflags=0x%08" PRIx64 " hflags=0x%08x hflags2=0x%08x"
+            " eax=0x%08" PRIx64 " ebx=0x%08" PRIx64
+            " ecx=0x%08" PRIx64 " edx=0x%08" PRIx64
+            " esi=0x%08" PRIx64 " edi=0x%08" PRIx64
+            " esp=0x%08" PRIx64 " ebp=0x%08" PRIx64 "\n",
+            phase, count, raw, pending, intno, pc,
+            (uint64_t)env->eflags, env->hflags, env->hflags2,
+            (uint64_t)env->regs[R_EAX], (uint64_t)env->regs[R_EBX],
+            (uint64_t)env->regs[R_ECX], (uint64_t)env->regs[R_EDX],
+            (uint64_t)env->regs[R_ESI], (uint64_t)env->regs[R_EDI],
+            (uint64_t)env->regs[R_ESP], (uint64_t)env->regs[R_EBP]);
+}
+
+static void ios_x86_log_hard_vector(CPUState *cs, CPUX86State *env,
+                                    int raw, int intno)
+{
+    static int trace_enabled = -1;
+    static uint64_t count;
+    static int64_t last_log_us;
+    uint64_t pc = (uint64_t)(env->eip + env->segs[R_CS].base);
+    int64_t now = g_get_monotonic_time();
+
+    if (trace_enabled < 0) {
+        const char *value = getenv("XEMU_IOS_IRQ_TRACE");
+        trace_enabled = value && g_str_equal(value, "1");
+    }
+    if (!trace_enabled) {
+        return;
+    }
+
+    count++;
+    if (count > 64 && intno >= 0 && (count % 4096) != 0 &&
+        now - last_log_us < G_USEC_PER_SEC) {
+        return;
+    }
+    last_log_us = now;
+
+    fprintf(stderr,
+            "xemu_ios: hard irq vector #%" PRIu64
+            " raw=0x%x intno=%d pc=0x%016" PRIx64
+            " eflags=0x%08" PRIx64 " hflags=0x%08x hflags2=0x%08x"
+            " exit=%d irq=0x%x\n",
+            count, raw, intno, pc, (uint64_t)env->eflags,
+            env->hflags, env->hflags2, qatomic_read(&cs->exit_request),
+            qatomic_read(&cs->interrupt_request));
+}
+#endif
+
 void helper_syscall(CPUX86State *env, int next_eip_addend)
 {
     int selector;
@@ -166,12 +250,22 @@ bool x86_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 {
     X86CPU *cpu = X86_CPU(cs);
     CPUX86State *env = &cpu->env;
+    int raw_interrupt_request = interrupt_request;
     int intno;
 
     interrupt_request = x86_cpu_pending_interrupt(cs, interrupt_request);
     if (!interrupt_request) {
+#ifdef CONFIG_IOS
+        ios_x86_log_exec_interrupt(cs, env, "none", raw_interrupt_request,
+                                   interrupt_request, -1);
+#endif
         return false;
     }
+
+#ifdef CONFIG_IOS
+    ios_x86_log_exec_interrupt(cs, env, "selected", raw_interrupt_request,
+                               interrupt_request, -1);
+#endif
 
     /* Don't process multiple interrupt requests in a single call.
      * This is required to make icount-driven execution deterministic.
@@ -204,6 +298,12 @@ bool x86_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
         cpu_svm_check_intercept_param(env, SVM_EXIT_INTR, 0, 0);
         cpu_reset_interrupt(cs, CPU_INTERRUPT_HARD | CPU_INTERRUPT_VIRQ);
         intno = cpu_get_pic_interrupt(env);
+#ifdef CONFIG_IOS
+        ios_x86_log_hard_vector(cs, env, raw_interrupt_request, intno);
+        ios_x86_log_exec_interrupt(cs, env, "hard-vector",
+                                   raw_interrupt_request,
+                                   interrupt_request, intno);
+#endif
         qemu_log_mask(CPU_LOG_INT,
                       "Servicing hardware INT=0x%02x\n", intno);
         do_interrupt_x86_hardirq(env, intno, 1);

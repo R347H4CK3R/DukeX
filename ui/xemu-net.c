@@ -29,13 +29,18 @@
 #include "hw/qdev-properties.h"
 #include "qapi/error.h"
 #include "monitor/qdev.h"
+#include "qapi/qobject-input-visitor.h"
+#include "qapi/visitor.h"
 #include "qobject/qdict.h"
 #include "qemu/option.h"
 #include "qemu/config-file.h"
 #include "net/net.h"
 #include "net/hub.h"
 #include "net/slirp.h"
+#include "qom/object_interfaces.h"
+#ifdef CONFIG_SLIRP
 #include <libslirp.h>
+#endif
 #if defined(_WIN32)
 #include <pcap/pcap.h>
 #endif
@@ -43,6 +48,42 @@
 
 static const char *id = "xemu-netdev";
 static const char *id_hubport = "xemu-netdev-hubport";
+
+#ifdef CONFIG_IOS
+static void xemu_ios_attach_net_capture_filter(void)
+{
+    const char *capture_path = getenv("XEMU_IOS_NET_CAPTURE_PATH");
+    Error *local_err = NULL;
+    Object *filter;
+    QDict *qdict;
+    Visitor *visitor;
+
+    if (!capture_path || !capture_path[0]) {
+        return;
+    }
+
+    qdict = qdict_new();
+    qdict_put_str(qdict, "netdev", id);
+    qdict_put_str(qdict, "file", capture_path);
+    qdict_put_int(qdict, "maxlen", 65536);
+    qdict_put_str(qdict, "position", "tail");
+
+    visitor = qobject_input_visitor_new(QOBJECT(qdict));
+    filter = user_creatable_add_type("filter-dump",
+                                     "xemu-ios-insignia-capture",
+                                     qdict, visitor, &local_err);
+    visit_free(visitor);
+    qobject_unref(qdict);
+
+    if (local_err) {
+        error_report_err(local_err);
+        return;
+    }
+
+    object_unref(filter);
+    fprintf(stderr, "xemu-ios: network capture enabled: %s\n", capture_path);
+}
+#endif
 
 void xemu_net_enable(void)
 {
@@ -56,9 +97,20 @@ void xemu_net_enable(void)
     // Create the netdev
     QDict *qdict;
     if (g_config.net.backend == CONFIG_NET_BACKEND_NAT) {
+#ifdef CONFIG_SLIRP
         qdict = qdict_new();
         qdict_put_str(qdict, "id",   id);
         qdict_put_str(qdict, "type", "user");
+#ifdef CONFIG_IOS
+        const char *direct_dns = getenv("XEMU_IOS_NAT_DIRECT_DNS");
+        if (direct_dns && direct_dns[0]) {
+            qdict_put_str(qdict, "dns", direct_dns);
+        }
+#endif
+#else
+        xemu_queue_error_message("NAT networking is not available in this build");
+        return;
+#endif
     } else if (g_config.net.backend == CONFIG_NET_BACKEND_UDP) {
         qdict = qdict_new();
         qdict_put_str(qdict, "id",        id);
@@ -108,6 +160,11 @@ void xemu_net_enable(void)
         return;
     }
 
+#ifdef CONFIG_IOS
+    xemu_ios_attach_net_capture_filter();
+#endif
+
+#ifdef CONFIG_SLIRP
     if (g_config.net.backend == CONFIG_NET_BACKEND_NAT) {
         void *s = slirp_get_state_from_netdev(id);
         assert(s != NULL);
@@ -134,6 +191,7 @@ void xemu_net_enable(void)
 
         }
     }
+#endif
 
     if (local_err) {
         xemu_net_disable();
@@ -166,6 +224,7 @@ static void remove_netdev(const char *name)
 
 static void clear_slirp_port_forwards(void)
 {
+#ifdef CONFIG_SLIRP
     void *s = slirp_get_state_from_netdev(id);
     if (!s) {
         return;
@@ -179,6 +238,7 @@ static void clear_slirp_port_forwards(void)
                              host_addr,
                              g_config.net.nat.forward_ports[i].host);
     }
+#endif
 }
 
 void xemu_net_disable(void)

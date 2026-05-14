@@ -589,6 +589,15 @@ void pgraph_vk_determine_gpu_properties(NV2AState *d)
 {
     const int width = 640;
     const int height = 480;
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    if (r->enabled_physical_device_features.geometryShader != VK_TRUE) {
+        memset(&pgraph_vk_gpu_properties, 0, sizeof(pgraph_vk_gpu_properties));
+        fprintf(stderr,
+                "VK geometry shader winding: unavailable, using defaults\n");
+        return;
+    }
 
     uint8_t *pixels = render_geom_shader_triangles(d, width, height);
     determine_triangle_winding_order(pixels, width, height,

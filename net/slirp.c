@@ -32,6 +32,7 @@
 #include <sys/wait.h>
 #endif
 #include "net/eth.h"
+#include "net/checksum.h"
 #include "net/net.h"
 #include "clients.h"
 #include "hub.h"
@@ -113,12 +114,666 @@ static void slirp_smb_cleanup(SlirpState *s);
 static inline void slirp_smb_cleanup(SlirpState *s) { }
 #endif
 
+#ifdef CONFIG_IOS
+#define XEMU_IOS_DNS_REDIRECT_LIMIT 64
+
+typedef struct XemuIOSDnsFrameInfo {
+    size_t l3_offset;
+    size_t l4_offset;
+    int csum_flags;
+    uint8_t proto;
+    uint16_t src_port;
+    uint16_t dst_port;
+    uint32_t src_ip;
+    uint32_t dst_ip;
+} XemuIOSDnsFrameInfo;
+
+typedef struct XemuIOSDnsRedirect {
+    bool active;
+    uint8_t proto;
+    uint16_t guest_port;
+    uint32_t guest_ip;
+    uint32_t original_dns;
+} XemuIOSDnsRedirect;
+
+static XemuIOSDnsRedirect xemu_ios_dns_redirects[XEMU_IOS_DNS_REDIRECT_LIMIT];
+static unsigned xemu_ios_dns_redirect_next;
+static unsigned xemu_ios_dns_query_log_count;
+static unsigned xemu_ios_dns_response_log_count;
+static unsigned xemu_ios_dns_local_log_count;
+static unsigned xemu_ios_net_trace_log_count;
+
+typedef struct XemuIOSInsigniaZone {
+    const char *name;
+    const char *target;
+    uint32_t cached_ip;
+} XemuIOSInsigniaZone;
+
+static XemuIOSInsigniaZone xemu_ios_insignia_zones[] = {
+    { "macs.xboxlive.com", "macs.insig.uk" },
+    { "as.xboxlive.com", "as.insig.uk" },
+    { "tgs.xboxlive.com", "tgs.insig.uk" },
+    { "xds.xboxlive.com", "xexds.xboxlive.com" },
+    { "insignia.live", "insignia.live" },
+};
+
+static bool xemu_ios_net_trace_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_NET_TRACE");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+static bool xemu_ios_direct_dns(struct in_addr *direct_dns)
+{
+    const char *value = getenv("XEMU_IOS_NAT_DIRECT_DNS");
+
+    if (!value || !value[0]) {
+        return false;
+    }
+
+    return inet_aton(value, direct_dns) != 0;
+}
+
+static bool xemu_ios_force_insignia_nat_enabled(void)
+{
+    const char *value = getenv("XEMU_IOS_FORCE_INSIGNIA_NAT");
+
+    return !value || strcmp(value, "0") != 0;
+}
+
+static bool xemu_ios_l3_offset(const uint8_t *pkt, size_t size,
+                               size_t *l3_offset, uint16_t *proto)
+{
+    const struct eth_header *eth;
+    const struct vlan_header *vlan;
+
+    if (size < sizeof(struct eth_header)) {
+        return false;
+    }
+
+    eth = (const struct eth_header *)pkt;
+    *proto = lduw_be_p(&eth->h_proto);
+    *l3_offset = sizeof(struct eth_header);
+
+    switch (*proto) {
+    case ETH_P_VLAN:
+        if (size < sizeof(struct eth_header) + sizeof(struct vlan_header)) {
+            return false;
+        }
+        vlan = (const struct vlan_header *)(pkt + sizeof(struct eth_header));
+        *proto = lduw_be_p(&vlan->h_proto);
+        *l3_offset += sizeof(struct vlan_header);
+        break;
+    case ETH_P_DVLAN:
+        if (size < sizeof(struct eth_header) + sizeof(struct vlan_header)) {
+            return false;
+        }
+        vlan = (const struct vlan_header *)(pkt + sizeof(struct eth_header));
+        *proto = lduw_be_p(&vlan->h_proto);
+        *l3_offset += sizeof(struct vlan_header);
+        if (*proto == ETH_P_VLAN) {
+            if (size < sizeof(struct eth_header) + 2 * sizeof(struct vlan_header)) {
+                return false;
+            }
+            vlan = (const struct vlan_header *)(pkt + *l3_offset);
+            *proto = lduw_be_p(&vlan->h_proto);
+            *l3_offset += sizeof(struct vlan_header);
+        }
+        break;
+    default:
+        break;
+    }
+
+    return true;
+}
+
+static bool xemu_ios_dns_frame_info(const uint8_t *pkt, size_t size,
+                                    XemuIOSDnsFrameInfo *info)
+{
+    uint16_t eth_proto;
+    const struct ip_header *ip;
+    int ip_hdr_len;
+    int ip_len;
+
+    if (size > INT_MAX) {
+        return false;
+    }
+
+    if (!xemu_ios_l3_offset(pkt, size, &info->l3_offset, &eth_proto)) {
+        return false;
+    }
+    if (eth_proto != ETH_P_IP) {
+        return false;
+    }
+    if (size < info->l3_offset + sizeof(struct ip_header)) {
+        return false;
+    }
+
+    ip = (const struct ip_header *)(pkt + info->l3_offset);
+    if (IP_HEADER_VERSION(ip) != IP_HEADER_VERSION_4 || IP4_IS_FRAGMENT(ip)) {
+        return false;
+    }
+
+    ip_hdr_len = (ip->ip_ver_len & 0x0f) << 2;
+    ip_len = lduw_be_p(&ip->ip_len);
+    if (ip_hdr_len != sizeof(struct ip_header) ||
+        ip_len < ip_hdr_len ||
+        size < info->l3_offset + ip_len) {
+        return false;
+    }
+
+    memcpy(&info->src_ip, &ip->ip_src, sizeof(info->src_ip));
+    memcpy(&info->dst_ip, &ip->ip_dst, sizeof(info->dst_ip));
+    info->l4_offset = info->l3_offset + ip_hdr_len;
+    info->proto = ip->ip_p;
+    info->csum_flags = CSUM_IP;
+
+    switch (ip->ip_p) {
+    case IP_PROTO_UDP:
+    {
+        const udp_header *udp;
+
+        if (ip_len - ip_hdr_len < sizeof(*udp)) {
+            return false;
+        }
+        udp = (const udp_header *)(pkt + info->l4_offset);
+        info->src_port = lduw_be_p(&udp->uh_sport);
+        info->dst_port = lduw_be_p(&udp->uh_dport);
+        info->csum_flags |= CSUM_UDP;
+        return true;
+    }
+    case IP_PROTO_TCP:
+    {
+        const tcp_header *tcp;
+
+        if (ip_len - ip_hdr_len < sizeof(*tcp)) {
+            return false;
+        }
+        tcp = (const tcp_header *)(pkt + info->l4_offset);
+        info->src_port = lduw_be_p(&tcp->th_sport);
+        info->dst_port = lduw_be_p(&tcp->th_dport);
+        info->csum_flags |= CSUM_TCP;
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+static void xemu_ios_store_dns_redirect(const XemuIOSDnsFrameInfo *info)
+{
+    XemuIOSDnsRedirect *entry;
+
+    entry = &xemu_ios_dns_redirects[xemu_ios_dns_redirect_next];
+    entry->active = true;
+    entry->proto = info->proto;
+    entry->guest_port = info->src_port;
+    entry->guest_ip = info->src_ip;
+    entry->original_dns = info->dst_ip;
+    xemu_ios_dns_redirect_next =
+        (xemu_ios_dns_redirect_next + 1) % XEMU_IOS_DNS_REDIRECT_LIMIT;
+}
+
+static bool xemu_ios_find_dns_redirect(const XemuIOSDnsFrameInfo *info,
+                                       uint32_t *original_dns)
+{
+    unsigned i;
+
+    for (i = 0; i < XEMU_IOS_DNS_REDIRECT_LIMIT; i++) {
+        unsigned idx = (xemu_ios_dns_redirect_next +
+                        XEMU_IOS_DNS_REDIRECT_LIMIT - 1 - i) %
+                       XEMU_IOS_DNS_REDIRECT_LIMIT;
+        XemuIOSDnsRedirect *entry = &xemu_ios_dns_redirects[idx];
+
+        if (entry->active &&
+            entry->proto == info->proto &&
+            entry->guest_port == info->dst_port &&
+            entry->guest_ip == info->dst_ip) {
+            *original_dns = entry->original_dns;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static const char *xemu_ios_addr_string(uint32_t addr, char *buf, size_t len)
+{
+    struct in_addr in;
+
+    memcpy(&in.s_addr, &addr, sizeof(in.s_addr));
+    if (!inet_ntop(AF_INET, &in, buf, len)) {
+        pstrcpy(buf, len, "<invalid>");
+    }
+    return buf;
+}
+
+static bool xemu_ios_is_private_addr(uint32_t addr)
+{
+    uint32_t host = ntohl(addr);
+
+    return ((host & 0xff000000u) == 0x0a000000u) ||
+           ((host & 0xfff00000u) == 0xac100000u) ||
+           ((host & 0xffff0000u) == 0xc0a80000u) ||
+           ((host & 0xffff0000u) == 0xa9fe0000u) ||
+           ((host & 0xff000000u) == 0x7f000000u) ||
+           ((host & 0xf0000000u) == 0xe0000000u) ||
+           host == 0;
+}
+
+static bool xemu_ios_trace_port(uint16_t port)
+{
+    return port == 80 || port == 88 || port == 443 || port == 500 ||
+           port == 3074 || port == 3544 || port == 4500;
+}
+
+static void xemu_ios_tcp_flags(const uint8_t *pkt,
+                               const XemuIOSDnsFrameInfo *info,
+                               char *buf,
+                               size_t len)
+{
+    const tcp_header *tcp;
+    uint8_t flags;
+    size_t pos = 0;
+
+    if (len == 0) {
+        return;
+    }
+
+    buf[0] = '\0';
+    if (info->proto != IP_PROTO_TCP) {
+        return;
+    }
+
+    tcp = (const tcp_header *)(pkt + info->l4_offset);
+    flags = TCP_HEADER_FLAGS(tcp);
+
+#define XEMU_IOS_ADD_TCP_FLAG(flag, ch) \
+    do { \
+        if ((flags & (flag)) && pos + 1 < len) { \
+            buf[pos++] = (ch); \
+            buf[pos] = '\0'; \
+        } \
+    } while (0)
+    XEMU_IOS_ADD_TCP_FLAG(TH_SYN, 'S');
+    XEMU_IOS_ADD_TCP_FLAG(TH_ACK, 'A');
+    XEMU_IOS_ADD_TCP_FLAG(TH_RST, 'R');
+    XEMU_IOS_ADD_TCP_FLAG(TH_FIN, 'F');
+#undef XEMU_IOS_ADD_TCP_FLAG
+}
+
+static void xemu_ios_trace_net_packet(const char *direction,
+                                      const void *pkt,
+                                      size_t size)
+{
+    XemuIOSDnsFrameInfo info;
+    char src[INET_ADDRSTRLEN];
+    char dst[INET_ADDRSTRLEN];
+    char flags[8];
+    bool interesting;
+
+    if (!xemu_ios_net_trace_enabled()) {
+        return;
+    }
+
+    if (xemu_ios_net_trace_log_count >= 128 ||
+        !xemu_ios_dns_frame_info(pkt, size, &info) ||
+        info.src_port == 53 ||
+        info.dst_port == 53) {
+        return;
+    }
+
+    interesting =
+        !xemu_ios_is_private_addr(info.dst_ip) ||
+        !xemu_ios_is_private_addr(info.src_ip) ||
+        xemu_ios_trace_port(info.dst_port) ||
+        xemu_ios_trace_port(info.src_port);
+    if (!interesting) {
+        return;
+    }
+
+    xemu_ios_tcp_flags(pkt, &info, flags, sizeof(flags));
+    fprintf(stderr,
+            "xemu_ios: net %s %s %s:%u -> %s:%u%s%s\n",
+            direction,
+            info.proto == IP_PROTO_TCP ? "tcp" : "udp",
+            xemu_ios_addr_string(info.src_ip, src, sizeof(src)),
+            info.src_port,
+            xemu_ios_addr_string(info.dst_ip, dst, sizeof(dst)),
+            info.dst_port,
+            flags[0] ? " flags=" : "",
+            flags);
+    xemu_ios_net_trace_log_count++;
+}
+
+static XemuIOSInsigniaZone *xemu_ios_find_insignia_zone(const char *name)
+{
+    int i;
+
+    for (i = 0; i < ARRAY_SIZE(xemu_ios_insignia_zones); i++) {
+        if (g_ascii_strcasecmp(name, xemu_ios_insignia_zones[i].name) == 0) {
+            return &xemu_ios_insignia_zones[i];
+        }
+    }
+
+    return NULL;
+}
+
+static bool xemu_ios_resolve_insignia_zone(XemuIOSInsigniaZone *zone,
+                                           uint32_t *addr)
+{
+    struct addrinfo hints = { 0 };
+    struct addrinfo *result = NULL;
+    struct addrinfo *iter;
+    int ret;
+
+    if (zone->cached_ip) {
+        *addr = zone->cached_ip;
+        return true;
+    }
+
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    ret = getaddrinfo(zone->target, NULL, &hints, &result);
+    if (ret != 0) {
+        return false;
+    }
+
+    for (iter = result; iter; iter = iter->ai_next) {
+        struct sockaddr_in *sin;
+
+        if (iter->ai_family != AF_INET) {
+            continue;
+        }
+        sin = (struct sockaddr_in *)iter->ai_addr;
+        memcpy(&zone->cached_ip, &sin->sin_addr.s_addr, sizeof(zone->cached_ip));
+        *addr = zone->cached_ip;
+        freeaddrinfo(result);
+        return true;
+    }
+
+    freeaddrinfo(result);
+    return false;
+}
+
+static bool xemu_ios_parse_dns_question(const uint8_t *dns, size_t dns_len,
+                                        char *name, size_t name_len,
+                                        size_t *question_len,
+                                        uint16_t *qtype,
+                                        uint16_t *qclass)
+{
+    size_t pos = 12;
+    size_t out = 0;
+    uint16_t qdcount;
+
+    if (dns_len < 12 || name_len == 0) {
+        return false;
+    }
+
+    qdcount = lduw_be_p(dns + 4);
+    if (qdcount == 0) {
+        return false;
+    }
+
+    name[0] = '\0';
+    while (pos < dns_len) {
+        uint8_t label_len = dns[pos++];
+        size_t i;
+
+        if (label_len == 0) {
+            break;
+        }
+        if ((label_len & 0xc0) != 0 ||
+            label_len > 63 ||
+            pos + label_len > dns_len) {
+            return false;
+        }
+        if (out != 0) {
+            if (out + 1 >= name_len) {
+                return false;
+            }
+            name[out++] = '.';
+        }
+        if (out + label_len >= name_len) {
+            return false;
+        }
+        for (i = 0; i < label_len; i++) {
+            name[out++] = g_ascii_tolower(dns[pos + i]);
+        }
+        pos += label_len;
+    }
+
+    if (pos >= dns_len || pos + 4 > dns_len) {
+        return false;
+    }
+    name[out] = '\0';
+    *question_len = pos + 4 - 12;
+    *qtype = lduw_be_p(dns + pos);
+    *qclass = lduw_be_p(dns + pos + 2);
+    return true;
+}
+
+static bool xemu_ios_answer_insignia_dns(SlirpState *s,
+                                         const uint8_t *pkt,
+                                         size_t size)
+{
+    XemuIOSDnsFrameInfo info;
+    XemuIOSInsigniaZone *zone;
+    const struct eth_header *eth;
+    const struct ip_header *req_ip;
+    const udp_header *req_udp;
+    const uint8_t *dns;
+    uint8_t *resp;
+    struct eth_header *resp_eth;
+    struct ip_header *resp_ip;
+    udp_header *resp_udp;
+    uint8_t *resp_dns;
+    size_t udp_payload_offset;
+    size_t dns_len;
+    size_t question_len;
+    size_t resp_dns_len;
+    size_t resp_len;
+    uint16_t qtype;
+    uint16_t qclass;
+    uint16_t req_udp_len;
+    uint32_t answer_ip;
+    char name[256];
+    ssize_t sent;
+
+    if (!xemu_ios_force_insignia_nat_enabled() ||
+        !xemu_ios_dns_frame_info(pkt, size, &info) ||
+        info.proto != IP_PROTO_UDP ||
+        info.dst_port != 53) {
+        return false;
+    }
+
+    req_udp = (const udp_header *)(pkt + info.l4_offset);
+    req_udp_len = lduw_be_p(&req_udp->uh_ulen);
+    if (req_udp_len < sizeof(*req_udp)) {
+        return false;
+    }
+
+    udp_payload_offset = info.l4_offset + sizeof(*req_udp);
+    dns_len = req_udp_len - sizeof(*req_udp);
+    if (size < udp_payload_offset + dns_len) {
+        return false;
+    }
+
+    dns = pkt + udp_payload_offset;
+    if ((lduw_be_p(dns + 2) & 0x8000) != 0 ||
+        !xemu_ios_parse_dns_question(dns, dns_len, name, sizeof(name),
+                                     &question_len, &qtype, &qclass) ||
+        (qtype != 1 && qtype != 255) ||
+        (qclass != 1 && qclass != 255)) {
+        return false;
+    }
+
+    zone = xemu_ios_find_insignia_zone(name);
+    if (!zone || !xemu_ios_resolve_insignia_zone(zone, &answer_ip)) {
+        return false;
+    }
+
+    resp_dns_len = 12 + question_len + 16;
+    resp_len = sizeof(struct eth_header) + sizeof(struct ip_header) +
+               sizeof(udp_header) + resp_dns_len;
+    resp = g_malloc0(resp_len);
+
+    eth = (const struct eth_header *)pkt;
+    req_ip = (const struct ip_header *)(pkt + info.l3_offset);
+    resp_eth = (struct eth_header *)resp;
+    resp_ip = (struct ip_header *)(resp + sizeof(struct eth_header));
+    resp_udp = (udp_header *)(resp + sizeof(struct eth_header) +
+                              sizeof(struct ip_header));
+    resp_dns = resp + sizeof(struct eth_header) + sizeof(struct ip_header) +
+               sizeof(udp_header);
+
+    memcpy(resp_eth->h_dest, eth->h_source, ETH_ALEN);
+    memcpy(resp_eth->h_source, eth->h_dest, ETH_ALEN);
+    stw_be_p(&resp_eth->h_proto, ETH_P_IP);
+
+    resp_ip->ip_ver_len = 0x45;
+    resp_ip->ip_tos = req_ip->ip_tos;
+    stw_be_p(&resp_ip->ip_len, sizeof(struct ip_header) + sizeof(udp_header) +
+                              resp_dns_len);
+    memcpy(&resp_ip->ip_id, &req_ip->ip_id, sizeof(resp_ip->ip_id));
+    stw_be_p(&resp_ip->ip_off, 0);
+    resp_ip->ip_ttl = 64;
+    resp_ip->ip_p = IP_PROTO_UDP;
+    memcpy(&resp_ip->ip_src, &req_ip->ip_dst, sizeof(resp_ip->ip_src));
+    memcpy(&resp_ip->ip_dst, &req_ip->ip_src, sizeof(resp_ip->ip_dst));
+
+    stw_be_p(&resp_udp->uh_sport, 53);
+    stw_be_p(&resp_udp->uh_dport, info.src_port);
+    stw_be_p(&resp_udp->uh_ulen, sizeof(udp_header) + resp_dns_len);
+
+    memcpy(resp_dns, dns, 2);
+    stw_be_p(resp_dns + 2, 0x8180);
+    stw_be_p(resp_dns + 4, 1);
+    stw_be_p(resp_dns + 6, 1);
+    stw_be_p(resp_dns + 8, 0);
+    stw_be_p(resp_dns + 10, 0);
+    memcpy(resp_dns + 12, dns + 12, question_len);
+
+    stw_be_p(resp_dns + 12 + question_len, 0xc00c);
+    stw_be_p(resp_dns + 14 + question_len, 1);
+    stw_be_p(resp_dns + 16 + question_len, 1);
+    stl_be_p(resp_dns + 18 + question_len, 300);
+    stw_be_p(resp_dns + 22 + question_len, 4);
+    memcpy(resp_dns + 24 + question_len, &answer_ip, sizeof(answer_ip));
+
+    net_checksum_calculate(resp, (int)resp_len, CSUM_IP | CSUM_UDP);
+    sent = qemu_send_packet(&s->nc, resp, resp_len);
+
+    if (sent >= 0 && xemu_ios_dns_local_log_count < 16) {
+        char ip_buf[INET_ADDRSTRLEN];
+
+        fprintf(stderr,
+                "xemu_ios: answered Insignia DNS %s -> %s via %s\n",
+                name,
+                xemu_ios_addr_string(answer_ip, ip_buf, sizeof(ip_buf)),
+                zone->target);
+        xemu_ios_dns_local_log_count++;
+    }
+
+    g_free(resp);
+    return true;
+}
+
+static uint8_t *xemu_ios_redirect_dns_query(const uint8_t *pkt, size_t size)
+{
+    struct in_addr direct_dns;
+    XemuIOSDnsFrameInfo info;
+    struct ip_header *ip;
+    uint8_t *copy;
+
+    if (!xemu_ios_direct_dns(&direct_dns) ||
+        !xemu_ios_dns_frame_info(pkt, size, &info) ||
+        info.dst_port != 53 ||
+        info.dst_ip == direct_dns.s_addr) {
+        return NULL;
+    }
+
+    copy = g_malloc(size);
+    memcpy(copy, pkt, size);
+    ip = (struct ip_header *)(copy + info.l3_offset);
+
+    xemu_ios_store_dns_redirect(&info);
+    memcpy(&ip->ip_dst, &direct_dns.s_addr, sizeof(ip->ip_dst));
+    net_checksum_calculate(copy, (int)size, info.csum_flags);
+
+    if (xemu_ios_dns_query_log_count < 16) {
+        char old_dns[INET_ADDRSTRLEN];
+        char new_dns[INET_ADDRSTRLEN];
+
+        fprintf(stderr,
+                "xemu_ios: redirected DNS query %s -> %s (%s/%u)\n",
+                xemu_ios_addr_string(info.dst_ip, old_dns, sizeof(old_dns)),
+                xemu_ios_addr_string(direct_dns.s_addr, new_dns, sizeof(new_dns)),
+                info.proto == IP_PROTO_TCP ? "tcp" : "udp",
+                info.src_port);
+        xemu_ios_dns_query_log_count++;
+    }
+
+    return copy;
+}
+
+static uint8_t *xemu_ios_redirect_dns_response(const void *pkt, size_t size)
+{
+    struct in_addr direct_dns;
+    XemuIOSDnsFrameInfo info;
+    uint32_t original_dns;
+    struct ip_header *ip;
+    uint8_t *copy;
+
+    if (!xemu_ios_direct_dns(&direct_dns) ||
+        !xemu_ios_dns_frame_info(pkt, size, &info) ||
+        info.src_port != 53 ||
+        info.src_ip != direct_dns.s_addr ||
+        !xemu_ios_find_dns_redirect(&info, &original_dns) ||
+        original_dns == direct_dns.s_addr) {
+        return NULL;
+    }
+
+    copy = g_malloc(size);
+    memcpy(copy, pkt, size);
+    ip = (struct ip_header *)(copy + info.l3_offset);
+
+    memcpy(&ip->ip_src, &original_dns, sizeof(ip->ip_src));
+    net_checksum_calculate(copy, (int)size, info.csum_flags);
+
+    if (xemu_ios_dns_response_log_count < 16) {
+        char old_dns[INET_ADDRSTRLEN];
+        char new_dns[INET_ADDRSTRLEN];
+
+        fprintf(stderr,
+                "xemu_ios: restored DNS response %s -> %s (%s/%u)\n",
+                xemu_ios_addr_string(direct_dns.s_addr, old_dns, sizeof(old_dns)),
+                xemu_ios_addr_string(original_dns, new_dns, sizeof(new_dns)),
+                info.proto == IP_PROTO_TCP ? "tcp" : "udp",
+                info.dst_port);
+        xemu_ios_dns_response_log_count++;
+    }
+
+    return copy;
+}
+#endif
+
 static ssize_t net_slirp_send_packet(const void *pkt, size_t pkt_len,
                                      void *opaque)
 {
     SlirpState *s = opaque;
     uint8_t min_pkt[ETH_ZLEN];
     size_t min_pktsz = sizeof(min_pkt);
+    ssize_t sent;
+#ifdef CONFIG_IOS
+    uint8_t *rewritten = NULL;
+#endif
 
     if (net_peer_needs_padding(&s->nc)) {
         if (eth_pad_short_frame(min_pkt, &min_pktsz, pkt, pkt_len)) {
@@ -127,14 +782,39 @@ static ssize_t net_slirp_send_packet(const void *pkt, size_t pkt_len,
         }
     }
 
-    return qemu_send_packet(&s->nc, pkt, pkt_len);
+#ifdef CONFIG_IOS
+    rewritten = xemu_ios_redirect_dns_response(pkt, pkt_len);
+    if (rewritten) {
+        pkt = rewritten;
+    }
+    xemu_ios_trace_net_packet("in", pkt, pkt_len);
+#endif
+
+    sent = qemu_send_packet(&s->nc, pkt, pkt_len);
+
+#ifdef CONFIG_IOS
+    g_free(rewritten);
+#endif
+
+    return sent;
 }
 
 static ssize_t net_slirp_receive(NetClientState *nc, const uint8_t *buf, size_t size)
 {
     SlirpState *s = DO_UPCAST(SlirpState, nc, nc);
+#ifdef CONFIG_IOS
+    if (xemu_ios_answer_insignia_dns(s, buf, size)) {
+        return size;
+    }
 
+    uint8_t *rewritten = xemu_ios_redirect_dns_query(buf, size);
+
+    xemu_ios_trace_net_packet("out", rewritten ? rewritten : buf, size);
+    slirp_input(s->slirp, rewritten ? rewritten : buf, size);
+    g_free(rewritten);
+#else
     slirp_input(s->slirp, buf, size);
+#endif
 
     return size;
 }
@@ -539,6 +1219,15 @@ static int net_slirp_init(NetClientState *peer, const char *model,
         error_setg(errp, "Failed to parse DNS");
         return -1;
     }
+#ifdef CONFIG_IOS
+    const char *ios_direct_dns = getenv("XEMU_IOS_NAT_DIRECT_DNS");
+    if (ios_direct_dns && ios_direct_dns[0]) {
+        if (!inet_aton(ios_direct_dns, &dns)) {
+            error_setg(errp, "Failed to parse iOS direct DNS");
+            return -1;
+        }
+    }
+#endif
     if (restricted && (dns.s_addr & mask.s_addr) != net.s_addr) {
         error_setg(errp, "DNS doesn't belong to network");
         return -1;
@@ -662,6 +1351,13 @@ static int net_slirp_init(NetClientState *peer, const char *model,
     cfg.vnameserver6 = ip6_dns;
     cfg.vdnssearch = dnssearch;
     cfg.vdomainname = vdomainname;
+#ifdef CONFIG_IOS
+    if (ios_direct_dns && ios_direct_dns[0]) {
+        cfg.disable_dns = true;
+        fprintf(stderr, "xemu_ios: slirp direct DNS enabled: %s\n",
+                ios_direct_dns);
+    }
+#endif
     s->slirp = slirp_new(&cfg, &slirp_cb, s);
     QTAILQ_INSERT_TAIL(&slirp_stacks, s, entry);
 

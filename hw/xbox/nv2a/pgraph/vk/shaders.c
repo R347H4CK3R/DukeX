@@ -253,6 +253,20 @@ get_and_ref_shader_module_for_key(PGRAPHVkState *r,
     return module->module_info;
 }
 
+#ifdef CONFIG_IOS
+static bool ios_host_depth_interpolation_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_HOST_DEPTH_INTERPOLATION");
+        enabled = !env || strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+#endif
+
 static void shader_cache_entry_init(Lru *lru, LruNode *node, const void *state)
 {
     PGRAPHVkState *r = container_of(lru, PGRAPHVkState, shader_cache);
@@ -264,7 +278,31 @@ static void shader_cache_entry_init(Lru *lru, LruNode *node, const void *state)
 
     ShaderModuleCacheKey key;
 
-    bool need_geometry_shader = pgraph_glsl_need_geom(&binding->state.geom);
+    bool geometry_shader_supported =
+        r->enabled_physical_device_features.geometryShader == VK_TRUE;
+    bool geometry_shader_requested =
+        pgraph_glsl_need_geom(&binding->state.geom);
+    bool need_geometry_shader =
+        geometry_shader_supported && geometry_shader_requested;
+#ifdef CONFIG_IOS
+    bool use_host_depth_interpolation =
+        geometry_shader_requested && !geometry_shader_supported &&
+        ios_host_depth_interpolation_enabled();
+    static bool warned_no_geometry_shader;
+    if (geometry_shader_requested && !geometry_shader_supported &&
+        !warned_no_geometry_shader) {
+        fprintf(stderr,
+                "Warning: Vulkan geometry shaders are unavailable; using "
+                "CPU primitive expansion%s\n",
+                use_host_depth_interpolation ?
+                    " and host depth interpolation" :
+                    " without host depth interpolation");
+        warned_no_geometry_shader = true;
+    }
+#else
+    bool use_host_depth_interpolation =
+        geometry_shader_requested && !geometry_shader_supported;
+#endif
     if (need_geometry_shader) {
         memset(&key, 0, sizeof(key));
         key.kind = VK_SHADER_STAGE_GEOMETRY_BIT;
@@ -289,6 +327,8 @@ static void shader_cache_entry_init(Lru *lru, LruNode *node, const void *state)
     key.kind = VK_SHADER_STAGE_FRAGMENT_BIT;
     key.psh.state = binding->state.psh;
     key.psh.glsl_opts.vulkan = true;
+    key.psh.glsl_opts.use_host_depth_interpolation =
+        use_host_depth_interpolation;
     key.psh.glsl_opts.ubo_binding = PSH_UBO_BINDING;
     key.psh.glsl_opts.tex_binding = PSH_TEX_BINDING;
     binding->psh.module_info = get_and_ref_shader_module_for_key(r, &key);

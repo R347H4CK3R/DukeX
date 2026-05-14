@@ -20,10 +20,65 @@
 #include "hw/xbox/nv2a/nv2a_int.h"
 #include "renderer.h"
 
+#if HAVE_EXTERNAL_MEMORY
 #include "gloffscreen.h"
 
-#if HAVE_EXTERNAL_MEMORY
 static GloContext *g_gl_context;
+#endif
+
+#ifdef CONFIG_IOS
+uint64_t xemu_ios_framebuffer_download_generation;
+bool xemu_ios_vulkan_presenter_enabled(void);
+
+static bool ios_vk_renderer_trace_enabled(const char *name)
+{
+    const char *env = getenv(name);
+
+    return env && strcmp(env, "0") != 0;
+}
+
+static gint64 ios_present_download_min_interval_us(void)
+{
+    static int min_interval_us = -1;
+
+    if (min_interval_us < 0) {
+        const char *env = getenv("XEMU_IOS_PRESENT_DOWNLOAD_FPS");
+        char *end = NULL;
+        long fps = env && *env ? strtol(env, &end, 10) : 0;
+
+        if (!env || !*env || end == env || fps <= 0) {
+            min_interval_us = 0;
+        } else {
+            fps = MIN(fps, 60);
+            min_interval_us = 1000000 / fps;
+        }
+    }
+
+    return min_interval_us;
+}
+
+#define IOS_VK_RENDERER_INIT_LOG(stage) \
+    do { \
+        if (ios_vk_renderer_trace_enabled("XEMU_IOS_VK_RENDERER_TRACE")) { \
+            fprintf(stderr, "xemu-ios: vk renderer init: %s\n", stage); \
+        } \
+    } while (0)
+#define IOS_VK_MEMORY_LOG(...) \
+    do { \
+        if (ios_vk_renderer_trace_enabled("XEMU_IOS_VK_MEMORY_TRACE")) { \
+            fprintf(stderr, "xemu_ios: vk memory: " __VA_ARGS__); \
+            fputc('\n', stderr); \
+            fflush(stderr); \
+        } \
+    } while (0)
+#else
+#define IOS_VK_RENDERER_INIT_LOG(stage) \
+    do {                                \
+    } while (0)
+#define IOS_VK_MEMORY_LOG(...) \
+    do { \
+    } while (0)
+#define ios_present_download_min_interval_us() 0
 #endif
 
 static void early_context_init(void)
@@ -45,25 +100,38 @@ static void pgraph_vk_init(NV2AState *d, Error **errp)
 
     pgraph_vk_debug_init();
 
+    IOS_VK_RENDERER_INIT_LOG("instance");
     pgraph_vk_init_instance(pg, errp);
     if (*errp) {
         return;
     }
 
+    IOS_VK_RENDERER_INIT_LOG("command buffers");
     pgraph_vk_init_command_buffers(pg);
+    IOS_VK_RENDERER_INIT_LOG("buffers");
     pgraph_vk_init_buffers(d);
+    IOS_VK_RENDERER_INIT_LOG("surfaces");
     pgraph_vk_init_surfaces(pg);
+    IOS_VK_RENDERER_INIT_LOG("shaders");
     pgraph_vk_init_shaders(pg);
+    IOS_VK_RENDERER_INIT_LOG("pipelines");
     pgraph_vk_init_pipelines(pg);
+    IOS_VK_RENDERER_INIT_LOG("textures");
     pgraph_vk_init_textures(pg);
+    IOS_VK_RENDERER_INIT_LOG("reports");
     pgraph_vk_init_reports(pg);
+    IOS_VK_RENDERER_INIT_LOG("compute");
     pgraph_vk_init_compute(pg);
+    IOS_VK_RENDERER_INIT_LOG("display");
     pgraph_vk_init_display(pg);
 
+    IOS_VK_RENDERER_INIT_LOG("vertex ram upload");
     pgraph_vk_update_vertex_ram_buffer(&d->pgraph, 0, d->vram_ptr,
                                    memory_region_size(d->vram));
 
+    IOS_VK_RENDERER_INIT_LOG("gpu properties");
     pgraph_vk_determine_gpu_properties(d);
+    IOS_VK_RENDERER_INIT_LOG("complete");
 }
 
 static void pgraph_vk_finalize(NV2AState *d)
@@ -172,7 +240,9 @@ static void pgraph_vk_pre_shutdown_wait(NV2AState *d)
 static int pgraph_vk_get_framebuffer_surface(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
+#if HAVE_EXTERNAL_MEMORY
     PGRAPHVkState *r = pg->vk_renderer_state;
+#endif
 
     qemu_mutex_lock(&d->pfifo.lock);
 
@@ -182,13 +252,53 @@ static int pgraph_vk_get_framebuffer_surface(NV2AState *d)
     SurfaceBinding *surface = pgraph_vk_surface_get_within(
         d, d->pcrtc.start + vga_display_params.line_offset);
     if (surface == NULL || !surface->color) {
+#ifdef CONFIG_IOS
+    bool trace_framebuffer =
+        ios_vk_renderer_trace_enabled("XEMU_IOS_FRAMEBUFFER_TRACE");
+    static uint64_t ios_fb_miss_count;
+    uint64_t miss = ++ios_fb_miss_count;
+        if (trace_framebuffer && (miss <= 16 || (miss % 300) == 0)) {
+            fprintf(stderr,
+                    "xemu_ios: vk framebuffer miss #%" PRIu64
+                    " start=0x%08" PRIx32 " line_offset=%d surface=%p color=%d\n",
+                    miss, (uint32_t)d->pcrtc.start, vga_display_params.line_offset,
+                    surface, surface != NULL && surface->color);
+        }
+#endif
         qemu_mutex_unlock(&d->pfifo.lock);
         return 0;
     }
 
     assert(surface->color);
 
+#ifdef CONFIG_IOS
+    bool trace_framebuffer =
+        ios_vk_renderer_trace_enabled("XEMU_IOS_FRAMEBUFFER_TRACE");
+    static uint64_t ios_fb_hit_count;
+    uint64_t hit = ++ios_fb_hit_count;
+    if (trace_framebuffer && (hit <= 16 || (hit % 120) == 0)) {
+        fprintf(stderr,
+                "xemu_ios: vk framebuffer hit #%" PRIu64
+                " tex pending start=0x%08" PRIx32 " line_offset=%d surface=%p"
+                " color=%d size=%ux%u pitch=%u vram=0x%08" HWADDR_PRIx "\n",
+                hit, (uint32_t)d->pcrtc.start, vga_display_params.line_offset,
+                surface, surface->color, surface->width, surface->height,
+                surface->pitch, surface->vram_addr);
+    }
+#endif
+
     surface->frame_time = pg->frame_time;
+
+#ifdef CONFIG_IOS
+    if (xemu_ios_vulkan_presenter_enabled()) {
+        qemu_event_reset(&d->pgraph.sync_complete);
+        qatomic_set(&pg->sync_pending, true);
+        pfifo_kick(d);
+        qemu_mutex_unlock(&d->pfifo.lock);
+        qemu_event_wait(&d->pgraph.sync_complete);
+        return 0;
+    }
+#endif
 
 #if HAVE_EXTERNAL_MEMORY
     qemu_event_reset(&d->pgraph.sync_complete);
@@ -198,8 +308,26 @@ static int pgraph_vk_get_framebuffer_surface(NV2AState *d)
     qemu_event_wait(&d->pgraph.sync_complete);
     return r->display.gl_texture_id;
 #else
+    bool downloaded = qatomic_read(&surface->draw_dirty);
+#ifdef CONFIG_IOS
+    static gint64 last_present_download_us;
+    gint64 min_interval_us = ios_present_download_min_interval_us();
+
+    if (downloaded && min_interval_us > 0) {
+        gint64 now = g_get_monotonic_time();
+        if (last_present_download_us &&
+            now - last_present_download_us < min_interval_us) {
+            qemu_mutex_unlock(&d->pfifo.lock);
+            return 0;
+        }
+        last_present_download_us = now;
+    }
+#endif
     qemu_mutex_unlock(&d->pfifo.lock);
     pgraph_vk_wait_for_surface_download(surface);
+    if (downloaded) {
+        qatomic_inc(&xemu_ios_framebuffer_download_generation);
+    }
     return 0;
 #endif
 }
@@ -240,6 +368,80 @@ static void __attribute__((constructor)) register_renderer(void)
 
 void pgraph_vk_check_memory_budget(PGRAPHState *pg)
 {
+#ifdef CONFIG_IOS
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    static gint64 last_log_us;
+    static gint64 last_trim_us;
+
+    if (r == NULL || r->allocator == VK_NULL_HANDLE) {
+        return;
+    }
+
+    gint64 now = g_get_monotonic_time();
+    bool should_log = (last_log_us == 0) || (now - last_log_us > 2000000);
+
+    VkPhysicalDeviceMemoryProperties const *props;
+    vmaGetMemoryProperties(r->allocator, &props);
+
+    g_autofree VmaBudget *budgets =
+        g_malloc_n(props->memoryHeapCount, sizeof(VmaBudget));
+    vmaGetHeapBudgets(r->allocator, budgets);
+
+    int max_heap = -1;
+    double max_ratio = 0.0;
+    unsigned long long max_used = 0;
+    unsigned long long max_budget = 0;
+
+    for (uint32_t i = 0; i < props->memoryHeapCount; i++) {
+        VmaBudget *b = &budgets[i];
+        if (b->budget == 0) {
+            continue;
+        }
+
+        double ratio = (double)b->statistics.allocationBytes /
+                       (double)b->budget;
+        if (ratio > max_ratio) {
+            max_ratio = ratio;
+            max_heap = (int)i;
+            max_used = (unsigned long long)b->statistics.allocationBytes;
+            max_budget = (unsigned long long)b->budget;
+        }
+    }
+
+    bool near_budget = max_ratio > 0.70;
+    bool texture_pressure = r->texture_cache.num_used > 768;
+    bool can_trim = (last_trim_us == 0) || (now - last_trim_us > 1000000);
+
+    if ((near_budget || texture_pressure) && can_trim) {
+        IOS_VK_MEMORY_LOG("trim begin heap=%d used=%lluMB budget=%lluMB %.1f%% "
+                          "textures=%d/%d pipelines=%d shaders=%d modules=%d",
+                          max_heap, max_used / (1024 * 1024),
+                          max_budget / (1024 * 1024), max_ratio * 100.0,
+                          r->texture_cache.num_used,
+                          r->texture_cache.num_used + r->texture_cache.num_free,
+                          r->pipeline_cache.num_used,
+                          r->shader_cache.num_used,
+                          r->shader_module_cache.num_used);
+        pgraph_vk_trim_texture_cache(pg);
+        last_trim_us = now;
+        should_log = true;
+    }
+
+    if (should_log) {
+        IOS_VK_MEMORY_LOG("heap=%d used=%lluMB budget=%lluMB %.1f%% "
+                          "textures=%d/%d pipelines=%d shaders=%d modules=%d",
+                          max_heap, max_used / (1024 * 1024),
+                          max_budget / (1024 * 1024), max_ratio * 100.0,
+                          r->texture_cache.num_used,
+                          r->texture_cache.num_used + r->texture_cache.num_free,
+                          r->pipeline_cache.num_used,
+                          r->shader_cache.num_used,
+                          r->shader_module_cache.num_used);
+        last_log_us = now;
+    }
+    return;
+#endif
+
 #if 0 // FIXME
     PGRAPHVkState *r = pg->vk_renderer_state;
 

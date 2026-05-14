@@ -55,6 +55,108 @@ static void mttcg_force_rcu(Notifier *notify, void *data)
     async_run_on_cpu(cpu, do_nothing, RUN_ON_CPU_NULL);
 }
 
+#ifdef CONFIG_IOS
+static void ios_tcg_watchdog_dump_bytes(CPUState *cpu, vaddr pc)
+{
+    uint8_t bytes[64];
+    vaddr base = pc >= 16 ? pc - 16 : pc;
+    g_autoptr(GString) line = g_string_new(NULL);
+    int ret;
+
+    ret = cpu_memory_rw_debug(cpu, base, bytes, sizeof(bytes), false);
+    if (ret != 0) {
+        fprintf(stderr,
+                "xemu_ios: tcg watchdog bytes pc=0x%016" VADDR_PRIx
+                " base=0x%016" VADDR_PRIx " unavailable ret=%d\n",
+                pc, base, ret);
+        return;
+    }
+
+    for (size_t i = 0; i < sizeof(bytes); i++) {
+        g_string_append_printf(line, " %02x", bytes[i]);
+    }
+
+    fprintf(stderr,
+            "xemu_ios: tcg watchdog bytes pc=0x%016" VADDR_PRIx
+            " base=0x%016" VADDR_PRIx "%s\n",
+            pc, base, line->str);
+
+}
+
+static gpointer ios_tcg_watchdog_thread(gpointer opaque)
+{
+    CPUState *cpu = opaque;
+    const char *mode = getenv("XEMU_IOS_TCG_WATCHDOG");
+    bool kick_cpu = !mode || (g_ascii_strcasecmp(mode, "log") != 0 &&
+                              g_ascii_strcasecmp(mode, "log-only") != 0);
+    uint64_t kicks = 0;
+    vaddr last_pc = 0;
+    vaddr dumped_pc = 0;
+    unsigned stable_pc_logs = 0;
+
+    fprintf(stderr, "xemu_ios: tcg watchdog mode=%s\n",
+            kick_cpu ? "kick" : "log-only");
+    g_usleep(10 * G_USEC_PER_SEC);
+    for (;;) {
+        vaddr pc = 0;
+
+        g_usleep(250 * 1000);
+        if (kick_cpu) {
+            cpu_exit(cpu);
+        }
+        kicks++;
+
+        if ((kicks % 4) == 0) {
+            if (cpu->cc->get_pc) {
+                pc = cpu->cc->get_pc(cpu);
+            }
+            if (pc == last_pc) {
+                stable_pc_logs++;
+            } else {
+                last_pc = pc;
+                stable_pc_logs = 0;
+            }
+            fprintf(stderr,
+                    "xemu_ios: tcg watchdog kick cpu=%d kicks=%" PRIu64
+                    " pc=0x%016" VADDR_PRIx " exit=%d irq=0x%x\n",
+                    cpu->cpu_index, kicks, pc,
+                    qatomic_read(&cpu->exit_request),
+                    qatomic_read(&cpu->interrupt_request));
+            if (stable_pc_logs == 4 && dumped_pc != pc) {
+                dumped_pc = pc;
+                ios_tcg_watchdog_dump_bytes(cpu, pc);
+            }
+        }
+    }
+
+    return NULL;
+}
+
+static void ios_tcg_start_watchdog(CPUState *cpu)
+{
+    static gsize started;
+    const char *mode = getenv("XEMU_IOS_TCG_WATCHDOG");
+
+    if (mode && (g_ascii_strcasecmp(mode, "0") == 0 ||
+                 g_ascii_strcasecmp(mode, "false") == 0 ||
+                 g_ascii_strcasecmp(mode, "off") == 0 ||
+                 g_ascii_strcasecmp(mode, "no") == 0)) {
+        fprintf(stderr, "xemu_ios: tcg watchdog disabled cpu=%d\n",
+                cpu->cpu_index);
+        return;
+    }
+
+    if (g_once_init_enter(&started)) {
+        GThread *thread = g_thread_new("ios-tcg-watchdog",
+                                       ios_tcg_watchdog_thread, cpu);
+        g_thread_unref(thread);
+        g_once_init_leave(&started, 1);
+        fprintf(stderr, "xemu_ios: tcg watchdog started cpu=%d\n",
+                cpu->cpu_index);
+    }
+}
+#endif
+
 /*
  * In the multi-threaded case each vCPU has its own thread. The TLS
  * variable current_cpu can be used deep in the code to find the
@@ -83,15 +185,33 @@ static void *mttcg_cpu_thread_fn(void *arg)
     current_cpu = cpu;
     cpu_thread_signal_created(cpu);
     qemu_guest_random_seed_thread_part2(cpu->random_seed);
+#ifdef CONFIG_IOS
+    fprintf(stderr, "xemu_ios: mttcg cpu thread started cpu=%d tid=%" PRId64 "\n",
+            cpu->cpu_index, (int64_t)cpu->thread_id);
+    ios_tcg_start_watchdog(cpu);
+#endif
 
     do {
         qemu_process_cpu_events(cpu);
 
         if (cpu_can_run(cpu)) {
             int r;
+#ifdef CONFIG_IOS
+            static int64_t last_return_log_us;
+#endif
             bql_unlock();
             r = tcg_cpu_exec(cpu);
             bql_lock();
+#ifdef CONFIG_IOS
+            int64_t now = g_get_monotonic_time();
+            if (now - last_return_log_us >= G_USEC_PER_SEC || r != EXCP_INTERRUPT) {
+                last_return_log_us = now;
+                fprintf(stderr,
+                        "xemu_ios: tcg_cpu_exec returned cpu=%d r=%d halted=%d irq=0x%x\n",
+                        cpu->cpu_index, r, cpu->halted,
+                        qatomic_read(&cpu->interrupt_request));
+            }
+#endif
             switch (r) {
             case EXCP_DEBUG:
                 cpu_handle_guest_debug(cpu);

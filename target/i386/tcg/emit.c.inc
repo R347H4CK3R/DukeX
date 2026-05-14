@@ -1139,7 +1139,15 @@ static void gen_AAA(DisasContext *s, X86DecodedInsn *decode)
 
 static void gen_AAD(DisasContext *s, X86DecodedInsn *decode)
 {
-    gen_helper_aad(s->T0, s->T0, s->T1);
+    TCGv al = tcg_temp_new();
+    TCGv ah = tcg_temp_new();
+
+    tcg_gen_ext8u_tl(al, s->T0);
+    tcg_gen_shri_tl(ah, s->T0, 8);
+    tcg_gen_ext8u_tl(ah, ah);
+    tcg_gen_mul_tl(ah, ah, s->T1);
+    tcg_gen_add_tl(s->T0, ah, al);
+    tcg_gen_ext8u_tl(s->T0, s->T0);
     prepare_update1_cc(decode, s, CC_OP_LOGICB);
 }
 

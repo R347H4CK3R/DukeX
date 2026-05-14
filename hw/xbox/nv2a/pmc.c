@@ -21,6 +21,15 @@
 
 #include "nv2a_int.h"
 
+#ifdef CONFIG_IOS
+static bool ios_nv2a_write_trace_enabled(void)
+{
+    const char *trace = getenv("XEMU_IOS_NV2A_WRITE_TRACE");
+
+    return trace && strcmp(trace, "0") != 0;
+}
+#endif
+
 /* PMC - card master control */
 uint64_t pmc_read(void *opaque, hwaddr addr, unsigned int size)
 {
@@ -55,6 +64,15 @@ void pmc_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
     NV2AState *d = (NV2AState *)opaque;
 
     nv2a_reg_log_write(NV_PMC, addr, size, val);
+#ifdef CONFIG_IOS
+    static unsigned ios_pmc_write_logs;
+    if (ios_nv2a_write_trace_enabled() && ios_pmc_write_logs < 48) {
+        fprintf(stderr,
+                "xemu_ios: pmc write[%u] addr=0x%" HWADDR_PRIx
+                " size=%u val=0x%016" PRIx64 "\n",
+                ios_pmc_write_logs++, addr, size, val);
+    }
+#endif
 
     switch (addr) {
     case NV_PMC_INTR_0:
@@ -70,4 +88,3 @@ void pmc_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         break;
     }
 }
-

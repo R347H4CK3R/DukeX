@@ -28,6 +28,10 @@
 #include "swizzle.h"
 #include "nv2a_vsh_emulator.h"
 
+#ifdef CONFIG_IOS
+bool xemu_ios_vulkan_presenter_enabled(void);
+#endif
+
 #define PG_GET_MASK(reg, mask) GET_MASK(pgraph_reg_r(pg, reg), mask)
 #define PG_SET_MASK(reg, mask, value)        \
     do {                                     \
@@ -86,6 +90,27 @@ void pgraph_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
     PGRAPHState *pg = &d->pgraph;
 
     nv2a_reg_log_write(NV_PGRAPH, addr, size, val);
+#ifdef CONFIG_IOS
+    static unsigned ios_pgraph_write_logs;
+    static int ios_pgraph_write_trace = -1;
+    if (ios_pgraph_write_trace < 0) {
+        const char *trace = getenv("XEMU_IOS_NV2A_WRITE_TRACE");
+        ios_pgraph_write_trace = trace && strcmp(trace, "1") == 0;
+    }
+    if (ios_pgraph_write_trace &&
+        (ios_pgraph_write_logs < 128 ||
+        addr == NV_PGRAPH_FIFO ||
+        addr == NV_PGRAPH_CHANNEL_CTX_TRIGGER ||
+        addr == NV_PGRAPH_INCREMENT)) {
+        fprintf(stderr,
+                "xemu_ios: pgraph write[%u] addr=0x%" HWADDR_PRIx
+                " size=%u val=0x%016" PRIx64 "\n",
+                ios_pgraph_write_logs, addr, size, val);
+        if (ios_pgraph_write_logs < 128) {
+            ios_pgraph_write_logs++;
+        }
+    }
+#endif
 
     qemu_mutex_lock(&d->pfifo.lock); // FIXME: Factor out fifo lock here
     qemu_mutex_lock(&pg->lock);
@@ -253,6 +278,13 @@ void pgraph_clear_dirty_reg_map(PGRAPHState *pg)
 
 static CONFIG_DISPLAY_RENDERER get_default_renderer(void)
 {
+#ifdef CONFIG_IOS
+#ifdef CONFIG_VULKAN
+    if (renderers[CONFIG_DISPLAY_RENDERER_VULKAN]) {
+        return CONFIG_DISPLAY_RENDERER_VULKAN;
+    }
+#endif
+#endif
 #ifdef CONFIG_OPENGL
     if (renderers[CONFIG_DISPLAY_RENDERER_OPENGL]) {
         return CONFIG_DISPLAY_RENDERER_OPENGL;
@@ -284,6 +316,12 @@ void nv2a_context_init(void)
         if (!r) {
             continue;
         }
+#ifdef CONFIG_IOS
+        if (xemu_ios_vulkan_presenter_enabled() &&
+            r->type != CONFIG_DISPLAY_RENDERER_VULKAN) {
+            continue;
+        }
+#endif
         if (r->ops.early_context_init) {
             r->ops.early_context_init();
         }

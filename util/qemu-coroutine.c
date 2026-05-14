@@ -67,6 +67,20 @@ static unsigned int global_pool_max_size = COROUTINE_POOL_BATCH_MAX_SIZE;
 QEMU_DEFINE_STATIC_CO_TLS(CoroutinePool, local_pool);
 QEMU_DEFINE_STATIC_CO_TLS(Notifier, local_pool_cleanup_notifier);
 
+#ifdef CONFIG_IOS
+static bool ios_coroutine_trace_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_COROUTINE_TRACE");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+#endif
+
 static CoroutinePoolBatch *coroutine_pool_batch_new(void)
 {
     CoroutinePoolBatch *batch = g_new(CoroutinePoolBatch, 1);
@@ -173,6 +187,84 @@ static void coroutine_pool_put_global(CoroutinePoolBatch *batch)
     coroutine_pool_batch_delete(batch);
 }
 
+#ifdef CONFIG_IOS
+void xemu_ios_coroutine_prime_global_pool(unsigned int count)
+{
+    CoroutinePoolBatch *batch;
+    unsigned int primed = 0;
+    unsigned int before_size;
+    unsigned int before_max;
+
+    fprintf(stderr, "xemu_ios: coroutine prime begin count=%u\n", count);
+    fflush(stderr);
+
+    if (!IS_ENABLED(CONFIG_COROUTINE_POOL) || count == 0) {
+        fprintf(stderr,
+                "xemu_ios: coroutine prime skipped pool=%d count=%u\n",
+                IS_ENABLED(CONFIG_COROUTINE_POOL), count);
+        fflush(stderr);
+        return;
+    }
+
+    WITH_QEMU_LOCK_GUARD(&global_pool_lock) {
+        before_size = global_pool_size;
+        before_max = global_pool_max_size;
+        if (global_pool_size >= count) {
+            fprintf(stderr,
+                    "xemu_ios: coroutine prime already satisfied "
+                    "(pool size %u count %u max %u hard %u)\n",
+                    global_pool_size, count, global_pool_max_size,
+                    global_pool_hard_max_size);
+            fflush(stderr);
+            return;
+        }
+
+        count -= global_pool_size;
+        if (global_pool_max_size < global_pool_size + count) {
+            global_pool_max_size = global_pool_size + count;
+        }
+    }
+
+    batch = coroutine_pool_batch_new();
+    while (primed < count) {
+        if (primed < 8 || (primed % 128) == 0) {
+            fprintf(stderr,
+                    "xemu_ios: coroutine prime new begin #%u\n",
+                    primed + 1);
+            fflush(stderr);
+        }
+        Coroutine *co = qemu_coroutine_new();
+
+        if (primed < 8 || (primed % 128) == 0) {
+            fprintf(stderr,
+                    "xemu_ios: coroutine prime new end #%u co=%p\n",
+                    primed + 1, co);
+            fflush(stderr);
+        }
+        QSLIST_INSERT_HEAD(&batch->list, co, pool_next);
+        batch->size++;
+        primed++;
+
+        if (batch->size >= COROUTINE_POOL_BATCH_MAX_SIZE) {
+            coroutine_pool_put_global(batch);
+            batch = coroutine_pool_batch_new();
+        }
+    }
+
+    if (batch->size > 0) {
+        coroutine_pool_put_global(batch);
+    } else {
+        g_free(batch);
+    }
+
+    fprintf(stderr,
+            "xemu_ios: primed %u global coroutines "
+            "(pool size %u->%u max %u->%u hard %u)\n",
+            primed, before_size, global_pool_size, before_max,
+            global_pool_max_size, global_pool_hard_max_size);
+}
+#endif
+
 /* Get the next unused coroutine from the pool or return NULL */
 static Coroutine *coroutine_pool_get(void)
 {
@@ -217,13 +309,40 @@ static void coroutine_pool_put(Coroutine *co)
 Coroutine *qemu_coroutine_create(CoroutineEntry *entry, void *opaque)
 {
     Coroutine *co = NULL;
+#ifdef CONFIG_IOS
+    static unsigned int ios_create_log_count;
+    unsigned int ios_log_id = qatomic_fetch_inc(&ios_create_log_count);
+    bool ios_should_log = ios_coroutine_trace_enabled() && ios_log_id < 256;
+
+    if (ios_should_log) {
+        fprintf(stderr, "xemu_ios: coroutine create #%u enter\n", ios_log_id + 1);
+    }
+#endif
 
     if (IS_ENABLED(CONFIG_COROUTINE_POOL)) {
         co = coroutine_pool_get();
+#ifdef CONFIG_IOS
+        if (ios_should_log) {
+            fprintf(stderr, "xemu_ios: coroutine create #%u pool=%p\n",
+                    ios_log_id + 1, co);
+        }
+#endif
     }
 
     if (!co) {
+#ifdef CONFIG_IOS
+        if (ios_should_log) {
+            fprintf(stderr, "xemu_ios: coroutine create #%u before-new\n",
+                    ios_log_id + 1);
+        }
+#endif
         co = qemu_coroutine_new();
+#ifdef CONFIG_IOS
+        if (ios_should_log) {
+            fprintf(stderr, "xemu_ios: coroutine create #%u after-new %p\n",
+                    ios_log_id + 1, co);
+        }
+#endif
     }
 
     co->entry = entry;

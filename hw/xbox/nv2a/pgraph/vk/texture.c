@@ -30,6 +30,107 @@
 #include "qemu/lru.h"
 #include "renderer.h"
 
+#ifdef CONFIG_IOS
+static bool ios_vk_texture_trace_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_VK_TEXTURE_TRACE");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+static bool ios_surface_texture_trace_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_SURFACE_TEXTURE_TRACE");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+#define IOS_VK_TEXTURE_LOG(stage) \
+    do { \
+        if (ios_vk_texture_trace_enabled()) { \
+            fprintf(stderr, "xemu-ios: vk texture init: %s\n", stage); \
+        } \
+    } while (0)
+#define IOS_VK_TEXTURE_CACHE_LOG(...) \
+    do { \
+        if (ios_vk_texture_trace_enabled()) { \
+            fprintf(stderr, "xemu_ios: vk texture: " __VA_ARGS__); \
+            fputc('\n', stderr); \
+            fflush(stderr); \
+        } \
+    } while (0)
+static void ios_surface_texture_log_pair(const SurfaceBinding *surface,
+                                         const TextureShape *shape,
+                                         bool allowed)
+{
+    typedef struct IosPairLogEntry {
+        uint32_t surface_format;
+        uint32_t texture_format;
+        bool allowed;
+        uint32_t count;
+    } IosPairLogEntry;
+
+    static IosPairLogEntry entries[128];
+    static unsigned int num_entries;
+
+    if (!ios_surface_texture_trace_enabled() || !surface || !shape) {
+        return;
+    }
+
+    for (unsigned int i = 0; i < num_entries; i++) {
+        IosPairLogEntry *entry = &entries[i];
+        if (entry->surface_format == surface->shape.color_format &&
+            entry->texture_format == shape->color_format &&
+            entry->allowed == allowed) {
+            entry->count++;
+            return;
+        }
+    }
+
+    if (num_entries < ARRAY_SIZE(entries)) {
+        entries[num_entries++] = (IosPairLogEntry) {
+            .surface_format = surface->shape.color_format,
+            .texture_format = shape->color_format,
+            .allowed = allowed,
+            .count = 1,
+        };
+    }
+
+    fprintf(stderr,
+            "xemu_ios: surface-texture pair allowed=%d surface_fmt=0x%x "
+            "texture_fmt=0x%x surface=%ux%u pitch=%u swizzle=%d "
+            "texture=%ux%u pitch=%u levels=%u surface_bpp=%u texture_vk=0x%x\n",
+            allowed, surface->shape.color_format, shape->color_format,
+            surface->width, surface->height, surface->pitch, surface->swizzle,
+            shape->width, shape->height, shape->pitch, shape->levels,
+            surface->host_fmt.host_bytes_per_pixel,
+            kelvin_color_format_vk_map[shape->color_format].vk_format);
+    fflush(stderr);
+}
+#else
+#define IOS_VK_TEXTURE_LOG(stage) \
+    do {                          \
+    } while (0)
+#define IOS_VK_TEXTURE_CACHE_LOG(...) \
+    do { \
+    } while (0)
+static void ios_surface_texture_log_pair(const SurfaceBinding *surface,
+                                         const TextureShape *shape,
+                                         bool allowed)
+{
+}
+#endif
+
 static void texture_cache_release_node_resources(PGRAPHVkState *r, TextureBinding *snode);
 
 static const VkImageType dimensionality_to_vk_image_type[] = {
@@ -886,6 +987,33 @@ static unsigned int vk_format_texel_size(VkFormat format)
     }
 }
 
+static bool surface_color_format_matches_texture(uint32_t surface_format,
+                                                 uint32_t texture_format)
+{
+    switch (surface_format) {
+    case NV097_SET_SURFACE_FORMAT_COLOR_LE_X1R5G5B5_Z1R5G5B5:
+        return texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_X1R5G5B5 ||
+               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_X1R5G5B5 ||
+               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_A1R5G5B5 ||
+               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_A1R5G5B5;
+    case NV097_SET_SURFACE_FORMAT_COLOR_LE_R5G6B5:
+        return texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_R5G6B5 ||
+               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_R5G6B5;
+    case NV097_SET_SURFACE_FORMAT_COLOR_LE_X8R8G8B8_Z8R8G8B8:
+        return texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_X8R8G8B8 ||
+               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_X8R8G8B8 ||
+               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_A8R8G8B8 ||
+               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_A8R8G8B8;
+    case NV097_SET_SURFACE_FORMAT_COLOR_LE_A8R8G8B8:
+        return texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_A8R8G8B8 ||
+               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_A8R8G8B8 ||
+               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_X8R8G8B8 ||
+               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_X8R8G8B8;
+    default:
+        return false;
+    }
+}
+
 static bool check_surface_to_texture_compatiblity(const SurfaceBinding *surface,
                                                   const TextureShape *shape)
 {
@@ -903,13 +1031,17 @@ static bool check_surface_to_texture_compatiblity(const SurfaceBinding *surface,
 
     VkColorFormatInfo tex_vkf = kelvin_color_format_vk_map[shape->color_format];
     return tex_vkf.vk_format &&
-           surface->host_fmt.host_bytes_per_pixel == vk_format_texel_size(tex_vkf.vk_format);
+           surface->host_fmt.host_bytes_per_pixel ==
+               vk_format_texel_size(tex_vkf.vk_format) &&
+           surface_color_format_matches_texture(surface->shape.color_format,
+                                                shape->color_format);
 }
 
 static void create_dummy_texture(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
+    IOS_VK_TEXTURE_LOG("dummy image create begin");
     VkImageCreateInfo image_create_info = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
@@ -937,7 +1069,9 @@ static void create_dummy_texture(PGRAPHState *pg)
     VK_CHECK(vmaCreateImage(r->allocator, &image_create_info,
                             &alloc_create_info, &texture_image,
                             &texture_allocation, NULL));
+    IOS_VK_TEXTURE_LOG("dummy image create complete");
 
+    IOS_VK_TEXTURE_LOG("dummy image view create begin");
     VkImageViewCreateInfo image_view_create_info = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image = texture_image,
@@ -956,7 +1090,9 @@ static void create_dummy_texture(PGRAPHState *pg)
     VkImageView texture_image_view;
     VK_CHECK(vkCreateImageView(r->device, &image_view_create_info, NULL,
                                &texture_image_view));
+    IOS_VK_TEXTURE_LOG("dummy image view create complete");
 
+    IOS_VK_TEXTURE_LOG("dummy sampler create begin");
     VkSamplerCreateInfo sampler_create_info = {
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
         .magFilter = VK_FILTER_NEAREST,
@@ -975,15 +1111,18 @@ static void create_dummy_texture(PGRAPHState *pg)
     VkSampler texture_sampler;
     VK_CHECK(vkCreateSampler(r->device, &sampler_create_info, NULL,
                              &texture_sampler));
+    IOS_VK_TEXTURE_LOG("dummy sampler create complete");
 
     // Copy texture data to mapped device buffer
     uint8_t *mapped_memory_ptr;
     size_t texture_data_size =
         image_create_info.extent.width * image_create_info.extent.height;
 
+    IOS_VK_TEXTURE_LOG("dummy staging map begin");
     VK_CHECK(vmaMapMemory(r->allocator,
                           r->storage_buffers[BUFFER_STAGING_SRC].allocation,
                           (void *)&mapped_memory_ptr));
+    IOS_VK_TEXTURE_LOG("dummy staging map complete");
     memset(mapped_memory_ptr, 0xff, texture_data_size);
 
     vmaFlushAllocation(r->allocator,
@@ -993,6 +1132,7 @@ static void create_dummy_texture(PGRAPHState *pg)
     vmaUnmapMemory(r->allocator,
                    r->storage_buffers[BUFFER_STAGING_SRC].allocation);
 
+    IOS_VK_TEXTURE_LOG("dummy upload commands begin");
     VkCommandBuffer cmd = pgraph_vk_begin_single_time_commands(pg);
     pgraph_vk_begin_debug_marker(r, cmd, RGBA_GREEN, __func__);
 
@@ -1023,6 +1163,7 @@ static void create_dummy_texture(PGRAPHState *pg)
 
     pgraph_vk_end_debug_marker(r, cmd);
     pgraph_vk_end_single_time_commands(pg, cmd);
+    IOS_VK_TEXTURE_LOG("dummy upload commands complete");
 
     r->dummy_texture = (TextureBinding){
         .key.scale = 1.0,
@@ -1124,6 +1265,7 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
     if (surface && state.levels == 1) {
         surface_to_texture =
             check_surface_to_texture_compatiblity(surface, &state);
+        ios_surface_texture_log_pair(surface, &state, surface_to_texture);
 
         if (!surface_to_texture && surface->color) {
             trace_nv2a_pgraph_surface_texture_compat_failed(
@@ -1534,11 +1676,16 @@ void pgraph_vk_trim_texture_cache(PGRAPHState *pg)
 
     int num_to_evict = r->texture_cache.num_used / 4;
     int num_evicted = 0;
+    int num_used_before = r->texture_cache.num_used;
 
     while (num_to_evict-- && lru_try_evict_one(&r->texture_cache)) {
         num_evicted += 1;
     }
 
+    IOS_VK_TEXTURE_CACHE_LOG("trim evicted=%d used=%d->%d free=%d",
+                             num_evicted, num_used_before,
+                             r->texture_cache.num_used,
+                             r->texture_cache.num_free);
     NV2A_VK_DPRINTF("Evicted %d textures, %d remain", num_evicted, r->texture_cache.num_used);
 }
 
@@ -1546,9 +1693,14 @@ void pgraph_vk_init_textures(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
+    IOS_VK_TEXTURE_LOG("cache init begin");
     texture_cache_init(r);
+    IOS_VK_TEXTURE_LOG("cache init complete");
+    IOS_VK_TEXTURE_LOG("dummy create begin");
     create_dummy_texture(pg);
+    IOS_VK_TEXTURE_LOG("dummy create complete");
 
+    IOS_VK_TEXTURE_LOG("format properties begin");
     r->texture_format_properties = g_malloc0_n(
         ARRAY_SIZE(kelvin_color_format_vk_map), sizeof(VkFormatProperties));
     for (int i = 0; i < ARRAY_SIZE(kelvin_color_format_vk_map); i++) {
@@ -1556,6 +1708,7 @@ void pgraph_vk_init_textures(PGRAPHState *pg)
             r->physical_device, kelvin_color_format_vk_map[i].vk_format,
             &r->texture_format_properties[i]);
     }
+    IOS_VK_TEXTURE_LOG("format properties complete");
 }
 
 void pgraph_vk_finalize_textures(PGRAPHState *pg)

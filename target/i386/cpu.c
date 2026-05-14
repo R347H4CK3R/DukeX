@@ -9844,18 +9844,183 @@ static void x86_cpu_set_pc(CPUState *cs, vaddr value)
 static vaddr x86_cpu_get_pc(CPUState *cs)
 {
     X86CPU *cpu = X86_CPU(cs);
+    vaddr pc = cpu->env.eip + cpu->env.segs[R_CS].base;
+
+#ifdef CONFIG_IOS
+    static vaddr last_pc;
+    static vaddr dumped_pc;
+    static unsigned stable_pc_logs;
+    static int64_t last_regs_log_us;
+
+    if (pc == last_pc) {
+        stable_pc_logs++;
+    } else {
+        last_pc = pc;
+        stable_pc_logs = 0;
+    }
+
+    if (pc >= 0x80000000ULL && stable_pc_logs >= 4) {
+        CPUX86State *env = &cpu->env;
+        int64_t now = g_get_monotonic_time();
+
+        if (now - last_regs_log_us >= 5 * G_USEC_PER_SEC) {
+            last_regs_log_us = now;
+            fprintf(stderr,
+                    "xemu_ios: stable pc regs pc=0x%016" PRIx64
+                    " stable=%u eip=0x%08" PRIx64
+                    " eflags=0x%08" PRIx64
+                    " hflags=0x%08x hflags2=0x%08x"
+                    " cr0=0x%08" PRIx64 " cr2=0x%08" PRIx64
+                    " cr3=0x%08" PRIx64 " cr4=0x%08" PRIx64
+                    " eax=0x%08" PRIx64 " ebx=0x%08" PRIx64
+                    " ecx=0x%08" PRIx64 " edx=0x%08" PRIx64
+                    " esi=0x%08" PRIx64 " edi=0x%08" PRIx64
+                    " esp=0x%08" PRIx64 " ebp=0x%08" PRIx64 "\n",
+                    (uint64_t)pc, stable_pc_logs, (uint64_t)env->eip,
+                    (uint64_t)env->eflags, env->hflags, env->hflags2,
+                    (uint64_t)env->cr[0], (uint64_t)env->cr[2],
+                    (uint64_t)env->cr[3], (uint64_t)env->cr[4],
+                    (uint64_t)env->regs[R_EAX],
+                    (uint64_t)env->regs[R_EBX],
+                    (uint64_t)env->regs[R_ECX],
+                    (uint64_t)env->regs[R_EDX],
+                    (uint64_t)env->regs[R_ESI],
+                    (uint64_t)env->regs[R_EDI],
+                    (uint64_t)env->regs[R_ESP],
+                    (uint64_t)env->regs[R_EBP]);
+        }
+
+        if (dumped_pc != pc) {
+            uint8_t bytes[192];
+            uint8_t stack[64];
+            vaddr base = pc >= 64 ? pc - 64 : pc;
+            g_autoptr(GString) line = g_string_new(NULL);
+
+            dumped_pc = pc;
+            if (cpu_memory_rw_debug(cs, base, bytes, sizeof(bytes), false) == 0) {
+                for (size_t i = 0; i < sizeof(bytes); i++) {
+                    g_string_append_printf(line, " %02x", bytes[i]);
+                }
+                fprintf(stderr,
+                        "xemu_ios: stable pc bytes pc=0x%016" PRIx64
+                        " base=0x%016" PRIx64 "%s\n",
+                        (uint64_t)pc, (uint64_t)base, line->str);
+            }
+
+            g_string_truncate(line, 0);
+            if (cpu_memory_rw_debug(cs, env->regs[R_ESP],
+                                    stack, sizeof(stack), false) == 0) {
+                for (size_t i = 0; i < sizeof(stack); i++) {
+                    g_string_append_printf(line, " %02x", stack[i]);
+                }
+                fprintf(stderr,
+                        "xemu_ios: stable pc stack pc=0x%016" PRIx64
+                        " esp=0x%08" PRIx64 "%s\n",
+                        (uint64_t)pc, (uint64_t)env->regs[R_ESP],
+                        line->str);
+
+                for (size_t i = 0; i + 4 <= sizeof(stack) && i < 32; i += 4) {
+                    uint32_t ret = stack[i] |
+                                   ((uint32_t)stack[i + 1] << 8) |
+                                   ((uint32_t)stack[i + 2] << 16) |
+                                   ((uint32_t)stack[i + 3] << 24);
+                    vaddr ret_base;
+
+                    if (ret < 0x80000000U || ret >= 0x80100000U) {
+                        continue;
+                    }
+
+                    ret_base = ret >= 32 ? ret - 32 : ret;
+                    g_string_truncate(line, 0);
+                    if (cpu_memory_rw_debug(cs, ret_base, bytes, 96,
+                                            false) != 0) {
+                        continue;
+                    }
+                    for (size_t j = 0; j < 96; j++) {
+                        g_string_append_printf(line, " %02x", bytes[j]);
+                    }
+                    fprintf(stderr,
+                            "xemu_ios: stable pc caller slot=%zu"
+                            " ret=0x%08x base=0x%08" PRIx64 "%s\n",
+                            i / 4, ret, (uint64_t)ret_base, line->str);
+                }
+            }
+        }
+    }
+#endif
 
     /* Match cpu_get_tb_cpu_state. */
-    return cpu->env.eip + cpu->env.segs[R_CS].base;
+    return pc;
 }
 
 #if !defined(CONFIG_USER_ONLY)
+#ifdef CONFIG_IOS
+static void ios_x86_log_pending_irq(CPUState *cs, CPUX86State *env,
+                                    const char *phase, int raw, int pending)
+{
+    static int trace_enabled = -1;
+    static uint64_t count;
+    static int64_t last_log_us;
+    uint64_t pc = (uint64_t)(env->eip + env->segs[R_CS].base);
+    int64_t now = g_get_monotonic_time();
+    bool low_boot_pc = pc >= 0x0000000000400000ULL &&
+                       pc < 0x0000000000410000ULL;
+    bool first_logs;
+
+    if (trace_enabled < 0) {
+        const char *value = getenv("XEMU_IOS_IRQ_TRACE");
+        trace_enabled = value && g_str_equal(value, "1");
+    }
+    if (!trace_enabled || !(raw & CPU_INTERRUPT_HARD)) {
+        return;
+    }
+
+    count++;
+    first_logs = count <= 32;
+    if (!first_logs && !low_boot_pc && pending != CPU_INTERRUPT_HARD &&
+        (count % 1024) != 0) {
+        return;
+    }
+    if (!first_logs && now - last_log_us < 250 * 1000) {
+        return;
+    }
+    last_log_us = now;
+
+    fprintf(stderr,
+            "xemu_ios: irq pending %s #%" PRIu64
+            " raw=0x%x pending=0x%x pc=0x%016" PRIx64
+            " eip=0x%08" PRIx64 " csbase=0x%016" PRIx64
+            " eflags=0x%08" PRIx64 " hflags=0x%08x hflags2=0x%08x"
+            " if=%d inhibit=%d gif=%d poll=%d hard=%d"
+            " eax=0x%08" PRIx64 " ebx=0x%08" PRIx64
+            " ecx=0x%08" PRIx64 " edx=0x%08" PRIx64
+            " esi=0x%08" PRIx64 " edi=0x%08" PRIx64
+            " esp=0x%08" PRIx64 " ebp=0x%08" PRIx64 "\n",
+            phase, count, raw, pending, pc,
+            (uint64_t)env->eip, (uint64_t)env->segs[R_CS].base,
+            (uint64_t)env->eflags, env->hflags, env->hflags2,
+            !!(env->eflags & IF_MASK),
+            !!(env->hflags & HF_INHIBIT_IRQ_MASK),
+            !!(env->hflags2 & HF2_GIF_MASK),
+            !!(raw & CPU_INTERRUPT_POLL),
+            !!(raw & CPU_INTERRUPT_HARD),
+            (uint64_t)env->regs[R_EAX], (uint64_t)env->regs[R_EBX],
+            (uint64_t)env->regs[R_ECX], (uint64_t)env->regs[R_EDX],
+            (uint64_t)env->regs[R_ESI], (uint64_t)env->regs[R_EDI],
+            (uint64_t)env->regs[R_ESP], (uint64_t)env->regs[R_EBP]);
+}
+#endif
+
 int x86_cpu_pending_interrupt(CPUState *cs, int interrupt_request)
 {
     X86CPU *cpu = X86_CPU(cs);
     CPUX86State *env = &cpu->env;
 
     if (interrupt_request & CPU_INTERRUPT_POLL) {
+#ifdef CONFIG_IOS
+        ios_x86_log_pending_irq(cs, env, "poll", interrupt_request,
+                                CPU_INTERRUPT_POLL);
+#endif
         return CPU_INTERRUPT_POLL;
     }
     if (interrupt_request & CPU_INTERRUPT_SIPI) {
@@ -9877,6 +10042,10 @@ int x86_cpu_pending_interrupt(CPUState *cs, int interrupt_request)
                     (!(env->hflags2 & HF2_VINTR_MASK) &&
                      (env->eflags & IF_MASK &&
                       !(env->hflags & HF_INHIBIT_IRQ_MASK))))) {
+#ifdef CONFIG_IOS
+            ios_x86_log_pending_irq(cs, env, "hard-ready",
+                                    interrupt_request, CPU_INTERRUPT_HARD);
+#endif
             return CPU_INTERRUPT_HARD;
         } else if (env->hflags2 & HF2_VGIF_MASK) {
             if((interrupt_request & CPU_INTERRUPT_VIRQ) &&
@@ -9887,6 +10056,9 @@ int x86_cpu_pending_interrupt(CPUState *cs, int interrupt_request)
         }
     }
 
+#ifdef CONFIG_IOS
+    ios_x86_log_pending_irq(cs, env, "blocked", interrupt_request, 0);
+#endif
     return 0;
 }
 

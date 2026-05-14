@@ -28,28 +28,183 @@
 #include "tcg/helper-tcg.h"
 #include "hw/i386/apic.h"
 
+#ifdef CONFIG_IOS
+static bool ios_io_trace_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_IO_TRACE");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+static bool ios_io_trace_port(uint32_t port)
+{
+    return (port >= 0xff60 && port <= 0xff6f) ||
+           (port >= 0xc000 && port <= 0xc00f);
+}
+
+static bool ios_io_log_count(uint64_t count)
+{
+    return ios_io_trace_enabled() &&
+           (count <= 24 || (count % 1024) == 0);
+}
+
+static bool ios_io_skip_ff60(void)
+{
+    static int skip = -1;
+
+    if (skip < 0) {
+        skip = g_strcmp0(g_getenv("XEMU_IOS_SKIP_FF60"), "1") == 0;
+        if (skip) {
+            fprintf(stderr, "xemu_ios: io port 0xff60 skip enabled\n");
+        }
+    }
+
+    return skip;
+}
+
+static void ios_io_log(CPUX86State *env, const char *op, const char *phase,
+                       uint64_t count, uint32_t port, uint32_t data)
+{
+    uint64_t pc = (uint64_t)(env->eip + env->segs[R_CS].base);
+
+    fprintf(stderr,
+            "xemu_ios: io %s %s #%" PRIu64
+            " pc=0x%016" PRIx64 " port=0x%04x data=0x%08x"
+            " eax=0x%08" PRIx64 " ebx=0x%08" PRIx64
+            " ecx=0x%08" PRIx64 " edx=0x%08" PRIx64
+            " esi=0x%08" PRIx64 " edi=0x%08" PRIx64
+            " esp=0x%08" PRIx64 " ebp=0x%08" PRIx64
+            " eflags=0x%08x\n",
+            op, phase, count, pc, port, data,
+            (uint64_t)env->regs[R_EAX],
+            (uint64_t)env->regs[R_EBX],
+            (uint64_t)env->regs[R_ECX],
+            (uint64_t)env->regs[R_EDX],
+            (uint64_t)env->regs[R_ESI],
+            (uint64_t)env->regs[R_EDI],
+            (uint64_t)env->regs[R_ESP],
+            (uint64_t)env->regs[R_EBP],
+            env->eflags);
+}
+#endif
+
 void helper_outb(CPUX86State *env, uint32_t port, uint32_t data)
 {
+#ifdef CONFIG_IOS
+    static uint64_t traced_outb_count;
+    uint64_t log_count = 0;
+    bool log_io = false;
+
+    if (ios_io_trace_port(port)) {
+        log_count = ++traced_outb_count;
+        log_io = ios_io_log_count(log_count);
+        if (log_io) {
+            ios_io_log(env, "outb", "begin", log_count, port, data & 0xff);
+        }
+        if (port == 0xff60 && ios_io_skip_ff60()) {
+            if (log_io) {
+                ios_io_log(env, "outb", "skip", log_count, port, data & 0xff);
+            }
+            return;
+        }
+    }
+#endif
+
     address_space_stb(&address_space_io, port, data,
                       cpu_get_mem_attrs(env), NULL);
+
+#ifdef CONFIG_IOS
+    if (log_io) {
+        ios_io_log(env, "outb", "end", log_count, port, data & 0xff);
+    }
+#endif
 }
 
 target_ulong helper_inb(CPUX86State *env, uint32_t port)
 {
-    return address_space_ldub(&address_space_io, port,
-                              cpu_get_mem_attrs(env), NULL);
+    target_ulong ret;
+#ifdef CONFIG_IOS
+    static uint64_t traced_inb_count;
+    uint64_t log_count = 0;
+    bool log_io = false;
+
+    if (ios_io_trace_port(port)) {
+        log_count = ++traced_inb_count;
+        log_io = ios_io_log_count(log_count);
+        if (log_io) {
+            ios_io_log(env, "inb", "begin", log_count, port, 0);
+        }
+    }
+#endif
+
+    ret = address_space_ldub(&address_space_io, port,
+                             cpu_get_mem_attrs(env), NULL);
+
+#ifdef CONFIG_IOS
+    if (log_io) {
+        ios_io_log(env, "inb", "end", log_count, port, ret & 0xff);
+    }
+#endif
+    return ret;
 }
 
 void helper_outw(CPUX86State *env, uint32_t port, uint32_t data)
 {
+#ifdef CONFIG_IOS
+    static uint64_t traced_outw_count;
+    uint64_t log_count = 0;
+    bool log_io = false;
+
+    if (ios_io_trace_port(port)) {
+        log_count = ++traced_outw_count;
+        log_io = ios_io_log_count(log_count);
+        if (log_io) {
+            ios_io_log(env, "outw", "begin", log_count, port, data & 0xffff);
+        }
+    }
+#endif
+
     address_space_stw(&address_space_io, port, data,
                       cpu_get_mem_attrs(env), NULL);
+
+#ifdef CONFIG_IOS
+    if (log_io) {
+        ios_io_log(env, "outw", "end", log_count, port, data & 0xffff);
+    }
+#endif
 }
 
 target_ulong helper_inw(CPUX86State *env, uint32_t port)
 {
-    return address_space_lduw(&address_space_io, port,
-                              cpu_get_mem_attrs(env), NULL);
+    target_ulong ret;
+#ifdef CONFIG_IOS
+    static uint64_t traced_inw_count;
+    uint64_t log_count = 0;
+    bool log_io = false;
+
+    if (ios_io_trace_port(port)) {
+        log_count = ++traced_inw_count;
+        log_io = ios_io_log_count(log_count);
+        if (log_io) {
+            ios_io_log(env, "inw", "begin", log_count, port, 0);
+        }
+    }
+#endif
+
+    ret = address_space_lduw(&address_space_io, port,
+                             cpu_get_mem_attrs(env), NULL);
+
+#ifdef CONFIG_IOS
+    if (log_io) {
+        ios_io_log(env, "inw", "end", log_count, port, ret & 0xffff);
+    }
+#endif
+    return ret;
 }
 
 void helper_outl(CPUX86State *env, uint32_t port, uint32_t data)

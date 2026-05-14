@@ -145,7 +145,11 @@ void xemu_hud_init(SDL_Window* window, void* sdl_gl_context)
 
     // Setup Platform/Renderer bindings
     ImGui_ImplSDL3_InitForOpenGL(window, sdl_gl_context);
+#ifdef CONFIG_IOS
+    ImGui_ImplOpenGL3_Init("#version 300 es");
+#else
     ImGui_ImplOpenGL3_Init("#version 150");
+#endif
     ImPlot::CreateContext();
 
 #if defined(_WIN32)
@@ -226,6 +230,7 @@ void xemu_hud_update(void)
     }
 #endif
 
+#if !defined(CONFIG_IOS)
     if (g_config.display.ui.show_menubar && !first_boot_window.is_open) {
         // Auto-hide main menu after 5s of inactivity
         static uint32_t last_check = 0;
@@ -258,6 +263,7 @@ void xemu_hud_update(void)
             g_main_menu_height = 0;
         }
     }
+#endif
 
     static uint32_t last_mouse_move = 0;
     if (g_input_mgr.MouseMoved()) {

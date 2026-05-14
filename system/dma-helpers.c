@@ -73,6 +73,147 @@ typedef struct {
     void *io_func_opaque;
 } DMAAIOCB;
 
+#ifdef CONFIG_IOS
+static bool ios_dma_trace_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_DMA_TRACE");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+static bool ios_dma_should_log(uint64_t count)
+{
+    return ios_dma_trace_enabled() &&
+           (count <= 64 || (count % 1024) == 0);
+}
+
+static void ios_dma_blk_log(DMAAIOCB *dbs, const char *phase, int ret,
+                            dma_addr_t addr, dma_addr_t len, void *mem)
+{
+    static uint64_t count;
+    uint64_t n = ++count;
+
+    if (!ios_dma_should_log(n)) {
+        return;
+    }
+
+    fprintf(stderr,
+            "xemu_ios: dma blk %s #%" PRIu64
+            " ret=%d offset=0x%016" PRIx64
+            " idx=%d byte=0x%016" PRIx64
+            " nsg=%d sg_size=0x%016" PRIx64
+            " iov_size=0x%016" PRIx64
+            " addr=0x%016" PRIx64 " len=0x%016" PRIx64
+            " mem=%p acb=%p bh=%p dir=%d\n",
+            phase, n, ret, dbs->offset, dbs->sg_cur_index,
+            (uint64_t)dbs->sg_cur_byte,
+            dbs->sg ? dbs->sg->nsg : -1,
+            dbs->sg ? (uint64_t)dbs->sg->size : 0,
+            (uint64_t)dbs->iov.size,
+            (uint64_t)addr, (uint64_t)len, mem, dbs->acb, dbs->bh, dbs->dir);
+}
+
+static bool ios_dma_sync_enabled(void)
+{
+    const char *env = getenv("XEMU_IOS_SYNC_DMA");
+
+    return !env || strcmp(env, "0") != 0;
+}
+
+static void ios_dma_sync_log(const char *phase, int ret, uint64_t offset,
+                             QEMUSGList *sg, uint64_t iov_size,
+                             DMADirection dir)
+{
+    static uint64_t count;
+    uint64_t n = ++count;
+
+    if (!ios_dma_should_log(n)) {
+        return;
+    }
+
+    fprintf(stderr,
+            "xemu_ios: dma sync %s #%" PRIu64
+            " ret=%d offset=0x%016" PRIx64
+            " nsg=%d sg_size=0x%016" PRIx64
+            " iov_size=0x%016" PRIx64 " dir=%d\n",
+            phase, n, ret, offset, sg ? sg->nsg : -1,
+            sg ? (uint64_t)sg->size : 0, iov_size, dir);
+}
+
+static bool ios_dma_blk_rw_sync(BlockBackend *blk, QEMUSGList *sg,
+                                uint64_t offset, uint32_t align,
+                                BlockCompletionFunc *cb, void *opaque,
+                                DMADirection dir, BlockAIOCB **aiocb)
+{
+    QEMUIOVector iov;
+    int ret = 0;
+
+    *aiocb = NULL;
+
+    if (!ios_dma_sync_enabled()) {
+        return false;
+    }
+
+    ios_dma_sync_log("enter", 0, offset, sg, 0, dir);
+
+    if (!sg || sg->size == 0 || !QEMU_IS_ALIGNED(sg->size, align)) {
+        ret = -EINVAL;
+        goto out_no_iov;
+    }
+
+    qemu_iovec_init(&iov, sg->nsg);
+    for (int i = 0; i < sg->nsg; i++) {
+        dma_addr_t addr = sg->sg[i].base;
+        dma_addr_t remaining = sg->sg[i].len;
+
+        while (remaining > 0) {
+            dma_addr_t len = remaining;
+            void *mem = dma_memory_map(sg->as, addr, &len, dir,
+                                       MEMTXATTRS_UNSPECIFIED);
+
+            if (!mem || len == 0) {
+                if (mem) {
+                    dma_memory_unmap(sg->as, mem, len, dir, len);
+                }
+                ret = -EFAULT;
+                goto out_unmap;
+            }
+
+            qemu_iovec_add(&iov, mem, len);
+            addr += len;
+            remaining -= len;
+        }
+    }
+
+    ios_dma_sync_log("io-call", 0, offset, sg, iov.size, dir);
+    if (dir == DMA_DIRECTION_FROM_DEVICE) {
+        ret = blk_preadv(blk, offset, iov.size, &iov, 0);
+    } else {
+        ret = blk_pwritev(blk, offset, iov.size, &iov, 0);
+    }
+    ios_dma_sync_log("io-return", ret, offset, sg, iov.size, dir);
+
+out_unmap:
+    for (int i = 0; i < iov.niov; i++) {
+        dma_memory_unmap(sg->as, iov.iov[i].iov_base, iov.iov[i].iov_len,
+                         dir, iov.iov[i].iov_len);
+    }
+    qemu_iovec_destroy(&iov);
+
+out_no_iov:
+    ios_dma_sync_log("complete", ret, offset, sg, 0, dir);
+    if (cb) {
+        cb(opaque, ret);
+    }
+    return true;
+}
+#endif
+
 static void dma_blk_cb(void *opaque, int ret);
 
 static void reschedule_dma(void *opaque)
@@ -102,6 +243,9 @@ static void dma_complete(DMAAIOCB *dbs, int ret)
     trace_dma_complete(dbs, ret, dbs->common.cb);
 
     assert(!dbs->acb && !dbs->bh);
+#ifdef CONFIG_IOS
+    ios_dma_blk_log(dbs, "complete", ret, 0, 0, NULL);
+#endif
     dma_blk_unmap(dbs);
     if (dbs->common.cb) {
         dbs->common.cb(dbs->common.opaque, ret);
@@ -118,6 +262,9 @@ static void dma_blk_cb(void *opaque, int ret)
     void *mem;
 
     trace_dma_blk_cb(dbs, ret);
+#ifdef CONFIG_IOS
+    ios_dma_blk_log(dbs, "cb-enter", ret, 0, 0, NULL);
+#endif
 
     /* DMAAIOCB is not thread-safe and must be accessed only from dbs->ctx */
     assert(ctx == qemu_get_current_aio_context());
@@ -136,6 +283,10 @@ static void dma_blk_cb(void *opaque, int ret)
         cur_len = dbs->sg->sg[dbs->sg_cur_index].len - dbs->sg_cur_byte;
         mem = dma_memory_map(dbs->sg->as, cur_addr, &cur_len, dbs->dir,
                              MEMTXATTRS_UNSPECIFIED);
+#ifdef CONFIG_IOS
+        ios_dma_blk_log(dbs, mem ? "map" : "map-null", ret,
+                        cur_addr, cur_len, mem);
+#endif
         /*
          * Make reads deterministic in icount mode. Windows sometimes issues
          * disk read requests with overlapping SGs. It leads
@@ -169,6 +320,9 @@ static void dma_blk_cb(void *opaque, int ret)
     if (dbs->iov.size == 0) {
         trace_dma_map_wait(dbs);
         dbs->bh = aio_bh_new(ctx, reschedule_dma, dbs);
+#ifdef CONFIG_IOS
+        ios_dma_blk_log(dbs, "map-wait", ret, 0, 0, NULL);
+#endif
         address_space_register_map_client(dbs->sg->as, dbs->bh);
         return;
     }
@@ -178,8 +332,14 @@ static void dma_blk_cb(void *opaque, int ret)
                                 QEMU_ALIGN_DOWN(dbs->iov.size, dbs->align));
     }
 
+#ifdef CONFIG_IOS
+    ios_dma_blk_log(dbs, "io-call", ret, 0, 0, NULL);
+#endif
     dbs->acb = dbs->io_func(dbs->offset, &dbs->iov,
                             dma_blk_cb, dbs, dbs->io_func_opaque);
+#ifdef CONFIG_IOS
+    ios_dma_blk_log(dbs, "io-return", ret, 0, 0, NULL);
+#endif
     assert(dbs->acb);
 }
 
@@ -233,7 +393,13 @@ BlockAIOCB *dma_blk_io(
     dbs->io_func_opaque = io_func_opaque;
     dbs->bh = NULL;
     qemu_iovec_init(&dbs->iov, sg->nsg);
+#ifdef CONFIG_IOS
+    ios_dma_blk_log(dbs, "io-enter", 0, 0, 0, NULL);
+#endif
     dma_blk_cb(dbs, 0);
+#ifdef CONFIG_IOS
+    ios_dma_blk_log(dbs, "io-exit", 0, 0, 0, NULL);
+#endif
     return &dbs->common;
 }
 
@@ -251,6 +417,14 @@ BlockAIOCB *dma_blk_read(BlockBackend *blk,
                          QEMUSGList *sg, uint64_t offset, uint32_t align,
                          void (*cb)(void *opaque, int ret), void *opaque)
 {
+#ifdef CONFIG_IOS
+    BlockAIOCB *aiocb;
+
+    if (ios_dma_blk_rw_sync(blk, sg, offset, align, cb, opaque,
+                            DMA_DIRECTION_FROM_DEVICE, &aiocb)) {
+        return aiocb;
+    }
+#endif
     return dma_blk_io(sg, offset, align,
                       dma_blk_read_io_func, blk, cb, opaque,
                       DMA_DIRECTION_FROM_DEVICE);
@@ -269,6 +443,14 @@ BlockAIOCB *dma_blk_write(BlockBackend *blk,
                           QEMUSGList *sg, uint64_t offset, uint32_t align,
                           void (*cb)(void *opaque, int ret), void *opaque)
 {
+#ifdef CONFIG_IOS
+    BlockAIOCB *aiocb;
+
+    if (ios_dma_blk_rw_sync(blk, sg, offset, align, cb, opaque,
+                            DMA_DIRECTION_TO_DEVICE, &aiocb)) {
+        return aiocb;
+    }
+#endif
     return dma_blk_io(sg, offset, align,
                       dma_blk_write_io_func, blk, cb, opaque,
                       DMA_DIRECTION_TO_DEVICE);
@@ -344,4 +526,3 @@ uint64_t dma_aligned_pow2_mask(uint64_t start, uint64_t end, int max_addr_bits)
         return (1ULL << (63 - clz64(addr_mask + 1))) - 1;
     }
 }
-

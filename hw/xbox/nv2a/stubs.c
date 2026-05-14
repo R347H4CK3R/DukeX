@@ -42,7 +42,51 @@ DEFINE_STUB(pcounter, NV_PCOUNTER)
 DEFINE_STUB(pvpe, NV_PVPE)
 DEFINE_STUB(ptv, NV_PTV)
 DEFINE_STUB(prmfb, NV_PRMFB)
-DEFINE_STUB(pstraps, NV_PSTRAPS)
 // DEFINE_STUB(pramin, NV_PRAMIN)
 
 #undef DEFINE_STUB
+
+uint64_t pstraps_read(void *opaque, hwaddr addr, unsigned int size)
+{
+    uint64_t val = 0;
+#ifdef CONFIG_IOS
+    static bool ios_pstraps_env_checked;
+    static bool ios_pstraps_override_enabled;
+    static uint64_t ios_pstraps_override;
+    static unsigned ios_pstraps_read_logs;
+
+    if (!ios_pstraps_env_checked) {
+        const char *override = g_getenv("XEMU_IOS_PSTRAPS_VALUE");
+
+        ios_pstraps_env_checked = true;
+        if (override && *override) {
+            ios_pstraps_override = g_ascii_strtoull(override, NULL, 0);
+            ios_pstraps_override_enabled = true;
+            fprintf(stderr,
+                    "xemu_ios: pstraps override enabled value=0x%016"
+                    PRIx64 "\n",
+                    ios_pstraps_override);
+        }
+    }
+
+    if (ios_pstraps_override_enabled) {
+        val = ios_pstraps_override;
+    }
+
+    if (ios_pstraps_read_logs < 48 || (ios_pstraps_read_logs % 1024) == 0) {
+        fprintf(stderr,
+                "xemu_ios: pstraps read[%u] addr=0x%" HWADDR_PRIx
+                " size=%u val=0x%016" PRIx64 "\n",
+                ios_pstraps_read_logs, addr, size, val);
+    }
+    ios_pstraps_read_logs++;
+#endif
+
+    nv2a_reg_log_read(NV_PSTRAPS, addr, size, val);
+    return val;
+}
+
+void pstraps_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
+{
+    nv2a_reg_log_write(NV_PSTRAPS, addr, size, val);
+}

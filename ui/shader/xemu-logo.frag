@@ -13,7 +13,7 @@ const vec4 textPos      = vec4(0.01, 0, 0.98, 0.125);
 const float pi          = 3.14159265359;
 const float lineWidth   = 0.175;
 const float duration    = 1.25;
-const float pause       = 6.;
+const float pause       = 6.0;
 const int numParticles  = 35;
 const int numSpotlights = 5;
 
@@ -158,7 +158,7 @@ float getParticles(vec2 uv)
 
 void main()
 {
-    vec2 uv = gl_FragCoord.xy/vec2(512);
+    vec2 uv = gl_FragCoord.xy/vec2(512.0);
     float scale = 1.4;
     uv -= 0.5 * (1.-1./scale);
     uv *= scale;
@@ -177,6 +177,6 @@ void main()
     out_Color = mix(fill_color, line_color, getSweepingLine(uv));
     float mask_rhs = clamp(sign(uv.x-lineWidth-getSweepingLinePos()),0.,1.);
     out_Color += fill_color*mask_rhs*getSpotlights(uv);
-    out_Color += mix(vec4(0), fgColor, getParticles(uv));
+    out_Color += mix(vec4(0.0), fgColor, getParticles(uv));
     out_Color += 2.*fgColor*getBox(uv, textPos.x, textPos.z)*getGradients(uv);
 }

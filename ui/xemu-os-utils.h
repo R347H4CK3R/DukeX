@@ -26,6 +26,9 @@ extern "C" {
 
 const char *xemu_get_os_info(void);
 
+void xemu_ios_configure_metal_layer_hud(void *metal_layer);
+void xemu_ios_configure_presenter_metal_layer(void *metal_layer);
+
 #ifdef CONFIG_CPUID_H
 #include <cpuid.h>
 #endif

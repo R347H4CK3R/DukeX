@@ -45,10 +45,10 @@
 
 #if defined(__APPLE__) && (__MACH__)
 #include <sys/ioctl.h>
+#include <sys/mount.h>
 #if defined(HAVE_HOST_BLOCK_DEVICE)
 #include <paths.h>
 #include <sys/param.h>
-#include <sys/mount.h>
 #include <IOKit/IOKitLib.h>
 #include <IOKit/IOBSD.h>
 #include <IOKit/storage/IOMediaBSDClient.h>
@@ -2525,6 +2525,32 @@ static int coroutine_fn raw_thread_pool_submit(ThreadPoolFunc func, void *arg)
     return thread_pool_submit_co(func, arg);
 }
 
+#ifdef CONFIG_IOS
+static bool ios_raw_sync_enabled(void)
+{
+    const char *env = getenv("XEMU_IOS_SYNC_RAW");
+
+    return !env || strcmp(env, "0") != 0;
+}
+
+static void ios_raw_sync_log(const char *phase, int ret, int fd,
+                             uint64_t offset, uint64_t bytes, int type)
+{
+    static uint64_t count;
+    uint64_t n = ++count;
+
+    if (n > 64 && (n % 1024) != 0) {
+        return;
+    }
+
+    fprintf(stderr,
+            "xemu_ios: raw sync %s #%" PRIu64
+            " ret=%d fd=%d offset=0x%016" PRIx64
+            " bytes=0x%016" PRIx64 " type=0x%x\n",
+            phase, n, ret, fd, offset, bytes, type);
+}
+#endif
+
 /*
  * Check if all memory in this vector is sector aligned.
  */
@@ -2626,6 +2652,13 @@ raw_co_prw(BlockDriverState *bs, int64_t *offset_ptr, uint64_t bytes,
     };
 
     assert(qiov->size == bytes);
+#ifdef CONFIG_IOS
+    if (ios_raw_sync_enabled()) {
+        ios_raw_sync_log("call", 0, acb.aio_fildes, offset, bytes, type);
+        ret = handle_aiocb_rw(&acb);
+        ios_raw_sync_log("return", ret, acb.aio_fildes, offset, bytes, type);
+    } else
+#endif
     ret = raw_thread_pool_submit(handle_aiocb_rw, &acb);
     if (ret == 0 && (flags & BDRV_REQ_FUA)) {
         /* TODO Use pwritev2() instead if it's available */

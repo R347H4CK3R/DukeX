@@ -19,8 +19,33 @@
 
 #include "qemu/osdep.h"
 #include "qemu/fast-hash.h"
+#include "ui/xemu-settings.h"
 #include "renderer.h"
 #include <math.h>
+
+#ifdef CONFIG_IOS
+#define IOS_VK_LOG(...) \
+    do { \
+        fprintf(stderr, "xemu_ios: vk: " __VA_ARGS__); \
+        fputc('\n', stderr); \
+        fflush(stderr); \
+    } while (0)
+static bool ios_vk_submit_trace_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_VK_SUBMIT_TRACE");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+#else
+#define IOS_VK_LOG(...) \
+    do { \
+    } while (0)
+#endif
 
 void pgraph_vk_draw_begin(NV2AState *d)
 {
@@ -47,10 +72,264 @@ void pgraph_vk_draw_begin(NV2AState *d)
     }
 }
 
+static bool pgraph_vk_cpu_expand_quads(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    int primitive_mode = pg->primitive_mode;
+    int polygon_mode = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+                                NV_PGRAPH_SETUPRASTER_FRONTFACEMODE);
+
+    if (r->enabled_physical_device_features.geometryShader == VK_TRUE) {
+        return false;
+    }
+
+    if (polygon_mode != POLY_MODE_FILL) {
+        return false;
+    }
+
+    return primitive_mode == PRIM_TYPE_QUADS ||
+           primitive_mode == PRIM_TYPE_QUAD_STRIP;
+}
+
+static bool pgraph_vk_cpu_expand_indices(PGRAPHState *pg)
+{
+    int primitive_mode = pg->primitive_mode;
+    int polygon_mode = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+                                NV_PGRAPH_SETUPRASTER_FRONTFACEMODE);
+
+    if (pgraph_vk_cpu_expand_quads(pg)) {
+        return true;
+    }
+
+#ifdef CONFIG_IOS
+    switch (primitive_mode) {
+    case PRIM_TYPE_LINE_LOOP:
+    case PRIM_TYPE_LINE_STRIP:
+    case PRIM_TYPE_TRIANGLE_STRIP:
+    case PRIM_TYPE_TRIANGLE_FAN:
+        return true;
+    case PRIM_TYPE_POLYGON:
+        return polygon_mode == POLY_MODE_LINE || polygon_mode == POLY_MODE_FILL;
+    default:
+        return false;
+    }
+#else
+    return false;
+#endif
+}
+
+static void append_index(GArray *indices, uint32_t index)
+{
+    g_array_append_val(indices, index);
+}
+
+static uint32_t expanded_index_count(PGRAPHState *pg, uint32_t count)
+{
+    int primitive_mode = pg->primitive_mode;
+    int polygon_mode = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+                                NV_PGRAPH_SETUPRASTER_FRONTFACEMODE);
+
+    switch (primitive_mode) {
+    case PRIM_TYPE_LINE_LOOP:
+        return count >= 2 ? count * 2 : 0;
+    case PRIM_TYPE_LINE_STRIP:
+        return count >= 2 ? (count - 1) * 2 : 0;
+    case PRIM_TYPE_TRIANGLE_STRIP:
+    case PRIM_TYPE_TRIANGLE_FAN:
+        return count >= 3 ? (count - 2) * 3 : 0;
+    case PRIM_TYPE_QUADS:
+        return (count / 4) * 6;
+    case PRIM_TYPE_QUAD_STRIP:
+        return count >= 4 ? ((count - 2) / 2) * 6 : 0;
+    case PRIM_TYPE_POLYGON:
+        if (polygon_mode == POLY_MODE_LINE) {
+            return count >= 2 ? (count - 1) * 2 : 0;
+        } else if (polygon_mode == POLY_MODE_FILL) {
+            return count >= 3 ? (count - 2) * 3 : 0;
+        }
+        assert(!"Invalid polygon mode for primitive expansion");
+        return 0;
+    default:
+        assert(!"Invalid primitive mode for expansion");
+        return 0;
+    }
+}
+
+static void append_expanded_indices(PGRAPHState *pg, GArray *indices,
+                                    const uint32_t *elements, uint32_t count)
+{
+    int primitive_mode = pg->primitive_mode;
+    int polygon_mode = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+                                NV_PGRAPH_SETUPRASTER_FRONTFACEMODE);
+
+    switch (primitive_mode) {
+    case PRIM_TYPE_LINE_LOOP:
+        for (uint32_t i = 0; i + 1 < count; i++) {
+            append_index(indices, elements[i]);
+            append_index(indices, elements[i + 1]);
+        }
+        if (count >= 2) {
+            append_index(indices, elements[count - 1]);
+            append_index(indices, elements[0]);
+        }
+        break;
+    case PRIM_TYPE_LINE_STRIP:
+        for (uint32_t i = 0; i + 1 < count; i++) {
+            append_index(indices, elements[i]);
+            append_index(indices, elements[i + 1]);
+        }
+        break;
+    case PRIM_TYPE_TRIANGLE_STRIP:
+        for (uint32_t i = 0; i + 2 < count; i++) {
+            if (i & 1) {
+                append_index(indices, elements[i + 1]);
+                append_index(indices, elements[i + 0]);
+                append_index(indices, elements[i + 2]);
+            } else {
+                append_index(indices, elements[i + 0]);
+                append_index(indices, elements[i + 1]);
+                append_index(indices, elements[i + 2]);
+            }
+        }
+        break;
+    case PRIM_TYPE_TRIANGLE_FAN:
+        for (uint32_t i = 1; i + 1 < count; i++) {
+            append_index(indices, elements[0]);
+            append_index(indices, elements[i]);
+            append_index(indices, elements[i + 1]);
+        }
+        break;
+    case PRIM_TYPE_QUADS:
+        for (uint32_t i = 0; i + 3 < count; i += 4) {
+            append_index(indices, elements[i + 1]);
+            append_index(indices, elements[i + 2]);
+            append_index(indices, elements[i + 0]);
+            append_index(indices, elements[i + 2]);
+            append_index(indices, elements[i + 3]);
+            append_index(indices, elements[i + 0]);
+        }
+        break;
+    case PRIM_TYPE_QUAD_STRIP:
+        for (uint32_t i = 0; i + 3 < count; i += 2) {
+            append_index(indices, elements[i + 0]);
+            append_index(indices, elements[i + 1]);
+            append_index(indices, elements[i + 2]);
+            append_index(indices, elements[i + 2]);
+            append_index(indices, elements[i + 1]);
+            append_index(indices, elements[i + 3]);
+        }
+        break;
+    case PRIM_TYPE_POLYGON:
+        if (polygon_mode == POLY_MODE_LINE) {
+            for (uint32_t i = 0; i + 1 < count; i++) {
+                append_index(indices, elements[i]);
+                append_index(indices, elements[i + 1]);
+            }
+        } else if (polygon_mode == POLY_MODE_FILL) {
+            for (uint32_t i = 1; i + 1 < count; i++) {
+                append_index(indices, elements[0]);
+                append_index(indices, elements[i]);
+                append_index(indices, elements[i + 1]);
+            }
+        } else {
+            assert(!"Invalid polygon mode for primitive expansion");
+        }
+        break;
+    default:
+        assert(!"Invalid primitive mode for expansion");
+        break;
+    }
+}
+
+static void append_expanded_sequential_indices(PGRAPHState *pg, GArray *indices,
+                                               uint32_t start, uint32_t count)
+{
+    int primitive_mode = pg->primitive_mode;
+    int polygon_mode = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+                                NV_PGRAPH_SETUPRASTER_FRONTFACEMODE);
+
+    switch (primitive_mode) {
+    case PRIM_TYPE_LINE_LOOP:
+        for (uint32_t i = 0; i + 1 < count; i++) {
+            append_index(indices, start + i);
+            append_index(indices, start + i + 1);
+        }
+        if (count >= 2) {
+            append_index(indices, start + count - 1);
+            append_index(indices, start);
+        }
+        break;
+    case PRIM_TYPE_LINE_STRIP:
+        for (uint32_t i = 0; i + 1 < count; i++) {
+            append_index(indices, start + i);
+            append_index(indices, start + i + 1);
+        }
+        break;
+    case PRIM_TYPE_TRIANGLE_STRIP:
+        for (uint32_t i = 0; i + 2 < count; i++) {
+            if (i & 1) {
+                append_index(indices, start + i + 1);
+                append_index(indices, start + i + 0);
+                append_index(indices, start + i + 2);
+            } else {
+                append_index(indices, start + i + 0);
+                append_index(indices, start + i + 1);
+                append_index(indices, start + i + 2);
+            }
+        }
+        break;
+    case PRIM_TYPE_TRIANGLE_FAN:
+        for (uint32_t i = 1; i + 1 < count; i++) {
+            append_index(indices, start);
+            append_index(indices, start + i);
+            append_index(indices, start + i + 1);
+        }
+        break;
+    case PRIM_TYPE_QUADS:
+        for (uint32_t i = 0; i + 3 < count; i += 4) {
+            append_index(indices, start + i + 1);
+            append_index(indices, start + i + 2);
+            append_index(indices, start + i + 0);
+            append_index(indices, start + i + 2);
+            append_index(indices, start + i + 3);
+            append_index(indices, start + i + 0);
+        }
+        break;
+    case PRIM_TYPE_QUAD_STRIP:
+        for (uint32_t i = 0; i + 3 < count; i += 2) {
+            append_index(indices, start + i + 0);
+            append_index(indices, start + i + 1);
+            append_index(indices, start + i + 2);
+            append_index(indices, start + i + 2);
+            append_index(indices, start + i + 1);
+            append_index(indices, start + i + 3);
+        }
+        break;
+    case PRIM_TYPE_POLYGON:
+        if (polygon_mode == POLY_MODE_LINE) {
+            for (uint32_t i = 0; i + 1 < count; i++) {
+                append_index(indices, start + i);
+                append_index(indices, start + i + 1);
+            }
+        } else if (polygon_mode == POLY_MODE_FILL) {
+            for (uint32_t i = 1; i + 1 < count; i++) {
+                append_index(indices, start);
+                append_index(indices, start + i);
+                append_index(indices, start + i + 1);
+            }
+        } else {
+            assert(!"Invalid polygon mode for primitive expansion");
+        }
+        break;
+    default:
+        assert(!"Invalid primitive mode for expansion");
+        break;
+    }
+}
+
 static VkPrimitiveTopology get_primitive_topology(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
-
     int polygon_mode = r->shader_binding->state.geom.polygon_front_mode;
     int primitive_mode = r->shader_binding->state.geom.primitive_mode;
 
@@ -61,24 +340,48 @@ static VkPrimitiveTopology get_primitive_topology(PGRAPHState *pg)
     case PRIM_TYPE_LINES:
         return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
     case PRIM_TYPE_LINE_LOOP:
+        if (pgraph_vk_cpu_expand_indices(pg)) {
+            return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+        }
         // FIXME: line strips, except that the first and last vertices are also used as a line
         return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
     case PRIM_TYPE_LINE_STRIP:
+        if (pgraph_vk_cpu_expand_indices(pg)) {
+            return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+        }
         return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
     case PRIM_TYPE_TRIANGLES:
         return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     case PRIM_TYPE_TRIANGLE_STRIP:
+        if (pgraph_vk_cpu_expand_indices(pg)) {
+            return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        }
         return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
     case PRIM_TYPE_TRIANGLE_FAN:
+        if (pgraph_vk_cpu_expand_indices(pg)) {
+            return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        }
         return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
     case PRIM_TYPE_QUADS:
+        if (pgraph_vk_cpu_expand_quads(pg)) {
+            return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        }
         return VK_PRIMITIVE_TOPOLOGY_LINE_LIST_WITH_ADJACENCY;
     case PRIM_TYPE_QUAD_STRIP:
+        if (pgraph_vk_cpu_expand_quads(pg)) {
+            return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        }
         return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP_WITH_ADJACENCY;
     case PRIM_TYPE_POLYGON:
         if (polygon_mode == POLY_MODE_LINE) {
+            if (pgraph_vk_cpu_expand_indices(pg)) {
+                return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+            }
             return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP; // FIXME
         } else if (polygon_mode == POLY_MODE_FILL) {
+            if (pgraph_vk_cpu_expand_indices(pg)) {
+                return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+            }
             return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
         }
         assert(!"PRIM_TYPE_POLYGON with invalid polygon_mode");
@@ -121,19 +424,231 @@ static bool pipeline_cache_entry_compare(Lru *lru, LruNode *node,
     return memcmp(&snode->key, key, sizeof(PipelineKey));
 }
 
+static char *vk_pipeline_cache_get_dir(void)
+{
+    const char *path = getenv("XEMU_IOS_VK_PIPELINE_CACHE_PATH");
+
+    if (path && path[0]) {
+        return g_path_get_dirname(path);
+    }
+
+    return g_strdup_printf("%sshader_cache", xemu_settings_get_base_path());
+}
+
+static char *vk_pipeline_cache_get_path(void)
+{
+    const char *env_path = getenv("XEMU_IOS_VK_PIPELINE_CACHE_PATH");
+
+    if (env_path && env_path[0]) {
+        return g_strdup(env_path);
+    }
+
+    char *dir = vk_pipeline_cache_get_dir();
+    char *path = g_strdup_printf("%s/vulkan_pipeline_cache.bin", dir);
+
+    g_free(dir);
+    return path;
+}
+
+static void *vk_pipeline_cache_load(gsize *size)
+{
+    char *dir;
+    char *path;
+    gchar *data = NULL;
+    GError *error = NULL;
+
+    *size = 0;
+    if (!g_config.perf.cache_shaders) {
+        return NULL;
+    }
+
+    dir = vk_pipeline_cache_get_dir();
+    qemu_mkdir(dir);
+    g_free(dir);
+
+    path = vk_pipeline_cache_get_path();
+    if (!g_file_get_contents(path, &data, size, &error)) {
+        if (!g_error_matches(error, G_FILE_ERROR, G_FILE_ERROR_NOENT)) {
+            fprintf(stderr, "nv2a: Failed to load Vulkan pipeline cache %s: %s\n",
+                    path, error->message);
+        }
+        g_clear_error(&error);
+        g_free(path);
+        return NULL;
+    }
+
+    if (*size == 0) {
+        g_free(data);
+        data = NULL;
+    } else {
+        fprintf(stderr, "nv2a: Loaded Vulkan pipeline cache %s (%zu bytes)\n",
+                path, (size_t)*size);
+    }
+
+    g_free(path);
+    return data;
+}
+
+static void vk_pipeline_cache_save(PGRAPHVkState *r)
+{
+    size_t cache_size = 0;
+    void *cache_data = NULL;
+    char *dir;
+    char *path;
+    GError *error = NULL;
+    VkResult result;
+
+    if (!g_config.perf.cache_shaders ||
+        r->vk_pipeline_cache == VK_NULL_HANDLE) {
+        return;
+    }
+
+    result = vkGetPipelineCacheData(r->device, r->vk_pipeline_cache,
+                                    &cache_size, NULL);
+    if (result != VK_SUCCESS || cache_size == 0 || cache_size > G_MAXSSIZE) {
+        fprintf(stderr, "nv2a: Skipping Vulkan pipeline cache save "
+                "(result=%d size=%zu)\n", result, cache_size);
+        return;
+    }
+
+    IOS_VK_LOG("pipeline cache save begin size=%zu dirty=%u",
+               cache_size, r->vk_pipeline_cache_dirty_count);
+
+    cache_data = g_malloc(cache_size);
+    result = vkGetPipelineCacheData(r->device, r->vk_pipeline_cache,
+                                    &cache_size, cache_data);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "nv2a: Failed to read Vulkan pipeline cache data "
+                "(result=%d)\n", result);
+        g_free(cache_data);
+        return;
+    }
+
+    dir = vk_pipeline_cache_get_dir();
+    qemu_mkdir(dir);
+    g_free(dir);
+
+    path = vk_pipeline_cache_get_path();
+    if (!g_file_set_contents(path, cache_data, (gssize)cache_size, &error)) {
+        fprintf(stderr, "nv2a: Failed to save Vulkan pipeline cache %s: %s\n",
+                path, error->message);
+        g_clear_error(&error);
+    } else {
+        fprintf(stderr, "nv2a: Saved Vulkan pipeline cache %s (%zu bytes)\n",
+                path, cache_size);
+        IOS_VK_LOG("pipeline cache save complete size=%zu", cache_size);
+    }
+
+    g_free(path);
+    g_free(cache_data);
+}
+
+#ifdef CONFIG_IOS
+static gint64 ios_vk_pipeline_cache_save_interval_us(void)
+{
+    const char *env = getenv("XEMU_IOS_VK_PIPELINE_CACHE_SAVE_INTERVAL_MS");
+    char *end = NULL;
+    gint64 value_ms;
+
+    if (!env || !*env) {
+        return 15000000;
+    }
+
+    value_ms = g_ascii_strtoll(env, &end, 10);
+    if (end == env || value_ms < 1000) {
+        return 15000000;
+    }
+    return value_ms * 1000;
+}
+
+static uint32_t ios_vk_pipeline_cache_dirty_threshold(void)
+{
+    const char *env = getenv("XEMU_IOS_VK_PIPELINE_CACHE_DIRTY_THRESHOLD");
+    char *end = NULL;
+    unsigned long value;
+
+    if (!env || !*env) {
+        return 64;
+    }
+
+    value = strtoul(env, &end, 10);
+    if (end == env || value < 1 || value > UINT32_MAX) {
+        return 64;
+    }
+    return (uint32_t)value;
+}
+#endif
+
+static void vk_pipeline_cache_note_pipeline_created(PGRAPHVkState *r)
+{
+#ifdef CONFIG_IOS
+    const gint64 save_interval_us = ios_vk_pipeline_cache_save_interval_us();
+    const uint32_t dirty_threshold = ios_vk_pipeline_cache_dirty_threshold();
+#else
+    const gint64 save_interval_us = 10000000;
+    const uint32_t dirty_threshold = 16;
+#endif
+    gint64 now;
+
+    if (!g_config.perf.cache_shaders ||
+        r->vk_pipeline_cache == VK_NULL_HANDLE) {
+        return;
+    }
+
+    r->vk_pipeline_cache_dirty_count++;
+    now = g_get_monotonic_time();
+
+#ifdef CONFIG_IOS
+    if ((r->vk_pipeline_cache_dirty_count % 64) == 0) {
+        IOS_VK_LOG("pipeline cache dirty=%u elapsed_ms=%" G_GINT64_FORMAT,
+                   r->vk_pipeline_cache_dirty_count,
+                   (now - r->vk_pipeline_cache_last_save_us) / 1000);
+    }
+#endif
+
+    if (r->vk_pipeline_cache_last_save_us != 0 &&
+        r->vk_pipeline_cache_dirty_count < dirty_threshold &&
+        now - r->vk_pipeline_cache_last_save_us < save_interval_us) {
+        return;
+    }
+
+    vk_pipeline_cache_save(r);
+    r->vk_pipeline_cache_dirty_count = 0;
+    r->vk_pipeline_cache_last_save_us = now;
+}
+
 static void init_pipeline_cache(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
+    gsize initial_cache_size = 0;
+    void *initial_cache_data = vk_pipeline_cache_load(&initial_cache_size);
 
     VkPipelineCacheCreateInfo cache_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
         .flags = 0,
-        .initialDataSize = 0,
-        .pInitialData = NULL,
+        .initialDataSize = initial_cache_size,
+        .pInitialData = initial_cache_data,
         .pNext = NULL,
     };
-    VK_CHECK(vkCreatePipelineCache(r->device, &cache_info, NULL,
-                                   &r->vk_pipeline_cache));
+
+    VkResult result = vkCreatePipelineCache(r->device, &cache_info, NULL,
+                                            &r->vk_pipeline_cache);
+    if (result != VK_SUCCESS && initial_cache_data != NULL) {
+        fprintf(stderr, "nv2a: Vulkan pipeline cache load rejected "
+                "(result=%d); retrying empty cache\n", result);
+        cache_info.initialDataSize = 0;
+        cache_info.pInitialData = NULL;
+        result = vkCreatePipelineCache(r->device, &cache_info, NULL,
+                                       &r->vk_pipeline_cache);
+    }
+    g_free(initial_cache_data);
+    VK_CHECK(result);
+
+    r->vk_pipeline_cache_last_save_us = 0;
+#ifdef CONFIG_IOS
+    r->vk_pipeline_cache_last_save_us = g_get_monotonic_time();
+#endif
+    r->vk_pipeline_cache_dirty_count = 0;
 
     const size_t pipeline_cache_size = 2048;
     lru_init(&r->pipeline_cache);
@@ -157,6 +672,7 @@ static void finalize_pipeline_cache(PGRAPHState *pg)
     g_free(r->pipeline_cache_entries);
     r->pipeline_cache_entries = NULL;
 
+    vk_pipeline_cache_save(r);
     vkDestroyPipelineCache(r->device, r->vk_pipeline_cache, NULL);
 }
 
@@ -599,6 +1115,7 @@ static void create_clear_pipeline(PGRAPHState *pg)
     VkPipeline pipeline;
     VK_CHECK(vkCreateGraphicsPipelines(r->device, r->vk_pipeline_cache, 1,
                                        &pipeline_info, NULL, &pipeline));
+    vk_pipeline_cache_note_pipeline_created(r);
 
     snode->pipeline = pipeline;
     snode->layout = layout;
@@ -1007,6 +1524,7 @@ static void create_pipeline(PGRAPHState *pg)
     VkPipeline pipeline;
     VK_CHECK(vkCreateGraphicsPipelines(r->device, r->vk_pipeline_cache, 1,
                                        &pipeline_create_info, NULL, &pipeline));
+    vk_pipeline_cache_note_pipeline_created(r);
 
     snode->pipeline = pipeline;
     snode->layout = layout;
@@ -1258,10 +1776,29 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
             }
         };
         nv2a_profile_inc_counter(NV2A_PROF_QUEUE_SUBMIT);
+        uint32_t next_submit_count = r->submit_count + 1;
+#ifdef CONFIG_IOS
+        bool ios_log_submit = ios_vk_submit_trace_enabled() &&
+                              ((next_submit_count <= 16) ||
+                               ((next_submit_count % 128) == 0) ||
+                               finish_reason == VK_FINISH_REASON_SURFACE_CREATE ||
+                               finish_reason == VK_FINISH_REASON_SURFACE_DOWN ||
+                               finish_reason == VK_FINISH_REASON_NEED_BUFFER_SPACE);
+        if (ios_log_submit) {
+            IOS_VK_LOG("finish submit begin #%u reason=%d cache_dirty=%u",
+                       next_submit_count, finish_reason,
+                       r->vk_pipeline_cache_dirty_count);
+        }
+#endif
         vkResetFences(r->device, 1, &r->command_buffer_fence);
         VK_CHECK(vkQueueSubmit(r->queue, ARRAY_SIZE(submit_infos), submit_infos,
                                r->command_buffer_fence));
         r->submit_count += 1;
+#ifdef CONFIG_IOS
+        if (ios_log_submit) {
+            IOS_VK_LOG("finish submit queued #%u", r->submit_count);
+        }
+#endif
 
         bool check_budget = false;
 
@@ -1279,6 +1816,12 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
 
         VK_CHECK(vkWaitForFences(r->device, 1, &r->command_buffer_fence,
                                  VK_TRUE, UINT64_MAX));
+#ifdef CONFIG_IOS
+        if (ios_log_submit) {
+            IOS_VK_LOG("finish wait complete #%u check_budget=%d",
+                       r->submit_count, check_budget);
+        }
+#endif
 
         r->descriptor_set_index = 0;
         r->in_command_buffer = false;
@@ -2038,32 +2581,67 @@ void pgraph_vk_flush_draw(NV2AState *d)
         assert(pg->inline_buffer_length == 0);
         assert(pg->inline_array_length == 0);
 
+        bool expand_indices = pgraph_vk_cpu_expand_indices(pg);
+        GArray *expanded_indices = NULL;
+
         pgraph_vk_bind_vertex_attributes(d, pg->draw_arrays_min_start,
                                          pg->draw_arrays_max_count - 1, false,
                                          0, pg->draw_arrays_max_count - 1);
         uint32_t min_element = INT_MAX;
         uint32_t max_element = 0;
+        uint32_t expanded_index_capacity = 0;
         for (int i = 0; i < pg->draw_arrays_length; i++) {
             min_element = MIN(pg->draw_arrays_start[i], min_element);
             max_element = MAX(max_element, pg->draw_arrays_start[i] + pg->draw_arrays_count[i]);
+            if (expand_indices) {
+                expanded_index_capacity +=
+                    expanded_index_count(pg, pg->draw_arrays_count[i]);
+            }
+        }
+        if (expand_indices) {
+            expanded_indices =
+                g_array_sized_new(false, false, sizeof(uint32_t),
+                                  expanded_index_capacity);
+            for (int i = 0; i < pg->draw_arrays_length; i++) {
+                append_expanded_sequential_indices(
+                    pg, expanded_indices, pg->draw_arrays_start[i],
+                    pg->draw_arrays_count[i]);
+            }
+            ensure_buffer_space(pg, BUFFER_INDEX_STAGING,
+                                expanded_indices->len * sizeof(uint32_t));
         }
         sync_vertex_ram_buffer(pg);
         VertexBufferRemap remap = remap_unaligned_attributes(pg, max_element);
 
         begin_pre_draw(pg);
         copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_element);
+        VkDeviceSize index_buffer_offset = 0;
+        if (expanded_indices && expanded_indices->len) {
+            index_buffer_offset = pgraph_vk_update_index_buffer(
+                pg, expanded_indices->data,
+                expanded_indices->len * sizeof(uint32_t));
+        }
         pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
                                      "Draw Arrays");
         begin_draw(pg);
         bind_vertex_buffer(pg, remap.attributes, 0);
-        for (int i = 0; i < pg->draw_arrays_length; i++) {
-            uint32_t start = pg->draw_arrays_start[i],
-                     count = pg->draw_arrays_count[i];
-            NV2A_VK_DPRINTF("- [%d] Start:%d Count:%d", i, start, count);
-            vkCmdDraw(r->command_buffer, count, 1, start, 0);
+        if (expanded_indices) {
+            vkCmdBindIndexBuffer(r->command_buffer,
+                                 r->storage_buffers[BUFFER_INDEX].buffer,
+                                 index_buffer_offset, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(r->command_buffer, expanded_indices->len, 1, 0, 0,
+                             0);
+        } else {
+            for (int i = 0; i < pg->draw_arrays_length; i++) {
+                uint32_t start = pg->draw_arrays_start[i],
+                         count = pg->draw_arrays_count[i];
+                NV2A_VK_DPRINTF("- [%d] Start:%d Count:%d", i, start, count);
+                vkCmdDraw(r->command_buffer, count, 1, start, 0);
+            }
         }
         end_draw(pg);
         pgraph_vk_end_debug_marker(r, r->command_buffer);
+        g_clear_pointer(&expanded_indices, g_array_unref);
 
         NV2A_VK_DGROUP_END();
     } else if (pg->inline_elements_length) {
@@ -2073,8 +2651,23 @@ void pgraph_vk_flush_draw(NV2AState *d)
 
         nv2a_profile_inc_counter(NV2A_PROF_INLINE_ELEMENTS);
 
-        size_t index_data_size =
-            pg->inline_elements_length * sizeof(pg->inline_elements[0]);
+        bool expand_indices = pgraph_vk_cpu_expand_indices(pg);
+        GArray *expanded_indices = NULL;
+        void *index_data = pg->inline_elements;
+        uint32_t index_count = pg->inline_elements_length;
+
+        if (expand_indices) {
+            expanded_indices =
+                g_array_sized_new(false, false, sizeof(uint32_t),
+                                  expanded_index_count(
+                                      pg, pg->inline_elements_length));
+            append_expanded_indices(pg, expanded_indices, pg->inline_elements,
+                                    pg->inline_elements_length);
+            index_data = expanded_indices->data;
+            index_count = expanded_indices->len;
+        }
+
+        size_t index_data_size = index_count * sizeof(pg->inline_elements[0]);
 
         ensure_buffer_space(pg, BUFFER_INDEX_STAGING, index_data_size);
 
@@ -2092,25 +2685,44 @@ void pgraph_vk_flush_draw(NV2AState *d)
 
         begin_pre_draw(pg);
         copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_element + 1);
-        VkDeviceSize buffer_offset = pgraph_vk_update_index_buffer(
-            pg, pg->inline_elements, index_data_size);
+        VkDeviceSize buffer_offset = 0;
+        if (index_count) {
+            buffer_offset = pgraph_vk_update_index_buffer(
+                pg, index_data, index_data_size);
+        }
         pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
                                      "Inline Elements");
         begin_draw(pg);
         bind_vertex_buffer(pg, remap.attributes, 0);
-        vkCmdBindIndexBuffer(r->command_buffer,
-                             r->storage_buffers[BUFFER_INDEX].buffer,
-                             buffer_offset, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(r->command_buffer, pg->inline_elements_length, 1, 0, 0,
-                         0);
+        if (index_count) {
+            vkCmdBindIndexBuffer(r->command_buffer,
+                                 r->storage_buffers[BUFFER_INDEX].buffer,
+                                 buffer_offset, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(r->command_buffer, index_count, 1, 0, 0, 0);
+        }
         end_draw(pg);
         pgraph_vk_end_debug_marker(r, r->command_buffer);
+        g_clear_pointer(&expanded_indices, g_array_unref);
 
         NV2A_VK_DGROUP_END();
     } else if (pg->inline_buffer_length) {
         NV2A_VK_DGROUP_BEGIN("Inline Buffer");
         nv2a_profile_inc_counter(NV2A_PROF_INLINE_BUFFERS);
         assert(pg->inline_array_length == 0);
+
+        bool expand_indices = pgraph_vk_cpu_expand_indices(pg);
+        GArray *expanded_indices = NULL;
+
+        if (expand_indices) {
+            expanded_indices =
+                g_array_sized_new(false, false, sizeof(uint32_t),
+                                  expanded_index_count(
+                                      pg, pg->inline_buffer_length));
+            append_expanded_sequential_indices(
+                pg, expanded_indices, 0, pg->inline_buffer_length);
+            ensure_buffer_space(pg, BUFFER_INDEX_STAGING,
+                                expanded_indices->len * sizeof(uint32_t));
+        }
 
         size_t vertex_data_size = pg->inline_buffer_length * sizeof(float) * 4;
         void *data[NV2A_VERTEXSHADER_ATTRIBUTES];
@@ -2135,13 +2747,28 @@ void pgraph_vk_flush_draw(NV2AState *d)
         begin_pre_draw(pg);
         VkDeviceSize buffer_offset = pgraph_vk_update_vertex_inline_buffer(
             pg, data, sizes, r->num_active_vertex_attribute_descriptions);
+        VkDeviceSize index_buffer_offset = 0;
+        if (expanded_indices && expanded_indices->len) {
+            index_buffer_offset = pgraph_vk_update_index_buffer(
+                pg, expanded_indices->data,
+                expanded_indices->len * sizeof(uint32_t));
+        }
         pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
                                      "Inline Buffer");
         begin_draw(pg);
         bind_inline_vertex_buffer(pg, buffer_offset);
-        vkCmdDraw(r->command_buffer, pg->inline_buffer_length, 1, 0, 0);
+        if (expanded_indices) {
+            vkCmdBindIndexBuffer(r->command_buffer,
+                                 r->storage_buffers[BUFFER_INDEX].buffer,
+                                 index_buffer_offset, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(r->command_buffer, expanded_indices->len, 1, 0, 0,
+                             0);
+        } else {
+            vkCmdDraw(r->command_buffer, pg->inline_buffer_length, 1, 0, 0);
+        }
         end_draw(pg);
         pgraph_vk_end_debug_marker(r, r->command_buffer);
+        g_clear_pointer(&expanded_indices, g_array_unref);
 
         NV2A_VK_DGROUP_END();
     } else if (pg->inline_array_length) {
@@ -2170,6 +2797,18 @@ void pgraph_vk_flush_draw(NV2AState *d)
 
         unsigned int vertex_size = offset;
         unsigned int index_count = pg->inline_array_length * 4 / vertex_size;
+        bool expand_indices = pgraph_vk_cpu_expand_indices(pg);
+        GArray *expanded_indices = NULL;
+
+        if (expand_indices) {
+            expanded_indices =
+                g_array_sized_new(false, false, sizeof(uint32_t),
+                                  expanded_index_count(pg, index_count));
+            append_expanded_sequential_indices(
+                pg, expanded_indices, 0, index_count);
+            ensure_buffer_space(pg, BUFFER_INDEX_STAGING,
+                                expanded_indices->len * sizeof(uint32_t));
+        }
 
         NV2A_DPRINTF("draw inline array %d, %d\n", vertex_size, index_count);
         pgraph_vk_bind_vertex_attributes(d, 0, index_count - 1, true,
@@ -2179,13 +2818,28 @@ void pgraph_vk_flush_draw(NV2AState *d)
         void *inline_array_data = pg->inline_array;
         VkDeviceSize buffer_offset = pgraph_vk_update_vertex_inline_buffer(
             pg, &inline_array_data, &inline_array_data_size, 1);
+        VkDeviceSize index_buffer_offset = 0;
+        if (expanded_indices && expanded_indices->len) {
+            index_buffer_offset = pgraph_vk_update_index_buffer(
+                pg, expanded_indices->data,
+                expanded_indices->len * sizeof(uint32_t));
+        }
         pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
                                      "Inline Array");
         begin_draw(pg);
         bind_inline_vertex_buffer(pg, buffer_offset);
-        vkCmdDraw(r->command_buffer, index_count, 1, 0, 0);
+        if (expanded_indices) {
+            vkCmdBindIndexBuffer(r->command_buffer,
+                                 r->storage_buffers[BUFFER_INDEX].buffer,
+                                 index_buffer_offset, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(r->command_buffer, expanded_indices->len, 1, 0, 0,
+                             0);
+        } else {
+            vkCmdDraw(r->command_buffer, index_count, 1, 0, 0);
+        }
         end_draw(pg);
         pgraph_vk_end_debug_marker(r, r->command_buffer);
+        g_clear_pointer(&expanded_indices, g_array_unref);
         NV2A_VK_DGROUP_END();
     } else {
         NV2A_VK_DPRINTF("EMPTY NV097_SET_BEGIN_END");

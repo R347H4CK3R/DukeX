@@ -40,6 +40,70 @@
         (IDE_RETRY_DMA | IDE_RETRY_PIO | \
         IDE_RETRY_READ | IDE_RETRY_FLUSH)
 
+#ifdef CONFIG_IOS
+static bool ios_bmdma_trace_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_IDE_TRACE");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+static bool ios_bmdma_should_log(uint64_t count)
+{
+    return ios_bmdma_trace_enabled() &&
+           (count <= 48 || (count % 1024) == 0);
+}
+
+static void ios_bmdma_log(BMDMAState *bm, const char *phase, uint32_t val)
+{
+    static uint64_t count;
+    uint64_t n = ++count;
+
+    if (!ios_bmdma_should_log(n)) {
+        return;
+    }
+
+    fprintf(stderr,
+            "xemu_ios: bmdma %s #%" PRIu64
+            " bus=%d unit=%u retry=%u val=0x%02x cmd=0x%02x status=0x%02x"
+            " addr=0x%08x cur=0x%08x cb=%p aiocb=%p\n",
+            phase, n, bm->bus ? bm->bus->bus_id : -1,
+            bm->bus ? bm->bus->unit : 0xff,
+            bm->bus ? bm->bus->retry_unit : 0xff,
+            val & 0xff, bm->cmd, bm->status, bm->addr, bm->cur_addr,
+            bm->dma_cb, bm->dma.aiocb);
+}
+
+static void ios_bmdma_prepare_log(BMDMAState *bm, const char *phase,
+                                  uint64_t n, uint32_t prd_addr,
+                                  uint32_t prd_size, uint32_t len,
+                                  uint64_t sg_size, int io_size)
+{
+    if (!ios_bmdma_should_log(n)) {
+        return;
+    }
+
+    fprintf(stderr,
+            "xemu_ios: bmdma prepare %s #%" PRIu64
+            " bus=%d unit=%u retry=%u addr=0x%08x cur=0x%08x"
+            " prd_addr=0x%08x prd_size=0x%08x len=%u"
+            " cur_prd_addr=0x%08x cur_prd_len=%u last=%u"
+            " sg=0x%016" PRIx64 " io_size=%d status=0x%02x cmd=0x%02x\n",
+            phase, n,
+            bm->bus ? bm->bus->bus_id : -1,
+            bm->bus ? bm->bus->unit : 0xff,
+            bm->bus ? bm->bus->retry_unit : 0xff,
+            bm->addr, bm->cur_addr, prd_addr, prd_size, len,
+            bm->cur_prd_addr, bm->cur_prd_len, bm->cur_prd_last,
+            sg_size, io_size, bm->status, bm->cmd);
+}
+#endif
+
 static uint64_t pci_ide_status_read(void *opaque, hwaddr addr, unsigned size)
 {
     IDEBus *bus = opaque;
@@ -200,14 +264,25 @@ static void bmdma_start_dma(const IDEDMA *dma, IDEState *s,
 {
     BMDMAState *bm = DO_UPCAST(BMDMAState, dma, dma);
 
+#ifdef CONFIG_IOS
+    ios_bmdma_log(bm, "start_dma enter", bm->cmd);
+#endif
+
     bm->dma_cb = dma_cb;
     bm->cur_prd_last = 0;
     bm->cur_prd_addr = 0;
     bm->cur_prd_len = 0;
 
     if (bm->status & BM_STATUS_DMAING) {
+#ifdef CONFIG_IOS
+        ios_bmdma_log(bm, "start_dma immediate-cb", bm->cmd);
+#endif
         bm->dma_cb(bmdma_active_if(bm), 0);
     }
+
+#ifdef CONFIG_IOS
+    ios_bmdma_log(bm, "start_dma exit", bm->cmd);
+#endif
 }
 
 /**
@@ -228,6 +303,13 @@ static int32_t bmdma_prepare_buf(const IDEDMA *dma, int32_t limit)
         uint32_t size;
     } prd;
     int l, len;
+#ifdef CONFIG_IOS
+    static uint64_t ios_prepare_count;
+    uint64_t ios_prepare_n = ++ios_prepare_count;
+
+    ios_bmdma_prepare_log(bm, "begin", ios_prepare_n, 0, 0, limit,
+                          s->sg.size, s->io_buffer_size);
+#endif
 
     pci_dma_sglist_init(&s->sg, pci_dev,
                         s->nsector / (BMDMA_PAGE_SIZE / BDRV_SECTOR_SIZE) + 1);
@@ -249,6 +331,11 @@ static int32_t bmdma_prepare_buf(const IDEDMA *dma, int32_t limit)
             bm->cur_prd_len = len;
             bm->cur_prd_addr = prd.addr;
             bm->cur_prd_last = (prd.size & 0x80000000);
+#ifdef CONFIG_IOS
+            ios_bmdma_prepare_log(bm, "prd", ios_prepare_n, prd.addr,
+                                  prd.size, len, s->sg.size,
+                                  s->io_buffer_size);
+#endif
         }
         l = bm->cur_prd_len;
         if (l > 0) {
@@ -266,6 +353,10 @@ static int32_t bmdma_prepare_buf(const IDEDMA *dma, int32_t limit)
             s->io_buffer_size += l;
         }
     }
+#ifdef CONFIG_IOS
+    ios_bmdma_prepare_log(bm, "end", ios_prepare_n, 0, 0, limit,
+                          s->sg.size, s->io_buffer_size);
+#endif
     return s->sg.size;
 }
 
@@ -380,10 +471,16 @@ static void bmdma_irq(void *opaque, int n, int level)
 void bmdma_cmd_writeb(BMDMAState *bm, uint32_t val)
 {
     trace_bmdma_cmd_writeb(val);
+#ifdef CONFIG_IOS
+    ios_bmdma_log(bm, "cmd enter", val);
+#endif
 
     /* Ignore writes to SSBM if it keeps the old value */
     if ((val & BM_CMD_START) != (bm->cmd & BM_CMD_START)) {
         if (!(val & BM_CMD_START)) {
+#ifdef CONFIG_IOS
+            ios_bmdma_log(bm, "cmd cancel", val);
+#endif
             ide_cancel_dma_sync(ide_bus_active_if(bm->bus));
             bm->status &= ~BM_STATUS_DMAING;
         } else {
@@ -391,19 +488,32 @@ void bmdma_cmd_writeb(BMDMAState *bm, uint32_t val)
             if (!(bm->status & BM_STATUS_DMAING)) {
                 bm->status |= BM_STATUS_DMAING;
                 /* start dma transfer if possible */
-                if (bm->dma_cb)
+                if (bm->dma_cb) {
+#ifdef CONFIG_IOS
+                    ios_bmdma_log(bm, "cmd invoke-cb", val);
+#endif
                     bm->dma_cb(bmdma_active_if(bm), 0);
+                }
             }
         }
     }
 
     bm->cmd = val & 0x09;
+#ifdef CONFIG_IOS
+    ios_bmdma_log(bm, "cmd exit", val);
+#endif
 }
 
 void bmdma_status_writeb(BMDMAState *bm, uint32_t val)
 {
+#ifdef CONFIG_IOS
+    ios_bmdma_log(bm, "status enter", val);
+#endif
     bm->status = (val & 0x60) | (bm->status & BM_STATUS_DMAING)
                  | (bm->status & ~val & (BM_STATUS_ERROR | BM_STATUS_INT));
+#ifdef CONFIG_IOS
+    ios_bmdma_log(bm, "status exit", val);
+#endif
 }
 
 static uint64_t bmdma_addr_read(void *opaque, hwaddr addr,

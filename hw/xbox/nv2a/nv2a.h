@@ -30,4 +30,8 @@ unsigned int nv2a_get_surface_scale_factor(void);
 const uint8_t *nv2a_get_dac_palette(void);
 int nv2a_get_screen_off(void);
 
+#ifdef CONFIG_IOS
+extern uint64_t xemu_ios_framebuffer_download_generation;
+#endif
+
 #endif

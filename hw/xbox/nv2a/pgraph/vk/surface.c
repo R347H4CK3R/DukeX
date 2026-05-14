@@ -32,6 +32,105 @@
 const int num_invalid_surfaces_to_keep = 10;  // FIXME: Make automatic
 const int max_surface_frame_time_delta = 5;
 
+#ifdef CONFIG_IOS
+typedef struct IOSSurfaceStats {
+    uint64_t downloads;
+    uint64_t download_bytes;
+    uint64_t uploads;
+    uint64_t upload_bytes;
+    uint64_t present_waits;
+    uint64_t pending_batches;
+    uint64_t cpu_reads;
+    uint64_t cpu_writes;
+    uint64_t cpu_waits;
+    uint64_t range_downloads;
+    uint64_t dirty_flush_downloads;
+    uint64_t expired_downloads;
+    uint64_t overlap_downloads;
+    uint64_t incompatible_downloads;
+    uint64_t flush_downloads;
+    uint64_t generic_downloads;
+} IOSSurfaceStats;
+
+static IOSSurfaceStats ios_surface_stats;
+
+static bool ios_surface_stats_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_SURFACE_STATS");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+static void ios_surface_stats_log_maybe(const char *where)
+{
+    static gint64 last_log_us;
+    static IOSSurfaceStats last;
+
+    if (!ios_surface_stats_enabled()) {
+        return;
+    }
+
+    gint64 now = g_get_monotonic_time();
+    if (last_log_us && now - last_log_us < 2000000) {
+        return;
+    }
+    last_log_us = now;
+
+#define DELTA(field) (ios_surface_stats.field - last.field)
+    fprintf(stderr,
+            "xemu_ios: surface stats: where=%s"
+            " dl=%" PRIu64 " dl_mb=%" PRIu64
+            " up=%" PRIu64 " up_mb=%" PRIu64
+            " present_wait=%" PRIu64 " pending_batch=%" PRIu64
+            " cpu_read=%" PRIu64 " cpu_write=%" PRIu64 " cpu_wait=%" PRIu64
+            " range_dl=%" PRIu64 " dirty_flush=%" PRIu64
+            " expired=%" PRIu64 " overlap=%" PRIu64
+            " incompatible=%" PRIu64 " flush=%" PRIu64
+            " generic=%" PRIu64 "\n",
+            where,
+            DELTA(downloads), DELTA(download_bytes) / (1024 * 1024),
+            DELTA(uploads), DELTA(upload_bytes) / (1024 * 1024),
+            DELTA(present_waits), DELTA(pending_batches),
+            DELTA(cpu_reads), DELTA(cpu_writes), DELTA(cpu_waits),
+            DELTA(range_downloads), DELTA(dirty_flush_downloads),
+            DELTA(expired_downloads), DELTA(overlap_downloads),
+            DELTA(incompatible_downloads), DELTA(flush_downloads),
+            DELTA(generic_downloads));
+#undef DELTA
+    fflush(stderr);
+    last = ios_surface_stats;
+}
+
+#define IOS_SURFACE_STAT_INC(field) \
+    do { \
+        if (ios_surface_stats_enabled()) { \
+            ios_surface_stats.field++; \
+        } \
+    } while (0)
+
+#define IOS_SURFACE_STAT_ADD(field, value) \
+    do { \
+        if (ios_surface_stats_enabled()) { \
+            ios_surface_stats.field += (value); \
+        } \
+    } while (0)
+#else
+#define IOS_SURFACE_STAT_INC(field) \
+    do { \
+    } while (0)
+#define IOS_SURFACE_STAT_ADD(field, value) \
+    do { \
+    } while (0)
+#define ios_surface_stats_log_maybe(where) \
+    do { \
+    } while (0)
+#endif
+
 void pgraph_vk_set_surface_scale_factor(NV2AState *d, unsigned int scale)
 {
     g_config.display.quality.surface_scale = scale < 1 ? 1 : scale;
@@ -138,6 +237,7 @@ void pgraph_vk_download_surfaces_in_range_if_dirty(PGRAPHState *pg,
 
     QTAILQ_FOREACH(surface, &r->surfaces, entry) {
         if (check_surface_overlaps_range(surface, start, size)) {
+            IOS_SURFACE_STAT_INC(range_downloads);
             pgraph_vk_surface_download_if_dirty(
                 container_of(pg, NV2AState, pgraph), surface);
         }
@@ -478,6 +578,10 @@ static void download_surface(NV2AState *d, SurfaceBinding *surface, bool force)
         return;
     }
 
+    IOS_SURFACE_STAT_INC(downloads);
+    IOS_SURFACE_STAT_ADD(download_bytes, surface->pitch * surface->height);
+    ios_surface_stats_log_maybe("download");
+
     // FIXME: Respect write enable at last TOU?
 
     download_surface_to_buffer(d, surface, d->vram_ptr + surface->vram_addr);
@@ -498,6 +602,8 @@ void pgraph_vk_wait_for_surface_download(SurfaceBinding *surface)
     NV2AState *d = g_nv2a;
 
     if (qatomic_read(&surface->draw_dirty)) {
+        IOS_SURFACE_STAT_INC(present_waits);
+        ios_surface_stats_log_maybe("present_wait");
         qemu_mutex_lock(&d->pfifo.lock);
         qemu_event_reset(&d->pgraph.vk_renderer_state->downloads_complete);
         qatomic_set(&surface->download_pending, true);
@@ -513,6 +619,7 @@ void pgraph_vk_process_pending_downloads(NV2AState *d)
     PGRAPHVkState *r = d->pgraph.vk_renderer_state;
     SurfaceBinding *surface;
 
+    IOS_SURFACE_STAT_INC(pending_batches);
     QTAILQ_FOREACH(surface, &r->surfaces, entry) {
         download_surface(d, surface, false);
     }
@@ -527,6 +634,7 @@ void pgraph_vk_download_dirty_surfaces(NV2AState *d)
 
     SurfaceBinding *surface;
     QTAILQ_FOREACH(surface, &r->surfaces, entry) {
+        IOS_SURFACE_STAT_INC(dirty_flush_downloads);
         pgraph_vk_surface_download_if_dirty(d, surface);
     }
 
@@ -552,12 +660,16 @@ static void surface_access_callback(void *opaque, MemoryRegion *mr, hwaddr addr,
         hwaddr offset = addr - surface->vram_addr;
 
         if (write) {
+            IOS_SURFACE_STAT_INC(cpu_writes);
             trace_nv2a_pgraph_surface_cpu_write(surface->vram_addr, offset);
         } else {
+            IOS_SURFACE_STAT_INC(cpu_reads);
             trace_nv2a_pgraph_surface_cpu_read(surface->vram_addr, offset);
         }
 
         if (surface->draw_dirty) {
+            IOS_SURFACE_STAT_INC(cpu_waits);
+            ios_surface_stats_log_maybe("cpu_wait");
             surface->download_pending = true;
             wait_for_downloads = true;
         }
@@ -676,6 +788,7 @@ static void invalidate_overlapping_surfaces(NV2AState *d,
             trace_nv2a_pgraph_surface_evict_overlapping(
                 other_surface->vram_addr, other_surface->width,
                 other_surface->height, other_surface->pitch);
+            IOS_SURFACE_STAT_INC(overlap_downloads);
             pgraph_vk_surface_download_if_dirty(d, other_surface);
             invalidate_surface(d, other_surface);
         }
@@ -912,6 +1025,7 @@ static void expire_old_surfaces(NV2AState *d)
         int last_used = d->pgraph.frame_time - s->frame_time;
         if (last_used >= max_surface_frame_time_delta) {
             trace_nv2a_pgraph_surface_evict_reason("old", s->vram_addr);
+            IOS_SURFACE_STAT_INC(expired_downloads);
             pgraph_vk_surface_download_if_dirty(d, s);
             invalidate_surface(d, s);
         }
@@ -939,6 +1053,7 @@ static bool check_surface_compatibility(SurfaceBinding const *s1,
 void pgraph_vk_surface_download_if_dirty(NV2AState *d, SurfaceBinding *surface)
 {
     if (surface->draw_dirty) {
+        IOS_SURFACE_STAT_INC(generic_downloads);
         download_surface(d, surface, true);
     }
 }
@@ -952,6 +1067,10 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
     if (!(surface->upload_pending || force)) {
         return;
     }
+
+    IOS_SURFACE_STAT_INC(uploads);
+    IOS_SURFACE_STAT_ADD(upload_bytes, surface->pitch * surface->height);
+    ios_surface_stats_log_maybe("upload");
 
     nv2a_profile_inc_counter(NV2A_PROF_SURF_UPLOAD);
 
@@ -1512,6 +1631,7 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
                 trace_nv2a_pgraph_surface_evict_reason(
                     "incompatible", surface->vram_addr);
                 compare_surfaces(surface, &target);
+                IOS_SURFACE_STAT_INC(incompatible_downloads);
                 pgraph_vk_surface_download_if_dirty(d, surface);
                 invalidate_surface(d, surface);
             }
@@ -1751,6 +1871,7 @@ void pgraph_vk_surface_flush(NV2AState *d)
     QTAILQ_FOREACH_SAFE(s, &r->surfaces, entry, next) {
         // FIXME: We should download all surfaces to ram, but need to
         //        investigate corruption issue
+        IOS_SURFACE_STAT_INC(flush_downloads);
         pgraph_vk_surface_download_if_dirty(d, s);
         invalidate_surface(d, s);
     }

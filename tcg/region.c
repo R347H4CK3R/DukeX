@@ -31,6 +31,7 @@
 #include "qemu/qtree.h"
 #include "qapi/error.h"
 #include "tcg/tcg.h"
+#include "tcg/ios-jit.h"
 #include "exec/translation-block.h"
 #include "tcg-internal.h"
 #include "host/cpuinfo.h"
@@ -702,6 +703,90 @@ static int alloc_code_gen_buffer(size_t size, int splitwx, Error **errp)
         }
         error_free_or_abort(errp);
     }
+
+#ifdef CONFIG_IOS
+    if (xemu_ios_universal_jit_is_enabled()) {
+        void *buf_rw;
+        void *buf_rx;
+        void *prepared_addr;
+        mach_vm_address_t remap_addr;
+        vm_prot_t cur_prot, max_prot;
+        kern_return_t ret;
+
+        flags = MAP_PRIVATE | MAP_ANONYMOUS;
+
+        buf_rx = mmap(NULL, size, host_prot_read_exec(), flags, -1, 0);
+        if (buf_rx == MAP_FAILED) {
+            error_setg_errno(errp, errno,
+                             "allocate %zu bytes for jit rx buffer", size);
+            return -1;
+        }
+
+        prepared_addr = xemu_ios_universal_jit_prepare_region(buf_rx,
+                                                              size);
+        if (prepared_addr == NULL) {
+            munmap(buf_rx, size);
+            error_setg(errp, "Universal.js returned a null JIT region");
+            return -1;
+        }
+
+        if (prepared_addr != buf_rx) {
+            munmap(buf_rx, size);
+            error_setg(errp, "Universal.js returned unexpected JIT region");
+            return -1;
+        }
+
+        remap_addr = 0;
+        ret = mach_vm_remap(mach_task_self(),
+                            &remap_addr,
+                            size,
+                            0,
+                            VM_FLAGS_ANYWHERE,
+                            mach_task_self(),
+                            (mach_vm_address_t)buf_rx,
+                            false,
+                            &cur_prot,
+                            &max_prot,
+                            VM_INHERIT_NONE);
+        if (ret != KERN_SUCCESS) {
+            munmap(buf_rx, size);
+            error_setg(errp, "vm_remap for iOS Universal.js jit failed");
+            return -1;
+        }
+
+        buf_rw = (void *)remap_addr;
+        if (mprotect(buf_rw, size, PROT_READ | PROT_WRITE) != 0) {
+            error_setg_errno(errp, errno,
+                             "mprotect for iOS Universal.js jit rw alias");
+            munmap(buf_rw, size);
+            munmap(buf_rx, size);
+            return -1;
+        }
+
+        region.start_aligned = buf_rw;
+        region.total_size = size;
+        tcg_splitwx_diff = buf_rx - buf_rw;
+        xemu_ios_universal_jit_set_alias_backed(true);
+        fprintf(stderr,
+                "xemu-ios: Universal.js dual-map JIT active rw=%p rx=%p "
+                "size=%zu\n",
+                buf_rw, buf_rx, size);
+
+        if (!xemu_ios_universal_jit_probe_split(buf_rw, buf_rx)) {
+            xemu_ios_universal_jit_set_alias_backed(false);
+            munmap(buf_rx, region.total_size);
+            munmap(buf_rw, region.total_size);
+            error_setg(errp, "Universal.js split JIT probe failed");
+            return -1;
+        }
+
+        /*
+         * Xemu writes translated code into the RW alias. The RX mapping shares
+         * the same pages, matching the current XeniOS iOS 26 broker path.
+         */
+        return PROT_READ | PROT_WRITE;
+    }
+#endif
 
     /*
      * macOS 11.2 has a bug (Apple Feedback FB8994773) in which mprotect
