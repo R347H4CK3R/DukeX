@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SOURCE_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
+BUILD_DIR="${XEMU_IOS_BUILD_DIR:-${SOURCE_DIR}/build-ios-arm64}"
+IOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-26.3}"
+SDK_NAME="${SDK_NAME:-iphoneos}"
+VCPKG_PREFIX="${VITA3K_IOS_VCPKG_PREFIX:-${VCPKG_ROOT:-}/installed/arm64-ios}"
+MOLTENVK_ROOT="${MOLTENVK_ROOT:-/Users/michaelweekley/.local/tools/moltenvk-ios/MoltenVK}"
+XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-sigaltstack}"
+
+for path in "${SOURCE_DIR}" "${BUILD_DIR}"; do
+  case "${path}" in
+    *[[:space:]:]*)
+      printf 'Xemu configure rejects spaces or colons in source/build paths.\n' >&2
+      printf 'Source: %s\nBuild:  %s\n' "${SOURCE_DIR}" "${BUILD_DIR}" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -z "${VCPKG_PREFIX}" || ! -d "${VCPKG_PREFIX}" ]]; then
+  printf 'Missing arm64-ios vcpkg prefix. Set VITA3K_IOS_VCPKG_PREFIX or VCPKG_ROOT.\n' >&2
+  exit 1
+fi
+
+if [[ ! -f "${MOLTENVK_ROOT}/include/vulkan/vulkan.h" ]]; then
+  printf 'Missing MoltenVK iOS headers. Set MOLTENVK_ROOT.\n' >&2
+  printf 'Expected: %s\n' "${MOLTENVK_ROOT}/include/vulkan/vulkan.h" >&2
+  exit 1
+fi
+
+SDKROOT="$(xcrun --sdk "${SDK_NAME}" --show-sdk-path)"
+CLANG="$(xcrun --sdk "${SDK_NAME}" --find clang)"
+CLANGXX="$(xcrun --sdk "${SDK_NAME}" --find clang++)"
+AR="$(xcrun --sdk "${SDK_NAME}" --find ar)"
+RANLIB="$(xcrun --sdk "${SDK_NAME}" --find ranlib)"
+NM="$(xcrun --sdk "${SDK_NAME}" --find nm)"
+STRIP="$(xcrun --sdk "${SDK_NAME}" --find strip)"
+PKG_CONFIG="${PKG_CONFIG:-pkg-config}"
+TARGET="arm64-apple-ios${IOS_DEPLOYMENT_TARGET}"
+COMMON_FLAGS=(
+  "-target" "${TARGET}"
+  "-isysroot" "${SDKROOT}"
+  "-miphoneos-version-min=${IOS_DEPLOYMENT_TARGET}"
+  "-I${MOLTENVK_ROOT}/include"
+  "-DVK_ENABLE_BETA_EXTENSIONS=1"
+  "-DVK_USE_PLATFORM_METAL_EXT=1"
+  "-DXBOX"
+)
+COMMON_LDFLAGS=(
+  "${COMMON_FLAGS[@]}"
+  "-framework" "CoreFoundation"
+)
+EXTRA_CONFIGURE_ARGS=()
+if [[ -n "${XEMU_IOS_CONFIGURE_ARGS:-}" ]]; then
+  read -r -a EXTRA_CONFIGURE_ARGS <<< "${XEMU_IOS_CONFIGURE_ARGS}"
+fi
+read -r -a NINJA_TARGETS <<< "${XEMU_IOS_NINJA_TARGETS:-qemu-system-i386 libxemu-ios-core.dylib}"
+
+VULKAN_PKG_CONFIG_DIR="${BUILD_DIR}/ios-pkgconfig"
+mkdir -p "${VULKAN_PKG_CONFIG_DIR}"
+cat > "${VULKAN_PKG_CONFIG_DIR}/vulkan.pc" <<EOF
+prefix=${MOLTENVK_ROOT}
+includedir=\${prefix}/include
+
+Name: vulkan
+Description: MoltenVK headers for iOS runtime loading through volk
+Version: 1.3.0
+Libs:
+Cflags: -I\${includedir} -DVK_ENABLE_BETA_EXTENSIONS=1 -DVK_USE_PLATFORM_METAL_EXT=1
+EOF
+
+export PKG_CONFIG_LIBDIR="${VULKAN_PKG_CONFIG_DIR}:${VCPKG_PREFIX}/lib/pkgconfig:${VCPKG_PREFIX}/debug/lib/pkgconfig"
+export PKG_CONFIG_PATH="${PKG_CONFIG_LIBDIR}"
+export PKG_CONFIG_SYSROOT_DIR="/"
+export AR RANLIB NM STRIP PKG_CONFIG
+
+mkdir -p "${BUILD_DIR}"
+cd "${BUILD_DIR}"
+
+"${SOURCE_DIR}/configure" \
+  --cross-prefix= \
+  --cc="${CLANG}" \
+  --cxx="${CLANGXX}" \
+  --objcc="${CLANG}" \
+  --host-cc=cc \
+  --target-list=i386-softmmu \
+  --enable-system \
+  --enable-tcg \
+  --disable-tcg-interpreter \
+  --disable-rust \
+  --disable-docs \
+  --disable-tools \
+  --disable-guest-agent \
+  --disable-plugins \
+  --disable-bsd-user \
+  --disable-linux-user \
+  --disable-werror \
+  --enable-slirp \
+  --disable-slirp-smbd \
+  --disable-capstone \
+  --disable-coreaudio \
+  --disable-sdl-image \
+  --enable-fdt=internal \
+  --enable-sdl \
+  --enable-opengl \
+  --enable-pixman \
+  --audio-drv-list= \
+  --with-coroutine="${XEMU_IOS_COROUTINE_BACKEND}" \
+  --extra-cflags="${COMMON_FLAGS[*]}" \
+  --extra-cxxflags="${COMMON_FLAGS[*]}" \
+  --extra-objcflags="${COMMON_FLAGS[*]}" \
+  --extra-ldflags="${COMMON_LDFLAGS[*]}" \
+  "${EXTRA_CONFIGURE_ARGS[@]+"${EXTRA_CONFIGURE_ARGS[@]}"}"
+
+ninja -C "${BUILD_DIR}" "${NINJA_TARGETS[@]}" "$@"
