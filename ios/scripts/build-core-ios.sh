@@ -7,7 +7,7 @@ BUILD_DIR="${XEMU_IOS_BUILD_DIR:-${SOURCE_DIR}/build-ios-arm64}"
 IOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-26.3}"
 SDK_NAME="${SDK_NAME:-iphoneos}"
 VCPKG_PREFIX="${VITA3K_IOS_VCPKG_PREFIX:-${VCPKG_ROOT:-}/installed/arm64-ios}"
-MOLTENVK_ROOT="${MOLTENVK_ROOT:-/Users/michaelweekley/.local/tools/moltenvk-ios/MoltenVK}"
+MOLTENVK_ROOT="${MOLTENVK_ROOT:-}"
 XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-sigaltstack}"
 
 for path in "${SOURCE_DIR}" "${BUILD_DIR}"; do
@@ -25,9 +25,9 @@ if [[ -z "${VCPKG_PREFIX}" || ! -d "${VCPKG_PREFIX}" ]]; then
   exit 1
 fi
 
-if [[ ! -f "${MOLTENVK_ROOT}/include/vulkan/vulkan.h" ]]; then
+if [[ -z "${MOLTENVK_ROOT}" || ! -f "${MOLTENVK_ROOT}/include/vulkan/vulkan.h" ]]; then
   printf 'Missing MoltenVK iOS headers. Set MOLTENVK_ROOT.\n' >&2
-  printf 'Expected: %s\n' "${MOLTENVK_ROOT}/include/vulkan/vulkan.h" >&2
+  printf 'Expected: %s\n' "${MOLTENVK_ROOT:-<unset>}/include/vulkan/vulkan.h" >&2
   exit 1
 fi
 

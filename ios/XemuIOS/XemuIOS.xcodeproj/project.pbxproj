@@ -14,6 +14,17 @@
 		A10000000000000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* Assets.xcassets */; };
 		A10000000000000000000006 /* EmulatorCoreRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* EmulatorCoreRuntime.swift */; };
 		A10000000000000000000007 /* EarlyMetalDiagnostics.m in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000019 /* EarlyMetalDiagnostics.m */; };
+		B10000000000000000000001 /* GameLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* GameLibraryView.swift */; };
+		B10000000000000000000002 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* ProfileView.swift */; };
+		B10000000000000000000003 /* DocumentImportPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* DocumentImportPicker.swift */; };
+		B10000000000000000000004 /* SettingsRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* SettingsRows.swift */; };
+		B10000000000000000000005 /* AutoJITCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* AutoJITCoordinator.swift */; };
+		B10000000000000000000006 /* LaunchPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* LaunchPlanView.swift */; };
+		B10000000000000000000007 /* NativeMetalPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000017 /* NativeMetalPresenter.swift */; };
+		B10000000000000000000008 /* XISOGameTitleReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000018 /* XISOGameTitleReader.swift */; };
+		B10000000000000000000009 /* EmulatorLibraryModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* EmulatorLibraryModels.swift */; };
+		B1000000000000000000000A /* InsigniaProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001A /* InsigniaProfileStore.swift */; };
+		B1000000000000000000000B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001B /* SettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +38,17 @@
 		A10000000000000000000017 /* XemuIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = XemuIOS.entitlements; sourceTree = "<group>"; };
 		A10000000000000000000018 /* EmulatorCoreRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorCoreRuntime.swift; sourceTree = "<group>"; };
 		A10000000000000000000019 /* EarlyMetalDiagnostics.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = EarlyMetalDiagnostics.m; sourceTree = "<group>"; };
+		B10000000000000000000011 /* GameLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameLibraryView.swift; sourceTree = "<group>"; };
+		B10000000000000000000012 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
+		B10000000000000000000013 /* DocumentImportPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentImportPicker.swift; sourceTree = "<group>"; };
+		B10000000000000000000014 /* SettingsRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsRows.swift; sourceTree = "<group>"; };
+		B10000000000000000000015 /* AutoJITCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoJITCoordinator.swift; sourceTree = "<group>"; };
+		B10000000000000000000016 /* LaunchPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchPlanView.swift; sourceTree = "<group>"; };
+		B10000000000000000000017 /* NativeMetalPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMetalPresenter.swift; sourceTree = "<group>"; };
+		B10000000000000000000018 /* XISOGameTitleReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XISOGameTitleReader.swift; sourceTree = "<group>"; };
+		B10000000000000000000019 /* EmulatorLibraryModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorLibraryModels.swift; sourceTree = "<group>"; };
+		B1000000000000000000001A /* InsigniaProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsigniaProfileStore.swift; sourceTree = "<group>"; };
+		B1000000000000000000001B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -53,8 +75,19 @@
 			children = (
 				A10000000000000000000011 /* XemuIOSApp.swift */,
 				A10000000000000000000012 /* ContentView.swift */,
+				B10000000000000000000011 /* GameLibraryView.swift */,
+				B10000000000000000000012 /* ProfileView.swift */,
+				B1000000000000000000001A /* InsigniaProfileStore.swift */,
+				B1000000000000000000001B /* SettingsView.swift */,
+				B10000000000000000000013 /* DocumentImportPicker.swift */,
+				B10000000000000000000014 /* SettingsRows.swift */,
+				B10000000000000000000015 /* AutoJITCoordinator.swift */,
+				B10000000000000000000016 /* LaunchPlanView.swift */,
+				B10000000000000000000019 /* EmulatorLibraryModels.swift */,
 				A10000000000000000000013 /* EmulatorFileStore.swift */,
+				B10000000000000000000018 /* XISOGameTitleReader.swift */,
 				A10000000000000000000018 /* EmulatorCoreRuntime.swift */,
+				B10000000000000000000017 /* NativeMetalPresenter.swift */,
 				A10000000000000000000014 /* XemuLaunchPlan.swift */,
 				A10000000000000000000019 /* EarlyMetalDiagnostics.m */,
 				A10000000000000000000015 /* Assets.xcassets */,
@@ -170,8 +203,19 @@
 			files = (
 				A10000000000000000000001 /* XemuIOSApp.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
+				B10000000000000000000001 /* GameLibraryView.swift in Sources */,
+				B10000000000000000000002 /* ProfileView.swift in Sources */,
+				B1000000000000000000000A /* InsigniaProfileStore.swift in Sources */,
+				B1000000000000000000000B /* SettingsView.swift in Sources */,
+				B10000000000000000000003 /* DocumentImportPicker.swift in Sources */,
+				B10000000000000000000004 /* SettingsRows.swift in Sources */,
+				B10000000000000000000005 /* AutoJITCoordinator.swift in Sources */,
+				B10000000000000000000006 /* LaunchPlanView.swift in Sources */,
+				B10000000000000000000009 /* EmulatorLibraryModels.swift in Sources */,
 				A10000000000000000000003 /* EmulatorFileStore.swift in Sources */,
+				B10000000000000000000008 /* XISOGameTitleReader.swift in Sources */,
 				A10000000000000000000006 /* EmulatorCoreRuntime.swift in Sources */,
+				B10000000000000000000007 /* NativeMetalPresenter.swift in Sources */,
 				A10000000000000000000004 /* XemuLaunchPlan.swift in Sources */,
 				A10000000000000000000007 /* EarlyMetalDiagnostics.m in Sources */,
 			);
@@ -303,7 +347,7 @@
 				CODE_SIGN_ENTITLEMENTS = XemuIOS/XemuIOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 5Q9UYCH8TM;
+					DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = XemuIOS/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.3;
@@ -312,7 +356,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.mafty.DukeXGC;
+					PRODUCT_BUNDLE_IDENTIFIER = com.mafty.dukex;
 				PRODUCT_NAME = DukeX;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -332,7 +376,7 @@
 				CODE_SIGN_ENTITLEMENTS = XemuIOS/XemuIOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 5Q9UYCH8TM;
+					DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = XemuIOS/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.3;
@@ -341,7 +385,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.mafty.DukeXGC;
+					PRODUCT_BUNDLE_IDENTIFIER = com.mafty.dukex;
 				PRODUCT_NAME = DukeX;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;

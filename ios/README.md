@@ -22,8 +22,7 @@ hook in `tcg/ios-jit.c` uses this to decide whether to issue the iOS 26
 
 Core build note: QEMU/Xemu `configure` rejects source and build paths containing
 spaces or colons. Core configure/build checks need an actual no-space checkout
-or copy such as `/Users/michaelweekley/xemu-ios-core`; a symlink is not enough
-because the Python venv step resolves the real path.
+or copy, not a symlink, because the Python venv step resolves the real path.
 
 From that no-space workspace, run the first iPhoneOS arm64 build pass with:
 

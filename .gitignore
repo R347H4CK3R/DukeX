@@ -1,6 +1,7 @@
 /GNUmakefile
 /build/
 /build-ios-*/
+/build-ios-xcode-*/
 /.cache/
 /.vscode/
 *.pyc
@@ -27,3 +28,24 @@ build.log
 /macos-libs/
 /macos-pkgs/
 /xemu.iconset/
+
+# Local Apple signing and export artifacts
+*.ipa
+*.xcarchive
+*.dSYM
+*.dSYM/
+*.p12
+*.cer
+*.mobileprovision
+*.provisionprofile
+
+# Local Xcode state
+DerivedData/
+xcuserdata/
+*.xcuserstate
+
+# Device diagnostics and local release packaging
+*.crash
+*.ips
+DukeX_Backups/
+DukeX_Test_Releases/

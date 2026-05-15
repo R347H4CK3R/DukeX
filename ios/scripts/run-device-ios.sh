@@ -5,13 +5,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 SOURCE_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 PROJECT="${SOURCE_DIR}/ios/XemuIOS/XemuIOS.xcodeproj"
 SCHEME="${XEMU_IOS_SCHEME:-XemuIOS}"
-BUNDLE_ID="${XEMU_IOS_BUNDLE_ID:-com.michaelweekley.XemuIOS}"
+BUNDLE_ID="${XEMU_IOS_BUNDLE_ID:-com.mafty.dukex}"
 DERIVED_DATA="${XEMU_IOS_DERIVED_DATA:-${SOURCE_DIR}/build-ios-xcode}"
 CONFIGURATION="${XEMU_IOS_CONFIGURATION:-Debug}"
 
 if [[ -n "${XEMU_IOS_DISPLAY_NAME:-}" ]]; then
   DISPLAY_NAME="${XEMU_IOS_DISPLAY_NAME}"
-elif [[ "${BUNDLE_ID}" == "com.mafty.DukeX" || "${BUNDLE_ID}" == "com.michaelweekley.DukeX" ]]; then
+elif [[ "${BUNDLE_ID}" == "com.mafty.dukex" || "${BUNDLE_ID}" == "com.mafty.DukeX" ]]; then
   DISPLAY_NAME="DukeX"
 else
   DISPLAY_NAME="XemuIOS"
