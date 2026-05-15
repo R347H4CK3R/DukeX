@@ -22,14 +22,14 @@ MoltenVK and a native `CAMetalLayer`.
 
 ## At a Glance
 
-| Area | Alpha State |
-| --- | --- |
-| Target | iPhoneOS arm64, currently developed against iOS 26.3. |
-| Runtime | TCG with the iOS Universal.js JIT flow used by StikDebug. |
-| Graphics | xemu Vulkan renderer through MoltenVK with a native Metal presenter. |
-| Interface | Native SwiftUI library, profile, and settings tabs. |
-| Networking | Insignia-oriented NAT defaults with user-configurable settings. |
-| Known work | Rendering correctness, Metal HUD visibility, and title-by-title tuning. |
+- Device target: iPhoneOS arm64, currently developed against iOS 26.3.
+- Runtime: TCG with the iOS Universal.js JIT flow used by StikDebug.
+- Graphics: xemu Vulkan renderer through MoltenVK with a native Metal
+  presenter.
+- Interface: native SwiftUI library, profile, and settings tabs.
+- Networking: Insignia-oriented NAT defaults with user-configurable settings.
+- Known work: rendering correctness, Metal HUD visibility, and title-by-title
+  tuning.
 
 ## Features
 
@@ -51,35 +51,33 @@ DukeX alpha builds are intended for sideload distribution through StikStore and
 SideStore, with release artifacts published through GitHub Releases when public
 testing opens.
 
+Compatibility and performance vary by title, device, iOS version, and JIT
+availability. DukeX should be treated as early alpha software.
+
 <p align="center">
   <img src="docs/assets/branding/stikstore-badge.png" alt="Available on StikStore" width="170">
   <img src="docs/assets/branding/sidestore-badge.png" alt="Available on SideStore" width="170">
 </p>
 
-Compatibility and performance vary by title, device, iOS version, and JIT
-availability. DukeX should be treated as early alpha software.
-
 ## Dependencies
 
 ### Runtime
 
-| Requirement | Notes |
-| --- | --- |
-| Supported iPhone or iPad | Physical iOS/iPadOS hardware is required for device testing. |
-| StikDebug | Required for the Universal.js JIT workflow on iOS 26 or later. |
-| Xbox system files | Flash BIOS, MCPX ROM, and HDD image must be legally obtained by the user. |
-| Game images | XISO files must be legally obtained by the user. |
-| Insignia account | Optional, used for online service testing with a registered dashboard. |
+- Supported iPhone or iPad hardware for device testing.
+- StikDebug with Universal.js assigned to the DukeX bundle identifier for JIT on
+  iOS 26 or later.
+- Legally obtained Xbox flash BIOS, MCPX ROM, and HDD image.
+- Legally obtained XISO game images.
+- Optional Insignia account and registered dashboard for online service testing.
 
 ### Build
 
-| Requirement | Notes |
-| --- | --- |
-| macOS and Xcode | Xcode 26 or newer with the iPhoneOS SDK. |
-| MoltenVK | iOS framework and headers are required locally, but are not committed. |
-| vcpkg | `arm64-ios` dependency prefix used by the embedded xemu core. |
-| Build tools | Meson, Ninja, Python, and the standard xemu/QEMU build toolchain. |
-| Signing assets | Required only for signed device builds or sideload release preparation. |
+- macOS with Xcode 26 or newer and the iPhoneOS SDK.
+- MoltenVK iOS framework and headers, supplied locally and not committed.
+- vcpkg `arm64-ios` dependency prefix used by the embedded xemu core.
+- Meson, Ninja, Python, and the standard xemu/QEMU build toolchain.
+- Apple signing assets only when creating signed device builds or sideload
+  release packages.
 
 ## Documentation
 
