@@ -94,6 +94,7 @@ static SDL_Window *m_window;
 bool xemu_ios_vulkan_presenter_enabled(void);
 void *xemu_ios_get_metal_layer(void);
 void xemu_ios_set_external_metal_layer(void *metal_layer);
+void xemu_ios_request_shutdown(void);
 void xemu_ios_destroy_metal_view(void);
 
 bool xemu_ios_vulkan_presenter_enabled(void)
@@ -116,6 +117,13 @@ void xemu_ios_set_external_metal_layer(void *metal_layer)
     ios_external_metal_layer = metal_layer;
     IOS_LOG("external CAMetalLayer %s %p",
             metal_layer ? "set" : "cleared", metal_layer);
+}
+
+__attribute__((visibility("default")))
+void xemu_ios_request_shutdown(void)
+{
+    IOS_LOG("shutdown requested by native overlay");
+    qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_UI);
 }
 
 void *xemu_ios_get_metal_layer(void)

@@ -7,6 +7,7 @@ struct XemuLaunchPlan: Identifiable {
     let arguments: [String]
     let universalJITEnabled: Bool
     let gameName: String
+    let isDashboard: Bool
 
     var commandLine: String {
         arguments.map(Self.shellQuoted).joined(separator: " ")
@@ -94,7 +95,8 @@ struct XemuLaunchPlan: Identifiable {
                 "-config_path", (customConfigURL ?? configURL).path
             ],
             universalJITEnabled: universalJITEnabled,
-            gameName: launchName
+            gameName: launchName,
+            isDashboard: game == nil
         )
     }
 

@@ -14,10 +14,12 @@ final class EmulatorCoreRuntime: ObservableObject {
         case failed(String)
 
         var canLaunch: Bool {
-            if case .ready = self {
+            switch self {
+            case .ready, .exited:
                 return true
+            default:
+                return false
             }
-            return false
         }
 
         var isRunning: Bool {
@@ -34,6 +36,7 @@ final class EmulatorCoreRuntime: ObservableObject {
     ) -> Int32
     private typealias XemuPrimeCoroutines = @convention(c) (CUnsignedInt) -> Void
     private typealias XemuSetExternalMetalLayer = @convention(c) (UnsafeMutableRawPointer?) -> Void
+    private typealias XemuRequestShutdown = @convention(c) () -> Void
 
     @Published private(set) var state: RunState
 
@@ -41,6 +44,7 @@ final class EmulatorCoreRuntime: ObservableObject {
     private var entryPoint: XemuMain?
     private var primeCoroutines: XemuPrimeCoroutines?
     private var setExternalMetalLayer: XemuSetExternalMetalLayer?
+    private var requestShutdown: XemuRequestShutdown?
 
     init(bundle: Bundle = .main) {
         state = Self.resolveCoreURL(in: bundle).map(RunState.ready) ??
@@ -67,6 +71,7 @@ final class EmulatorCoreRuntime: ObservableObject {
             let arguments = plan.arguments
             let universalJITEnabled = plan.universalJITEnabled
             let setExternalMetalLayer = loadSetExternalMetalLayer()
+            let requestShutdown = loadRequestShutdown()
 
             let logURL = Self.prepareRunLog(for: plan, arguments: arguments)
             state = .running(plan.gameName)
@@ -81,7 +86,12 @@ final class EmulatorCoreRuntime: ObservableObject {
                     entryPoint,
                     arguments: arguments,
                     universalJITEnabled: universalJITEnabled,
-                    setExternalMetalLayer: setExternalMetalLayer
+                    setExternalMetalLayer: setExternalMetalLayer,
+                    requestShutdown: requestShutdown,
+                    session: NativeMetalPresenterSession(
+                        title: plan.gameName,
+                        isDashboard: plan.isDashboard
+                    )
                 )
 
                 Task { @MainActor [weak self] in
@@ -177,6 +187,26 @@ final class EmulatorCoreRuntime: ObservableObject {
         return setter
     }
 
+    private func loadRequestShutdown() -> XemuRequestShutdown? {
+        if let requestShutdown {
+            return requestShutdown
+        }
+
+        guard let handle else {
+            return nil
+        }
+
+        guard let symbol = dlsym(handle, "xemu_ios_request_shutdown") else {
+            NSLog("xemu_ios_request_shutdown is not available")
+            return nil
+        }
+
+        NSLog("Resolved xemu_ios_request_shutdown")
+        let requestShutdown = unsafeBitCast(symbol, to: XemuRequestShutdown.self)
+        self.requestShutdown = requestShutdown
+        return requestShutdown
+    }
+
     private static func prepareRunLog(
         for plan: XemuLaunchPlan,
         arguments: [String]
@@ -223,7 +253,9 @@ final class EmulatorCoreRuntime: ObservableObject {
         _ entryPoint: XemuMain,
         arguments: [String],
         universalJITEnabled: Bool,
-        setExternalMetalLayer: XemuSetExternalMetalLayer?
+        setExternalMetalLayer: XemuSetExternalMetalLayer?,
+        requestShutdown: XemuRequestShutdown?,
+        session: NativeMetalPresenterSession
     ) -> Int32 {
         MetalDiagnostics.configurePerformanceHUD()
         setenv("XEMU_IOS_UNIVERSAL_JIT", universalJITEnabled ? "1" : "0", 1)
@@ -306,7 +338,13 @@ final class EmulatorCoreRuntime: ObservableObject {
 
         let presenterHost = useVulkanSwapchain ? NativeMetalPresenterHost() : nil
         if let presenterHost {
-            if let layerPointer = presenterHost.start() {
+            if let layerPointer = presenterHost.start(
+                session: session,
+                onExitRequested: {
+                    NotificationCenter.default.post(name: .dukeXReturnToGamesRequested, object: nil)
+                    requestShutdown?()
+                }
+            ) {
                 setExternalMetalLayer?(layerPointer)
                 NSLog(
                     "Native CAMetalLayer presenter active: 0x%llx",
