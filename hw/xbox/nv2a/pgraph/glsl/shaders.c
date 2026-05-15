@@ -44,7 +44,8 @@ bool pgraph_glsl_check_shader_state_dirty(PGRAPHState *pg,
     }
 
     unsigned int regs[] = {
-        NV_PGRAPH_COMBINECTL,      NV_PGRAPH_COMBINESPECFOG0,
+        NV_PGRAPH_BLEND,           NV_PGRAPH_COMBINECTL,
+        NV_PGRAPH_COMBINESPECFOG0,
         NV_PGRAPH_COMBINESPECFOG1, NV_PGRAPH_CONTROL_0,
         NV_PGRAPH_CONTROL_3,       NV_PGRAPH_CSV0_C,
         NV_PGRAPH_CSV0_D,          NV_PGRAPH_CSV1_A,

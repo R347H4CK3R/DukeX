@@ -7,7 +7,11 @@
 static bool xemu_ios_metal_hud_requested(void)
 {
     const char *env = getenv("XEMU_IOS_METAL_HUD");
-    return env && env[0] && strcmp(env, "0") != 0;
+    if (env && env[0] && strcmp(env, "0") != 0) {
+        return true;
+    }
+
+    return [[NSUserDefaults standardUserDefaults] boolForKey:@"DukeXMetalHUDEnabled"];
 }
 
 __attribute__((constructor))

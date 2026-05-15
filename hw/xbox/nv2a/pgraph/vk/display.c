@@ -65,6 +65,283 @@ static bool ios_pvideo_trace_enabled(void)
             fflush(stderr); \
         } \
     } while (0)
+
+typedef struct IOSDisplayPerfFrame {
+    bool present_ready;
+    bool native_present_command;
+    bool pvideo_enabled;
+    bool surface_upload_pending;
+    bool finish_presenting;
+    gint64 wait_present_us;
+    gint64 finish_presenting_us;
+    gint64 surface_upload_us;
+    gint64 pvideo_upload_us;
+    gint64 acquire_us;
+    gint64 command_us;
+    gint64 submit_us;
+    gint64 present_us;
+    gint64 total_us;
+} IOSDisplayPerfFrame;
+
+typedef struct IOSDisplayPerfWindow {
+    uint64_t frames;
+    uint64_t present_ready_frames;
+    uint64_t present_missed_frames;
+    uint64_t native_present_frames;
+    uint64_t pvideo_frames;
+    uint64_t surface_upload_pending_frames;
+    uint64_t finish_presenting_frames;
+    gint64 wait_present_us;
+    gint64 finish_presenting_us;
+    gint64 surface_upload_us;
+    gint64 pvideo_upload_us;
+    gint64 acquire_us;
+    gint64 command_us;
+    gint64 submit_us;
+    gint64 present_us;
+    gint64 total_us;
+} IOSDisplayPerfWindow;
+
+typedef struct XemuIOSDisplayStats {
+    uint64_t sample_id;
+    double presenter_fps;
+    uint32_t nv2a_fps;
+    int32_t mspf;
+    uint64_t frames;
+    uint64_t present_ready_frames;
+    uint64_t present_missed_frames;
+    uint64_t native_present_frames;
+    uint64_t pvideo_frames;
+    uint64_t surface_upload_pending_frames;
+    uint64_t finish_presenting_frames;
+    int64_t avg_total_us;
+    int64_t avg_wait_present_us;
+    int64_t avg_submit_us;
+    int64_t avg_present_us;
+    int32_t queue_submits;
+    int32_t aux_submits;
+    int32_t display_submits;
+    int32_t shader_binds;
+    int32_t surface_downloads;
+    int32_t surface_to_texture;
+    int32_t geometry_updates;
+    int32_t geometry_ram_updates;
+    int32_t geometry_index_updates;
+    int32_t geometry_inline_updates;
+    int32_t pipeline_generations;
+    int32_t shader_generations;
+    int32_t texture_uploads;
+    int32_t surface_uploads;
+} XemuIOSDisplayStats;
+
+static XemuIOSDisplayStats ios_latest_display_stats;
+
+int xemu_ios_copy_display_stats(XemuIOSDisplayStats *out_stats)
+{
+    if (!out_stats || !ios_latest_display_stats.sample_id) {
+        return 0;
+    }
+
+    *out_stats = ios_latest_display_stats;
+    return 1;
+}
+
+static bool ios_display_perf_stats_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_DISPLAY_PERF_STATS");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+static gint64 ios_perf_avg_us(gint64 total_us, uint64_t frames)
+{
+    return frames ? total_us / (gint64)frames : 0;
+}
+
+static void ios_display_stats_update(PGRAPHState *pg,
+                                     const IOSDisplayPerfFrame *frame)
+{
+    static gint64 window_start_us;
+    static IOSDisplayPerfWindow window;
+
+    gint64 now_us = g_get_monotonic_time();
+    if (!window_start_us) {
+        window_start_us = now_us;
+    }
+
+    window.frames++;
+    window.present_ready_frames += frame->present_ready;
+    window.present_missed_frames += !frame->present_ready;
+    window.native_present_frames += frame->native_present_command;
+    window.pvideo_frames += frame->pvideo_enabled;
+    window.surface_upload_pending_frames += frame->surface_upload_pending;
+    window.finish_presenting_frames += frame->finish_presenting;
+    window.wait_present_us += frame->wait_present_us;
+    window.finish_presenting_us += frame->finish_presenting_us;
+    window.surface_upload_us += frame->surface_upload_us;
+    window.pvideo_upload_us += frame->pvideo_upload_us;
+    window.acquire_us += frame->acquire_us;
+    window.command_us += frame->command_us;
+    window.submit_us += frame->submit_us;
+    window.present_us += frame->present_us;
+    window.total_us += frame->total_us;
+
+    gint64 elapsed_us = now_us - window_start_us;
+    if (elapsed_us < 500000) {
+        return;
+    }
+
+    unsigned int frame_idx =
+        (g_nv2a_stats.frame_ptr + NV2A_PROF_NUM_FRAMES - 1) %
+        NV2A_PROF_NUM_FRAMES;
+
+    ios_latest_display_stats = (XemuIOSDisplayStats){
+        .sample_id = ios_latest_display_stats.sample_id + 1,
+        .presenter_fps =
+            elapsed_us > 0 ? (double)window.frames * 1000000.0 / elapsed_us : 0.0,
+        .nv2a_fps = g_nv2a_stats.increment_fps,
+        .mspf = g_nv2a_stats.frame_history[frame_idx].mspf,
+        .frames = window.frames,
+        .present_ready_frames = window.present_ready_frames,
+        .present_missed_frames = window.present_missed_frames,
+        .native_present_frames = window.native_present_frames,
+        .pvideo_frames = window.pvideo_frames,
+        .surface_upload_pending_frames = window.surface_upload_pending_frames,
+        .finish_presenting_frames = window.finish_presenting_frames,
+        .avg_total_us = ios_perf_avg_us(window.total_us, window.frames),
+        .avg_wait_present_us = ios_perf_avg_us(window.wait_present_us, window.frames),
+        .avg_submit_us = ios_perf_avg_us(window.submit_us, window.frames),
+        .avg_present_us = ios_perf_avg_us(window.present_us, window.frames),
+        .queue_submits = nv2a_profile_get_counter_value(NV2A_PROF_QUEUE_SUBMIT),
+        .aux_submits = nv2a_profile_get_counter_value(NV2A_PROF_QUEUE_SUBMIT_AUX),
+        .display_submits = nv2a_profile_get_counter_value(NV2A_PROF_QUEUE_SUBMIT_5),
+        .shader_binds = nv2a_profile_get_counter_value(NV2A_PROF_SHADER_BIND),
+        .surface_downloads = nv2a_profile_get_counter_value(NV2A_PROF_SURF_DOWNLOAD),
+        .surface_to_texture = nv2a_profile_get_counter_value(NV2A_PROF_SURF_TO_TEX),
+        .geometry_updates =
+            nv2a_profile_get_counter_value(NV2A_PROF_GEOM_BUFFER_UPDATE_1) +
+            nv2a_profile_get_counter_value(NV2A_PROF_GEOM_BUFFER_UPDATE_2) +
+            nv2a_profile_get_counter_value(NV2A_PROF_GEOM_BUFFER_UPDATE_3) +
+            nv2a_profile_get_counter_value(NV2A_PROF_GEOM_BUFFER_UPDATE_4),
+        .geometry_ram_updates =
+            nv2a_profile_get_counter_value(NV2A_PROF_GEOM_BUFFER_UPDATE_1),
+        .geometry_index_updates =
+            nv2a_profile_get_counter_value(NV2A_PROF_GEOM_BUFFER_UPDATE_2),
+        .geometry_inline_updates =
+            nv2a_profile_get_counter_value(NV2A_PROF_GEOM_BUFFER_UPDATE_3),
+        .pipeline_generations =
+            nv2a_profile_get_counter_value(NV2A_PROF_PIPELINE_GEN),
+        .shader_generations =
+            nv2a_profile_get_counter_value(NV2A_PROF_SHADER_GEN),
+        .texture_uploads =
+            nv2a_profile_get_counter_value(NV2A_PROF_TEX_UPLOAD),
+        .surface_uploads =
+            nv2a_profile_get_counter_value(NV2A_PROF_SURF_UPLOAD),
+    };
+
+    memset(&window, 0, sizeof(window));
+    window_start_us = now_us;
+}
+
+static void ios_display_perf_stats_log(PGRAPHState *pg,
+                                       const IOSDisplayPerfFrame *frame)
+{
+    static gint64 window_start_us;
+    static IOSDisplayPerfWindow window;
+
+    if (!ios_display_perf_stats_enabled()) {
+        return;
+    }
+
+    gint64 now_us = g_get_monotonic_time();
+    if (!window_start_us) {
+        window_start_us = now_us;
+    }
+
+    window.frames++;
+    window.present_ready_frames += frame->present_ready;
+    window.present_missed_frames += !frame->present_ready;
+    window.native_present_frames += frame->native_present_command;
+    window.pvideo_frames += frame->pvideo_enabled;
+    window.surface_upload_pending_frames += frame->surface_upload_pending;
+    window.finish_presenting_frames += frame->finish_presenting;
+    window.wait_present_us += frame->wait_present_us;
+    window.finish_presenting_us += frame->finish_presenting_us;
+    window.surface_upload_us += frame->surface_upload_us;
+    window.pvideo_upload_us += frame->pvideo_upload_us;
+    window.acquire_us += frame->acquire_us;
+    window.command_us += frame->command_us;
+    window.submit_us += frame->submit_us;
+    window.present_us += frame->present_us;
+    window.total_us += frame->total_us;
+
+    gint64 elapsed_us = now_us - window_start_us;
+    if (elapsed_us < 2000000) {
+        return;
+    }
+
+    unsigned int frame_idx =
+        (g_nv2a_stats.frame_ptr + NV2A_PROF_NUM_FRAMES - 1) %
+        NV2A_PROF_NUM_FRAMES;
+    int mspf = g_nv2a_stats.frame_history[frame_idx].mspf;
+    double presenter_fps =
+        elapsed_us > 0 ? (double)window.frames * 1000000.0 / elapsed_us : 0.0;
+
+    fprintf(stderr,
+            "xemu_ios: display perf: presenter_fps=%.1f nv2a_fps=%u mspf=%d"
+            " frames=%" PRIu64 " ready=%" PRIu64 " miss=%" PRIu64
+            " native=%" PRIu64 " pvideo=%" PRIu64 " upload_pending=%" PRIu64
+            " finish_presenting=%" PRIu64
+            " avg_us total=%" PRId64 " wait_present=%" PRId64
+            " finish_presenting=%" PRId64 " surface_upload=%" PRId64
+            " pvideo_upload=%" PRId64 " acquire=%" PRId64
+            " command=%" PRId64 " submit=%" PRId64 " present=%" PRId64
+            " counters queue=%d aux=%d display=%d pipeline_gen=%d"
+            " shader_gen=%d shader_bind=%d tex_upload=%d surf_upload=%d"
+            " surf_download=%d surf_to_tex=%d geom=%d\n",
+            presenter_fps,
+            g_nv2a_stats.increment_fps,
+            mspf,
+            window.frames,
+            window.present_ready_frames,
+            window.present_missed_frames,
+            window.native_present_frames,
+            window.pvideo_frames,
+            window.surface_upload_pending_frames,
+            window.finish_presenting_frames,
+            ios_perf_avg_us(window.total_us, window.frames),
+            ios_perf_avg_us(window.wait_present_us, window.frames),
+            ios_perf_avg_us(window.finish_presenting_us, window.frames),
+            ios_perf_avg_us(window.surface_upload_us, window.frames),
+            ios_perf_avg_us(window.pvideo_upload_us, window.frames),
+            ios_perf_avg_us(window.acquire_us, window.frames),
+            ios_perf_avg_us(window.command_us, window.frames),
+            ios_perf_avg_us(window.submit_us, window.frames),
+            ios_perf_avg_us(window.present_us, window.frames),
+            nv2a_profile_get_counter_value(NV2A_PROF_QUEUE_SUBMIT),
+            nv2a_profile_get_counter_value(NV2A_PROF_QUEUE_SUBMIT_AUX),
+            nv2a_profile_get_counter_value(NV2A_PROF_QUEUE_SUBMIT_5),
+            nv2a_profile_get_counter_value(NV2A_PROF_PIPELINE_GEN),
+            nv2a_profile_get_counter_value(NV2A_PROF_SHADER_GEN),
+            nv2a_profile_get_counter_value(NV2A_PROF_SHADER_BIND),
+            nv2a_profile_get_counter_value(NV2A_PROF_TEX_UPLOAD),
+            nv2a_profile_get_counter_value(NV2A_PROF_SURF_UPLOAD),
+            nv2a_profile_get_counter_value(NV2A_PROF_SURF_DOWNLOAD),
+            nv2a_profile_get_counter_value(NV2A_PROF_SURF_TO_TEX),
+            nv2a_profile_get_counter_value(NV2A_PROF_GEOM_BUFFER_UPDATE_1) +
+                nv2a_profile_get_counter_value(NV2A_PROF_GEOM_BUFFER_UPDATE_2) +
+                nv2a_profile_get_counter_value(NV2A_PROF_GEOM_BUFFER_UPDATE_3) +
+                nv2a_profile_get_counter_value(NV2A_PROF_GEOM_BUFFER_UPDATE_4));
+    fflush(stderr);
+
+    memset(&window, 0, sizeof(window));
+    window_start_us = now_us;
+}
 #else
 #define IOS_SWAPCHAIN_LOG(...) \
     do { \
@@ -289,6 +566,41 @@ static const char *display_frag_glsl =
     "        }\n"
     "    }\n"
     "}\n";
+
+#ifdef CONFIG_IOS
+static const char *ios_presenter_vert_glsl =
+    "#version 450\n"
+    "layout(push_constant, std430) uniform PushConstants {\n"
+    "    vec4 options;\n"
+    "};\n"
+    "layout(location = 0) out vec2 tex_coord;\n"
+    "void main()\n"
+    "{\n"
+    "    vec2 pos[3] = vec2[](\n"
+    "        vec2(-1.0, -1.0),\n"
+    "        vec2( 3.0, -1.0),\n"
+    "        vec2(-1.0,  3.0));\n"
+    "    vec2 uv = (pos[gl_VertexIndex] + vec2(1.0)) * 0.5;\n"
+    "    if (options.x != 0.0) {\n"
+    "        uv.x = 1.0 - uv.x;\n"
+    "    }\n"
+    "    if (options.y != 0.0) {\n"
+    "        uv.y = 1.0 - uv.y;\n"
+    "    }\n"
+    "    tex_coord = uv;\n"
+    "    gl_Position = vec4(pos[gl_VertexIndex], 0.0, 1.0);\n"
+    "}\n";
+
+static const char *ios_presenter_frag_glsl =
+    "#version 450\n"
+    "layout(binding = 0) uniform sampler2D guest_output;\n"
+    "layout(location = 0) in vec2 tex_coord;\n"
+    "layout(location = 0) out vec4 out_color;\n"
+    "void main()\n"
+    "{\n"
+    "    out_color = texture(guest_output, tex_coord);\n"
+    "}\n";
+#endif
 
 static void create_descriptor_pool(PGRAPHState *pg)
 {
@@ -898,6 +1210,266 @@ static VkPresentModeKHR ios_choose_present_mode(PGRAPHState *pg,
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 
+static bool ios_xenios_presenter_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_XENIOS_PRESENTER");
+        enabled = !env || strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
+static void ios_destroy_xenios_presenter_resources(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    PGRAPHVkDisplayState *d = &r->display;
+
+    for (uint32_t i = 0; i < XEMU_IOS_MAX_SWAPCHAIN_IMAGES; i++) {
+        if (d->presenter_framebuffers[i] != VK_NULL_HANDLE) {
+            vkDestroyFramebuffer(r->device, d->presenter_framebuffers[i], NULL);
+            d->presenter_framebuffers[i] = VK_NULL_HANDLE;
+        }
+    }
+
+    if (d->presenter_pipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(r->device, d->presenter_pipeline, NULL);
+        d->presenter_pipeline = VK_NULL_HANDLE;
+    }
+    if (d->presenter_pipeline_layout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(r->device, d->presenter_pipeline_layout, NULL);
+        d->presenter_pipeline_layout = VK_NULL_HANDLE;
+    }
+    if (d->presenter_render_pass != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(r->device, d->presenter_render_pass, NULL);
+        d->presenter_render_pass = VK_NULL_HANDLE;
+    }
+    if (d->presenter_descriptor_pool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(r->device, d->presenter_descriptor_pool, NULL);
+        d->presenter_descriptor_pool = VK_NULL_HANDLE;
+        d->presenter_descriptor_set = VK_NULL_HANDLE;
+    }
+    if (d->presenter_descriptor_set_layout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(r->device,
+                                     d->presenter_descriptor_set_layout,
+                                     NULL);
+        d->presenter_descriptor_set_layout = VK_NULL_HANDLE;
+    }
+    if (d->presenter_frag != NULL) {
+        pgraph_vk_destroy_shader_module(r, d->presenter_frag);
+        d->presenter_frag = NULL;
+    }
+    if (d->presenter_vert != NULL) {
+        pgraph_vk_destroy_shader_module(r, d->presenter_vert);
+        d->presenter_vert = NULL;
+    }
+
+    d->presenter_format = VK_FORMAT_UNDEFINED;
+}
+
+static void ios_create_xenios_presenter_resources(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    PGRAPHVkDisplayState *d = &r->display;
+
+    if (d->presenter_pipeline != VK_NULL_HANDLE &&
+        d->presenter_format == d->swapchain_format) {
+        return;
+    }
+
+    ios_destroy_xenios_presenter_resources(pg);
+
+    d->presenter_vert = pgraph_vk_create_shader_module_from_glsl(
+        r, VK_SHADER_STAGE_VERTEX_BIT, ios_presenter_vert_glsl);
+    d->presenter_frag = pgraph_vk_create_shader_module_from_glsl(
+        r, VK_SHADER_STAGE_FRAGMENT_BIT, ios_presenter_frag_glsl);
+
+    VkDescriptorPoolSize pool_size = {
+        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = 1,
+    };
+    VkDescriptorPoolCreateInfo pool_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = 1,
+        .pPoolSizes = &pool_size,
+        .maxSets = 1,
+    };
+    VK_CHECK(vkCreateDescriptorPool(r->device, &pool_info, NULL,
+                                    &d->presenter_descriptor_pool));
+
+    VkDescriptorSetLayoutBinding binding = {
+        .binding = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+    };
+    VkDescriptorSetLayoutCreateInfo set_layout_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = &binding,
+    };
+    VK_CHECK(vkCreateDescriptorSetLayout(r->device, &set_layout_info, NULL,
+                                         &d->presenter_descriptor_set_layout));
+
+    VkDescriptorSetAllocateInfo set_alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = d->presenter_descriptor_pool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &d->presenter_descriptor_set_layout,
+    };
+    VK_CHECK(vkAllocateDescriptorSets(r->device, &set_alloc_info,
+                                      &d->presenter_descriptor_set));
+
+    VkAttachmentDescription attachment = {
+        .format = d->swapchain_format,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    };
+    VkAttachmentReference color_reference = {
+        0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+    };
+    VkSubpassDescription subpass = {
+        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &color_reference,
+    };
+    VkSubpassDependency dependency = {
+        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        .dstSubpass = 0,
+        .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+    };
+    VkRenderPassCreateInfo render_pass_info = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &attachment,
+        .subpassCount = 1,
+        .pSubpasses = &subpass,
+        .dependencyCount = 1,
+        .pDependencies = &dependency,
+    };
+    VK_CHECK(vkCreateRenderPass(r->device, &render_pass_info, NULL,
+                                &d->presenter_render_pass));
+
+    VkPipelineShaderStageCreateInfo shader_stages[] = {
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .module = d->presenter_vert->module,
+            .pName = "main",
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .module = d->presenter_frag->module,
+            .pName = "main",
+        },
+    };
+    VkPipelineVertexInputStateCreateInfo vertex_input = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    };
+    VkPipelineInputAssemblyStateCreateInfo input_assembly = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    };
+    VkPipelineViewportStateCreateInfo viewport_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .scissorCount = 1,
+    };
+    VkPipelineRasterizationStateCreateInfo rasterizer = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .cullMode = VK_CULL_MODE_NONE,
+        .frontFace = VK_FRONT_FACE_CLOCKWISE,
+        .lineWidth = 1.0f,
+    };
+    VkPipelineMultisampleStateCreateInfo multisampling = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    };
+    VkPipelineColorBlendAttachmentState color_blend_attachment = {
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+                          VK_COLOR_COMPONENT_G_BIT |
+                          VK_COLOR_COMPONENT_B_BIT |
+                          VK_COLOR_COMPONENT_A_BIT,
+        .blendEnable = VK_FALSE,
+    };
+    VkPipelineColorBlendStateCreateInfo color_blending = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &color_blend_attachment,
+    };
+    VkDynamicState dynamic_states[] = {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR,
+    };
+    VkPipelineDynamicStateCreateInfo dynamic_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = ARRAY_SIZE(dynamic_states),
+        .pDynamicStates = dynamic_states,
+    };
+    VkPushConstantRange push_constant_range = {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .offset = 0,
+        .size = sizeof(float) * 4,
+    };
+    VkPipelineLayoutCreateInfo pipeline_layout_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &d->presenter_descriptor_set_layout,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &push_constant_range,
+    };
+    VK_CHECK(vkCreatePipelineLayout(r->device, &pipeline_layout_info, NULL,
+                                    &d->presenter_pipeline_layout));
+
+    VkGraphicsPipelineCreateInfo pipeline_info = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .stageCount = ARRAY_SIZE(shader_stages),
+        .pStages = shader_stages,
+        .pVertexInputState = &vertex_input,
+        .pInputAssemblyState = &input_assembly,
+        .pViewportState = &viewport_state,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState = &multisampling,
+        .pColorBlendState = &color_blending,
+        .pDynamicState = &dynamic_state,
+        .layout = d->presenter_pipeline_layout,
+        .renderPass = d->presenter_render_pass,
+        .subpass = 0,
+    };
+    VK_CHECK(vkCreateGraphicsPipelines(r->device, r->vk_pipeline_cache, 1,
+                                       &pipeline_info, NULL,
+                                       &d->presenter_pipeline));
+
+    for (uint32_t i = 0; i < d->swapchain_image_count; i++) {
+        VkFramebufferCreateInfo framebuffer_info = {
+            .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+            .renderPass = d->presenter_render_pass,
+            .attachmentCount = 1,
+            .pAttachments = &d->swapchain_image_views[i],
+            .width = d->swapchain_extent.width,
+            .height = d->swapchain_extent.height,
+            .layers = 1,
+        };
+        VK_CHECK(vkCreateFramebuffer(r->device, &framebuffer_info, NULL,
+                                     &d->presenter_framebuffers[i]));
+    }
+
+    d->presenter_format = d->swapchain_format;
+    IOS_SWAPCHAIN_LOG("XeniOS-style shader presenter created format=%d",
+                      d->swapchain_format);
+}
+
 static void ios_destroy_swapchain(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
@@ -909,6 +1481,8 @@ static void ios_destroy_swapchain(PGRAPHState *pg)
     }
 
     vkDeviceWaitIdle(r->device);
+
+    ios_destroy_xenios_presenter_resources(pg);
 
     if (d->swapchain_acquire_fence != VK_NULL_HANDLE) {
         vkDestroyFence(r->device, d->swapchain_acquire_fence, NULL);
@@ -1151,6 +1725,9 @@ static bool ios_create_swapchain(PGRAPHState *pg, uint32_t width,
     d->swapchain_format = surface_format.format;
     d->swapchain_color_space = surface_format.colorSpace;
     d->swapchain_extent = extent;
+    if (ios_xenios_presenter_enabled()) {
+        ios_create_xenios_presenter_resources(pg);
+    }
     VkRect2D presenter_rect = ios_presenter_fit_rect(d);
 
     IOS_SWAPCHAIN_LOG("created images=%u extent=%ux%u display=%dx%d"
@@ -1190,6 +1767,12 @@ static void ios_transition_swapchain_image(VkCommandBuffer cmd, VkImage image,
         barrier.dstAccessMask = 0;
         src_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         dst_stage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    } else if (old_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL &&
+               new_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+        barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        barrier.dstAccessMask = 0;
+        src_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dst_stage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
     } else if ((old_layout == VK_IMAGE_LAYOUT_UNDEFINED ||
                 old_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) &&
                new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
@@ -1199,6 +1782,15 @@ static void ios_transition_swapchain_image(VkCommandBuffer cmd, VkImage image,
                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT :
                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
         dst_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    } else if ((old_layout == VK_IMAGE_LAYOUT_UNDEFINED ||
+                old_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) &&
+               new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        src_stage = old_layout == VK_IMAGE_LAYOUT_UNDEFINED ?
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT :
+                        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     } else {
         assert(!"unsupported swapchain layout transition");
     }
@@ -1353,6 +1945,97 @@ static void ios_record_present_swapchain(PGRAPHState *pg, VkCommandBuffer cmd,
                                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
+    d->swapchain_image_layouts[image_index] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+}
+
+static void ios_update_xenios_presenter_descriptor(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    PGRAPHVkDisplayState *d = &r->display;
+
+    VkDescriptorImageInfo image_info = {
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .imageView = d->image_view,
+        .sampler = d->sampler,
+    };
+    VkWriteDescriptorSet descriptor_write = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = d->presenter_descriptor_set,
+        .dstBinding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = 1,
+        .pImageInfo = &image_info,
+    };
+
+    vkUpdateDescriptorSets(r->device, 1, &descriptor_write, 0, NULL);
+}
+
+static void ios_record_xenios_presenter(PGRAPHState *pg, VkCommandBuffer cmd,
+                                        uint32_t image_index)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    PGRAPHVkDisplayState *d = &r->display;
+    VkRect2D dst_rect = ios_presenter_fit_rect(d);
+    bool flip_x = ios_presenter_env_bool("XEMU_IOS_PRESENTER_FLIP_X", true);
+    bool flip_y = ios_presenter_env_bool("XEMU_IOS_PRESENTER_FLIP_Y", true);
+    const float options[4] = {
+        flip_x ? 1.0f : 0.0f,
+        flip_y ? 1.0f : 0.0f,
+        0.0f,
+        0.0f,
+    };
+
+    ios_create_xenios_presenter_resources(pg);
+    ios_update_xenios_presenter_descriptor(pg);
+
+    ios_transition_swapchain_image(cmd, d->swapchain_images[image_index],
+                                   d->swapchain_image_layouts[image_index],
+                                   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+    VkClearValue clear_value = {
+        .color.float32 = { 0.0f, 0.0f, 0.0f, 1.0f },
+    };
+    VkRenderPassBeginInfo render_pass_begin_info = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass = d->presenter_render_pass,
+        .framebuffer = d->presenter_framebuffers[image_index],
+        .renderArea.extent = d->swapchain_extent,
+        .clearValueCount = 1,
+        .pClearValues = &clear_value,
+    };
+    vkCmdBeginRenderPass(cmd, &render_pass_begin_info,
+                         VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      d->presenter_pipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            d->presenter_pipeline_layout, 0, 1,
+                            &d->presenter_descriptor_set, 0, NULL);
+    vkCmdPushConstants(cmd, d->presenter_pipeline_layout,
+                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(options),
+                       options);
+
+    VkViewport viewport = {
+        .x = (float)dst_rect.offset.x,
+        .y = (float)dst_rect.offset.y,
+        .width = (float)dst_rect.extent.width,
+        .height = (float)dst_rect.extent.height,
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f,
+    };
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+    VkRect2D scissor = {
+        .offset = dst_rect.offset,
+        .extent = dst_rect.extent,
+    };
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+    vkCmdEndRenderPass(cmd);
+
+    ios_transition_swapchain_image(cmd, d->swapchain_images[image_index],
+                                   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     d->swapchain_image_layouts[image_index] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 }
 
@@ -1882,21 +2565,56 @@ static void render_display(PGRAPHState *pg, SurfaceBinding *surface)
     PGRAPHVkDisplayState *disp = &r->display;
 
 #ifdef CONFIG_IOS
+    IOSDisplayPerfFrame perf = { 0 };
+    bool perf_enabled = ios_display_perf_stats_enabled();
+    gint64 perf_total_start_us = g_get_monotonic_time();
+
     if (xemu_ios_vulkan_presenter_enabled()) {
+        gint64 wait_start_us = perf_enabled ? g_get_monotonic_time() : 0;
         ios_wait_present_command(pg);
+        if (perf_enabled) {
+            perf.wait_present_us += g_get_monotonic_time() - wait_start_us;
+        }
     }
 #endif
 
     if (r->in_command_buffer &&
         surface->draw_time >= r->command_buffer_start_time) {
+#ifdef CONFIG_IOS
+        perf.finish_presenting = true;
+        gint64 finish_start_us = perf_enabled ? g_get_monotonic_time() : 0;
+#endif
         pgraph_vk_finish(pg, VK_FINISH_REASON_PRESENTING);
+#ifdef CONFIG_IOS
+        if (perf_enabled) {
+            perf.finish_presenting_us += g_get_monotonic_time() - finish_start_us;
+        }
+#endif
     }
 
+#ifdef CONFIG_IOS
+    perf.surface_upload_pending = qatomic_read(&surface->upload_pending);
+    gint64 upload_surface_start_us = perf_enabled ? g_get_monotonic_time() : 0;
+#endif
     pgraph_vk_upload_surface_data(d, surface, !tcg_enabled());
+#ifdef CONFIG_IOS
+    if (perf_enabled) {
+        perf.surface_upload_us += g_get_monotonic_time() - upload_surface_start_us;
+    }
+#endif
 
     disp->pvideo.state = get_pvideo_state(pg);
     if (disp->pvideo.state.enabled) {
+#ifdef CONFIG_IOS
+        perf.pvideo_enabled = true;
+        gint64 pvideo_start_us = perf_enabled ? g_get_monotonic_time() : 0;
+#endif
         upload_pvideo_image(pg, disp->pvideo.state);
+#ifdef CONFIG_IOS
+        if (perf_enabled) {
+            perf.pvideo_upload_us += g_get_monotonic_time() - pvideo_start_us;
+        }
+#endif
     }
 
     update_uniforms(pg, surface);
@@ -1907,17 +2625,24 @@ static void render_display(PGRAPHState *pg, SurfaceBinding *surface)
     uint32_t ios_present_image_index = 0;
     bool ios_native_present_command = false;
     if (xemu_ios_vulkan_presenter_enabled()) {
+        gint64 acquire_start_us = perf_enabled ? g_get_monotonic_time() : 0;
         ios_present_ready =
             ios_begin_present_swapchain(pg, &ios_present_image_index);
+        if (perf_enabled) {
+            perf.acquire_us += g_get_monotonic_time() - acquire_start_us;
+        }
         ios_native_present_command =
             ios_present_ready &&
             disp->present_command_buffer != VK_NULL_HANDLE &&
             disp->present_complete_semaphore != VK_NULL_HANDLE &&
             disp->present_command_fence != VK_NULL_HANDLE;
+        perf.present_ready = ios_present_ready;
+        perf.native_present_command = ios_native_present_command;
     }
 #endif
 
 #ifdef CONFIG_IOS
+    gint64 command_start_us = perf_enabled ? g_get_monotonic_time() : 0;
     VkCommandBuffer cmd = ios_native_present_command ?
         ios_begin_present_command(pg) :
         pgraph_vk_begin_single_time_commands(pg);
@@ -2003,7 +2728,11 @@ static void render_display(PGRAPHState *pg, SurfaceBinding *surface)
 
 #ifdef CONFIG_IOS
     if (ios_present_ready) {
-        ios_record_present_swapchain(pg, cmd, ios_present_image_index);
+        if (ios_xenios_presenter_enabled()) {
+            ios_record_xenios_presenter(pg, cmd, ios_present_image_index);
+        } else {
+            ios_record_present_swapchain(pg, cmd, ios_present_image_index);
+        }
     }
 #endif
 
@@ -2011,15 +2740,38 @@ static void render_display(PGRAPHState *pg, SurfaceBinding *surface)
 
 #ifdef CONFIG_IOS
     if (ios_native_present_command) {
+        if (perf_enabled) {
+            perf.command_us += g_get_monotonic_time() - command_start_us;
+        }
+        gint64 submit_start_us = perf_enabled ? g_get_monotonic_time() : 0;
         ios_submit_present_command(pg, cmd);
+        if (perf_enabled) {
+            perf.submit_us += g_get_monotonic_time() - submit_start_us;
+        }
     } else {
+        if (perf_enabled) {
+            perf.command_us += g_get_monotonic_time() - command_start_us;
+        }
+        gint64 submit_start_us = perf_enabled ? g_get_monotonic_time() : 0;
         pgraph_vk_end_single_time_commands(pg, cmd);
+        if (perf_enabled) {
+            perf.submit_us += g_get_monotonic_time() - submit_start_us;
+        }
     }
 
     if (ios_present_ready) {
         VkSemaphore wait_semaphore = ios_native_present_command ?
             disp->present_complete_semaphore : VK_NULL_HANDLE;
+        gint64 present_start_us = perf_enabled ? g_get_monotonic_time() : 0;
         ios_end_present_swapchain(pg, ios_present_image_index, wait_semaphore);
+        if (perf_enabled) {
+            perf.present_us += g_get_monotonic_time() - present_start_us;
+        }
+    }
+    perf.total_us = g_get_monotonic_time() - perf_total_start_us;
+    ios_display_stats_update(pg, &perf);
+    if (perf_enabled) {
+        ios_display_perf_stats_log(pg, &perf);
     }
 #else
     pgraph_vk_end_single_time_commands(pg, cmd);

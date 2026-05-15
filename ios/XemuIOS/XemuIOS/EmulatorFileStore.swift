@@ -207,6 +207,29 @@ enum PresentPacingMode: String, CaseIterable, Identifiable {
     }
 }
 
+enum TBCacheSize: Int, CaseIterable, Identifiable {
+    case mb64 = 64
+    case mb128 = 128
+    case mb256 = 256
+
+    var id: Int { rawValue }
+
+    static let defaultsKey = "DukeXTBCacheSizeMB"
+
+    static var current: TBCacheSize {
+        let storedValue = UserDefaults.standard.integer(forKey: defaultsKey)
+        return TBCacheSize(rawValue: storedValue) ?? .mb128
+    }
+
+    var title: String {
+        "\(rawValue) MB"
+    }
+
+    var launchArgumentValue: String {
+        String(rawValue)
+    }
+}
+
 @MainActor
 final class EmulatorFileStore: ObservableObject {
     @Published private(set) var bios: LibraryFile?
@@ -249,6 +272,21 @@ final class EmulatorFileStore: ObservableObject {
             MetalDiagnostics.configurePerformanceHUD()
         }
     }
+    @Published var statsHUDEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(statsHUDEnabled, forKey: Self.statsHUDEnabledKey)
+        }
+    }
+    @Published var forceThirtyFPSLockEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(forceThirtyFPSLockEnabled, forKey: Self.forceThirtyFPSLockEnabledKey)
+        }
+    }
+    @Published var tbCacheSize: TBCacheSize {
+        didSet {
+            UserDefaults.standard.set(tbCacheSize.rawValue, forKey: TBCacheSize.defaultsKey)
+        }
+    }
     @Published var forceInsigniaNATEnabled: Bool {
         didSet {
             UserDefaults.standard.set(forceInsigniaNATEnabled, forKey: Self.forceInsigniaNATKey)
@@ -285,6 +323,8 @@ final class EmulatorFileStore: ObservableObject {
     static let selectedGameIDKey = "SelectedGameID"
     static let selectedGameNameKey = "SelectedGameName"
     static let metalHUDEnabledKey = "DukeXMetalHUDEnabled"
+    static let statsHUDEnabledKey = "DukeXStatsHUDEnabled"
+    static let forceThirtyFPSLockEnabledKey = "DukeXForceThirtyFPSLockEnabled"
     static let forceInsigniaNATKey = "ForceInsigniaNATEnabled"
     static let natDNSServerKey = "NATDNSServer"
     static let natHostPortKey = "NATHostPort"
@@ -337,6 +377,9 @@ final class EmulatorFileStore: ObservableObject {
         autoLaunchDashboardOnOpenEnabled = UserDefaults.standard.object(forKey: Self.autoLaunchDashboardOnOpenKey) as? Bool ?? false
         presentPacingMode = PresentPacingMode.current
         metalHUDEnabled = UserDefaults.standard.object(forKey: Self.metalHUDEnabledKey) as? Bool ?? false
+        statsHUDEnabled = UserDefaults.standard.object(forKey: Self.statsHUDEnabledKey) as? Bool ?? true
+        forceThirtyFPSLockEnabled = UserDefaults.standard.object(forKey: Self.forceThirtyFPSLockEnabledKey) as? Bool ?? false
+        tbCacheSize = TBCacheSize.current
         forceInsigniaNATEnabled = UserDefaults.standard.object(forKey: Self.forceInsigniaNATKey) as? Bool ?? true
         natDNSServer = UserDefaults.standard.string(forKey: Self.natDNSServerKey) ?? NetworkSettings.insigniaDNSServer
         natHostPort = UserDefaults.standard.string(forKey: Self.natHostPortKey) ?? NetworkSettings.defaultHostPort
@@ -457,6 +500,7 @@ final class EmulatorFileStore: ObservableObject {
             gamesDirectoryURL: romsDirectoryURL,
             universalJITEnabled: universalJITEnabled,
             networkSettings: networkSettings,
+            tbCacheSize: tbCacheSize,
             shaderCacheURL: shaderCacheURL(for: selectedGame)
         )
     }
@@ -474,6 +518,7 @@ final class EmulatorFileStore: ObservableObject {
             gamesDirectoryURL: romsDirectoryURL,
             universalJITEnabled: universalJITEnabled,
             networkSettings: networkSettings,
+            tbCacheSize: tbCacheSize,
             shaderCacheURL: dashboardShaderCacheURL
         )
     }

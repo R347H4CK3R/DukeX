@@ -306,6 +306,17 @@ typedef struct PGRAPHVkDisplayState {
     VkFence present_command_fence;
     VkSemaphore present_complete_semaphore;
     bool present_command_in_flight;
+
+    ShaderModuleInfo *presenter_vert;
+    ShaderModuleInfo *presenter_frag;
+    VkDescriptorPool presenter_descriptor_pool;
+    VkDescriptorSetLayout presenter_descriptor_set_layout;
+    VkDescriptorSet presenter_descriptor_set;
+    VkPipelineLayout presenter_pipeline_layout;
+    VkPipeline presenter_pipeline;
+    VkRenderPass presenter_render_pass;
+    VkFramebuffer presenter_framebuffers[XEMU_IOS_MAX_SWAPCHAIN_IMAGES];
+    VkFormat presenter_format;
 #endif
 
     // OpenGL interop

@@ -254,16 +254,170 @@ get_and_ref_shader_module_for_key(PGRAPHVkState *r,
 }
 
 #ifdef CONFIG_IOS
-static bool ios_host_depth_interpolation_enabled(void)
-{
-    static int enabled = -1;
+typedef enum IosHostDepthInterpolationMode {
+    IOS_HOST_DEPTH_OFF,
+    IOS_HOST_DEPTH_ALL,
+    IOS_HOST_DEPTH_PERSPECTIVE,
+    IOS_HOST_DEPTH_PERSPECTIVE_OPAQUE,
+    IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_WRITE,
+    IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST,
+    IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE,
+    IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE_NOBLEND,
+    IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE_NOBLEND_OFFSET,
+    IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE_NOBLEND_QUADS,
+    IOS_HOST_DEPTH_NONPERSPECTIVE,
+} IosHostDepthInterpolationMode;
 
-    if (enabled < 0) {
-        const char *env = getenv("XEMU_IOS_HOST_DEPTH_INTERPOLATION");
-        enabled = !env || strcmp(env, "0") != 0;
+static IosHostDepthInterpolationMode ios_host_depth_interpolation_mode(void)
+{
+    static int mode = -1;
+
+    if (mode < 0) {
+        const char *mode_env =
+            getenv("XEMU_IOS_HOST_DEPTH_INTERPOLATION_MODE");
+        const char *legacy_env = getenv("XEMU_IOS_HOST_DEPTH_INTERPOLATION");
+
+        if (mode_env && strcmp(mode_env, "perspective") == 0) {
+            mode = IOS_HOST_DEPTH_PERSPECTIVE;
+        } else if (mode_env && strcmp(mode_env, "perspective-opaque") == 0) {
+            mode = IOS_HOST_DEPTH_PERSPECTIVE_OPAQUE;
+        } else if (mode_env &&
+                   strcmp(mode_env, "perspective-depth-write") == 0) {
+            mode = IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_WRITE;
+        } else if (mode_env &&
+                   strcmp(mode_env, "perspective-depth-test") == 0) {
+            mode = IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST;
+        } else if (mode_env &&
+                   strcmp(mode_env, "perspective-depth-test-write") == 0) {
+            mode = IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE;
+        } else if (mode_env &&
+                   strcmp(mode_env, "perspective-depth-test-write-noblend") ==
+                       0) {
+            mode = IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE_NOBLEND;
+        } else if (mode_env &&
+                   strcmp(mode_env,
+                          "perspective-depth-test-write-noblend-offset") ==
+                       0) {
+            mode = IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE_NOBLEND_OFFSET;
+        } else if (mode_env &&
+                   strcmp(mode_env,
+                          "perspective-depth-test-write-noblend-quads") ==
+                       0) {
+            mode = IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE_NOBLEND_QUADS;
+        } else if (mode_env && strcmp(mode_env, "nonperspective") == 0) {
+            mode = IOS_HOST_DEPTH_NONPERSPECTIVE;
+        } else if (mode_env && strcmp(mode_env, "all") == 0) {
+            mode = IOS_HOST_DEPTH_ALL;
+        } else if (mode_env && strcmp(mode_env, "0") != 0) {
+            mode = IOS_HOST_DEPTH_ALL;
+        } else if (legacy_env && strcmp(legacy_env, "0") != 0) {
+            mode = IOS_HOST_DEPTH_ALL;
+        } else {
+            mode = IOS_HOST_DEPTH_OFF;
+        }
     }
 
-    return enabled;
+    return mode;
+}
+
+static bool ios_host_depth_interpolation_enabled(void)
+{
+    return ios_host_depth_interpolation_mode() != IOS_HOST_DEPTH_OFF;
+}
+
+static bool ios_host_depth_interpolation_nonperspective_enabled(void)
+{
+    IosHostDepthInterpolationMode mode = ios_host_depth_interpolation_mode();
+    return mode == IOS_HOST_DEPTH_ALL ||
+           mode == IOS_HOST_DEPTH_NONPERSPECTIVE;
+}
+
+static bool ios_host_depth_interpolation_perspective_enabled(void)
+{
+    IosHostDepthInterpolationMode mode = ios_host_depth_interpolation_mode();
+    return mode == IOS_HOST_DEPTH_ALL ||
+           mode == IOS_HOST_DEPTH_PERSPECTIVE ||
+           mode == IOS_HOST_DEPTH_PERSPECTIVE_OPAQUE ||
+           mode == IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_WRITE ||
+           mode == IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST ||
+           mode == IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE ||
+           mode == IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE_NOBLEND ||
+           mode == IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE_NOBLEND_OFFSET ||
+           mode == IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE_NOBLEND_QUADS;
+}
+
+static bool ios_geom_is_quad_like(const GeomState *state)
+{
+    return state->primitive_mode == PRIM_TYPE_QUADS ||
+           state->primitive_mode == PRIM_TYPE_QUAD_STRIP;
+}
+
+static bool ios_psh_uses_alpha_discard_or_key(const PshState *state)
+{
+    if (state->alpha_test && state->alpha_func != ALPHA_FUNC_ALWAYS) {
+        return true;
+    }
+
+    for (int i = 0; i < ARRAY_SIZE(state->alphakill); i++) {
+        if (state->alphakill[i] ||
+            state->colorkey_mode[i] != COLOR_KEY_NONE) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool ios_host_depth_interpolation_perspective_allowed_for_shader(
+    const ShaderState *state)
+{
+    IosHostDepthInterpolationMode mode = ios_host_depth_interpolation_mode();
+
+    if (mode == IOS_HOST_DEPTH_PERSPECTIVE_OPAQUE &&
+        ios_psh_uses_alpha_discard_or_key(&state->psh)) {
+        return false;
+    }
+
+    if (mode == IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_WRITE &&
+        !state->psh.depth_write) {
+        return false;
+    }
+
+    if (mode == IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST &&
+        !state->psh.depth_test) {
+        return false;
+    }
+
+    if (mode == IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE &&
+        (!state->psh.depth_test || !state->psh.depth_write)) {
+        return false;
+    }
+
+    if (mode == IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE_NOBLEND &&
+        (!state->psh.depth_test || !state->psh.depth_write ||
+         state->psh.blend)) {
+        return false;
+    }
+
+    if (mode == IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE_NOBLEND_OFFSET &&
+        (!state->psh.depth_test || !state->psh.depth_write ||
+         state->psh.blend)) {
+        return false;
+    }
+
+    if (mode == IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE_NOBLEND_QUADS &&
+        (!state->psh.depth_test || !state->psh.depth_write ||
+         state->psh.blend || !ios_geom_is_quad_like(&state->geom))) {
+        return false;
+    }
+
+    return ios_host_depth_interpolation_perspective_enabled();
+}
+
+static bool ios_host_depth_interpolation_uses_guest_offset(void)
+{
+    return ios_host_depth_interpolation_mode() ==
+           IOS_HOST_DEPTH_PERSPECTIVE_DEPTH_TEST_WRITE_NOBLEND_OFFSET;
 }
 #endif
 
@@ -327,8 +481,21 @@ static void shader_cache_entry_init(Lru *lru, LruNode *node, const void *state)
     key.kind = VK_SHADER_STAGE_FRAGMENT_BIT;
     key.psh.state = binding->state.psh;
     key.psh.glsl_opts.vulkan = true;
+#ifdef CONFIG_IOS
+    key.psh.glsl_opts.use_host_depth_interpolation =
+        use_host_depth_interpolation &&
+        ios_host_depth_interpolation_nonperspective_enabled();
+    key.psh.glsl_opts.use_host_depth_for_perspective =
+        use_host_depth_interpolation &&
+        ios_host_depth_interpolation_perspective_allowed_for_shader(
+            &binding->state);
+    key.psh.glsl_opts.use_host_depth_with_guest_offset =
+        use_host_depth_interpolation &&
+        ios_host_depth_interpolation_uses_guest_offset();
+#else
     key.psh.glsl_opts.use_host_depth_interpolation =
         use_host_depth_interpolation;
+#endif
     key.psh.glsl_opts.ubo_binding = PSH_UBO_BINDING;
     key.psh.glsl_opts.tex_binding = PSH_TEX_BINDING;
     binding->psh.module_info = get_and_ref_shader_module_for_key(r, &key);

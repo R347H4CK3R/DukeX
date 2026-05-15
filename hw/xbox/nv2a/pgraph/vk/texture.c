@@ -55,6 +55,18 @@ static bool ios_surface_texture_trace_enabled(void)
     return enabled;
 }
 
+static bool ios_strict_surface_texture_formats_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("XEMU_IOS_STRICT_SURFACE_TEXTURE_FORMATS");
+        enabled = env && strcmp(env, "0") != 0;
+    }
+
+    return enabled;
+}
+
 #define IOS_VK_TEXTURE_LOG(stage) \
     do { \
         if (ios_vk_texture_trace_enabled()) { \
@@ -128,6 +140,10 @@ static void ios_surface_texture_log_pair(const SurfaceBinding *surface,
                                          const TextureShape *shape,
                                          bool allowed)
 {
+}
+static bool ios_strict_surface_texture_formats_enabled(void)
+{
+    return false;
 }
 #endif
 
@@ -990,25 +1006,32 @@ static unsigned int vk_format_texel_size(VkFormat format)
 static bool surface_color_format_matches_texture(uint32_t surface_format,
                                                  uint32_t texture_format)
 {
+    bool strict = ios_strict_surface_texture_formats_enabled();
+
     switch (surface_format) {
     case NV097_SET_SURFACE_FORMAT_COLOR_LE_X1R5G5B5_Z1R5G5B5:
         return texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_X1R5G5B5 ||
                texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_X1R5G5B5 ||
-               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_A1R5G5B5 ||
-               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_A1R5G5B5;
+               (!strict &&
+                (texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_A1R5G5B5 ||
+                 texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_A1R5G5B5));
     case NV097_SET_SURFACE_FORMAT_COLOR_LE_R5G6B5:
         return texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_R5G6B5 ||
                texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_R5G6B5;
     case NV097_SET_SURFACE_FORMAT_COLOR_LE_X8R8G8B8_Z8R8G8B8:
         return texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_X8R8G8B8 ||
                texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_X8R8G8B8 ||
-               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_A8R8G8B8 ||
-               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_A8R8G8B8;
+               (!strict &&
+                (texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_A8R8G8B8 ||
+                 texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_A8R8G8B8));
     case NV097_SET_SURFACE_FORMAT_COLOR_LE_A8R8G8B8:
         return texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_A8R8G8B8 ||
                texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_A8R8G8B8 ||
-               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_X8R8G8B8 ||
-               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_X8R8G8B8;
+               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_A8B8G8R8 ||
+               texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_R8G8B8A8 ||
+               (!strict &&
+                (texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_SZ_X8R8G8B8 ||
+                 texture_format == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_X8R8G8B8));
     default:
         return false;
     }

@@ -22,6 +22,7 @@ struct XemuLaunchPlan: Identifiable {
         gamesDirectoryURL: URL,
         universalJITEnabled: Bool,
         networkSettings: NetworkSettings,
+        tbCacheSize: TBCacheSize,
         shaderCacheURL: URL
     ) throws -> XemuLaunchPlan {
         let configURL = documentsURL.appendingPathComponent("xemu-ios.toml")
@@ -103,7 +104,7 @@ struct XemuLaunchPlan: Identifiable {
             configURL: customConfigURL ?? configURL,
             arguments: [
                 "xemu-ios",
-                "-accel", "tcg,thread=single,tb-size=16",
+                "-accel", "tcg,thread=single,tb-size=\(tbCacheSize.launchArgumentValue)",
                 "-config_path", (customConfigURL ?? configURL).path
             ],
             universalJITEnabled: universalJITEnabled,

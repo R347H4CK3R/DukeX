@@ -255,6 +255,22 @@ struct ContentView: View {
             }
 
             Section("Display") {
+                Toggle(isOn: $store.statsHUDEnabled) {
+                    Label("Stats HUD", systemImage: "waveform.path.ecg.rectangle")
+                }
+
+                Text("Shows FPS, CPU, memory, and thermal state while a game is running.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Toggle(isOn: $store.forceThirtyFPSLockEnabled) {
+                    Label("Lock Gameplay to 30 FPS", systemImage: "30.circle")
+                }
+
+                Text("Forces 30 FPS FIFO pacing while the emulator is running. Changes apply on the next launch.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
                 Toggle(isOn: $store.metalHUDEnabled) {
                     Label("Metal HUD", systemImage: "gauge.with.dots.needle.67percent")
                 }
@@ -273,6 +289,21 @@ struct ContentView: View {
                 .pickerStyle(.segmented)
 
                 Text(store.presentPacingMode.detail)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Advanced") {
+                Picker(selection: $store.tbCacheSize) {
+                    ForEach(TBCacheSize.allCases) { size in
+                        Text(size.title).tag(size)
+                    }
+                } label: {
+                    Label("TB Cache Size", systemImage: "memorychip")
+                }
+                .pickerStyle(.segmented)
+
+                Text("Controls the JIT translated block cache. 128 MB is the current default; changes apply on the next launch.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

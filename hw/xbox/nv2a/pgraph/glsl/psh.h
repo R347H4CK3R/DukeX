@@ -64,6 +64,10 @@ typedef struct PshState {
     bool alpha_test;
     enum PshAlphaFunc alpha_func;
 
+    bool depth_test;
+    bool depth_write;
+    bool blend;
+
     bool window_clip_exclusive;
 
     bool smooth_shading;
@@ -98,6 +102,7 @@ typedef struct GenPshGlslOptions {
     bool vulkan;
     bool use_host_depth_interpolation;
     bool use_host_depth_for_perspective;
+    bool use_host_depth_with_guest_offset;
     int ubo_binding;
     int tex_binding;
 } GenPshGlslOptions;

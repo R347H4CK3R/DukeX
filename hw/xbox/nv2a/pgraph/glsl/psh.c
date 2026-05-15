@@ -68,10 +68,14 @@ void pgraph_glsl_set_psh_state(PGRAPHState *pg, PshState *state)
     state->final_inputs_0 = pgraph_reg_r(pg, NV_PGRAPH_COMBINESPECFOG0);
     state->final_inputs_1 = pgraph_reg_r(pg, NV_PGRAPH_COMBINESPECFOG1);
 
-    state->alpha_test = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0) &
-                        NV_PGRAPH_CONTROL_0_ALPHATESTENABLE;
+    uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+
+    state->alpha_test = control_0 & NV_PGRAPH_CONTROL_0_ALPHATESTENABLE;
     state->alpha_func = (enum PshAlphaFunc)GET_MASK(
-        pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0), NV_PGRAPH_CONTROL_0_ALPHAFUNC);
+        control_0, NV_PGRAPH_CONTROL_0_ALPHAFUNC);
+    state->depth_test = control_0 & NV_PGRAPH_CONTROL_0_ZENABLE;
+    state->depth_write = control_0 & NV_PGRAPH_CONTROL_0_ZWRITEENABLE;
+    state->blend = pgraph_reg_r(pg, NV_PGRAPH_BLEND) & NV_PGRAPH_BLEND_EN;
 
     state->point_sprite = pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER) &
                           NV_PGRAPH_SETUPRASTER_POINTSMOOTHENABLE;
@@ -79,7 +83,7 @@ void pgraph_glsl_set_psh_state(PGRAPHState *pg, PshState *state)
     state->shadow_depth_func =
         (enum PshShadowDepthFunc)GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_SHADOWCTL),
                                           NV_PGRAPH_SHADOWCTL_SHADOW_ZFUNC);
-    state->z_perspective = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0) &
+    state->z_perspective = control_0 &
                            NV_PGRAPH_CONTROL_0_Z_PERSPECTIVE_ENABLE;
 
     state->smooth_shading = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
@@ -995,10 +999,29 @@ static MString* psh_convert(struct PixelShader *ps)
                              "}\n");
     }
 
-    if (ps->opts.use_host_depth_interpolation) {
+    bool use_host_depth =
+        ps->state->z_perspective ? ps->opts.use_host_depth_for_perspective :
+                                   ps->opts.use_host_depth_interpolation;
+
+    if (use_host_depth) {
         mstring_append(
             clip,
             "precise float zvalue = gl_FragCoord.z * clipRange.y;\n");
+        if (ps->opts.use_host_depth_with_guest_offset &&
+            ps->state->z_perspective) {
+            mstring_append(
+                clip,
+                "if (zvalue > 0.0) {\n"
+                "  float zslopeofs = depthFactor*triMZ*zvalue*zvalue;\n"
+                "  zvalue += depthOffset;\n"
+                "  zvalue += zslopeofs;\n"
+                "} else {\n"
+                "  zvalue = uintBitsToFloat(0x7F7FFFFFu);\n"
+                "}\n"
+                "if (isnan(zvalue)) {\n"
+                "  zvalue = uintBitsToFloat(0x7F7FFFFFu);\n"
+                "}\n");
+        }
     } else if (ps->state->z_perspective) {
         mstring_append(
             clip,
