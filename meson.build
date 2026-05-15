@@ -4118,15 +4118,19 @@ subdir('accel')
 subdir('plugins')
 subdir('ebpf')
 
-if 'CONFIG_TCG' in config_all_accel
+if get_option('plugins') and 'CONFIG_TCG' in config_all_accel
   subdir('contrib/plugins')
 endif
 
 common_user_inc = []
 
 subdir('common-user')
-subdir('bsd-user')
-subdir('linux-user')
+if have_bsd_user
+  subdir('bsd-user')
+endif
+if have_linux_user
+  subdir('linux-user')
+endif
 
 # needed for fuzzing binaries
 subdir('tests/qtest/libqos')
@@ -4737,7 +4741,9 @@ if get_option('plugins')
   endif
 endif
 
-subdir('qga')
+if have_ga
+  subdir('qga')
+endif
 
 # Don't build qemu-keymap if xkbcommon is not explicitly enabled
 # when we don't build tools or system
