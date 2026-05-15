@@ -63,23 +63,21 @@ availability. DukeX should be treated as early alpha software.
 
 ### Runtime
 
-| Requirement | Notes |
-| --- | --- |
-| Device | Supported iPhone or iPad hardware for on-device testing. |
-| JIT | StikDebug with Universal.js assigned to the DukeX bundle identifier on iOS 26 or later. |
-| System files | Legally obtained Xbox flash BIOS, MCPX ROM, EEPROM, and HDD image. |
-| Game images | Legally obtained XISO images. |
-| Online service testing | Optional Insignia account and registered dashboard. |
+- Supported iPhone or iPad hardware for device testing.
+- StikDebug with Universal.js assigned to the DukeX bundle identifier for JIT on
+  iOS 26 or later.
+- Legally obtained Xbox flash BIOS, MCPX ROM, and HDD image.
+- Legally obtained XISO game images.
+- Optional Insignia account and registered dashboard for online service testing.
 
 ### Build
 
-| Requirement | Notes |
-| --- | --- |
-| Xcode | macOS with Xcode 26 or newer and the iPhoneOS SDK. |
-| MoltenVK | iOS framework and headers supplied locally; binaries are not committed. |
-| vcpkg | `arm64-ios` dependency prefix used by the embedded xemu core. |
-| Build tools | Meson, Ninja, Python, and the standard xemu/QEMU build toolchain. |
-| Signing | Apple signing assets are only needed for signed device builds or release packaging. |
+- macOS with Xcode 26 or newer and the iPhoneOS SDK.
+- MoltenVK iOS framework and headers, supplied locally and not committed.
+- vcpkg `arm64-ios` dependency prefix used by the embedded xemu core.
+- Meson, Ninja, Python, and the standard xemu/QEMU build toolchain.
+- Apple signing assets only when creating signed device builds or sideload
+  release packages.
 
 ## Documentation
 
@@ -87,7 +85,6 @@ availability. DukeX should be treated as early alpha software.
 - [iOS build instructions](docs/ios-port/BUILDING.md)
 - [Renderer notes](docs/ios-port/RENDERER.md)
 - [Public release checklist](docs/ios-port/PUBLICATION.md)
-- [Contributing](CONTRIBUTING.md)
 
 ## Repository Layout
 
@@ -110,10 +107,3 @@ information, visit [xemu.app](https://xemu.app).
 QEMU/xemu licensing information remains in `LICENSE`, `COPYING`, and source
 file headers throughout the tree. DukeX is not affiliated with Microsoft, Xbox,
 or the xemu project.
-
-## Contributing
-
-Keep DukeX-specific changes focused in `ios/`, `docs/ios-port/`, and the
-renderer/runtime files needed for iOS. Avoid broad edits to inherited QEMU/xemu
-material unless the change is required by the iOS port or comes from an
-upstream sync.
