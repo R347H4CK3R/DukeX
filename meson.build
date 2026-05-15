@@ -879,11 +879,6 @@ if host_os == 'windows'
   winmm = cc.find_library('winmm', required: true)
   crypt32 = cc.find_library('crypt32')
 
-  win = import('windows')
-  version_res = win.compile_resources('version.rc',
-                                      depend_files: files('pc-bios/qemu-nsis.ico'),
-                                      include_directories: include_directories('.'),
-                                      depends: xemu_version)
   host_dsosuf = '.dll'
 elif host_os == 'darwin'
   coref = dependency('appleframeworks', modules: 'CoreFoundation')
@@ -4849,32 +4844,6 @@ if host_os != 'emscripten'
 endif
 if gtk.found()
   subdir('po')
-endif
-
-if host_machine.system() == 'windows'
-  nsis_cmd = [
-    find_program('scripts/nsis.py'),
-    '@OUTPUT@',
-    get_option('prefix'),
-    meson.current_source_dir(),
-    glib_pc.get_variable('bindir'),
-    host_machine.cpu(),
-    '--',
-    '-DDISPLAYVERSION=' + meson.project_version(),
-  ]
-  if build_docs
-    nsis_cmd += '-DCONFIG_DOCUMENTATION=y'
-  endif
-  if gtk.found()
-    nsis_cmd += '-DCONFIG_GTK=y'
-  endif
-
-  nsis = custom_target('nsis',
-                       output: 'qemu-setup-' + meson.project_version() + '.exe',
-                       input: files('qemu.nsi'),
-                       build_always_stale: true,
-                       command: nsis_cmd + ['@INPUT@'])
-  alias_target('installer', nsis)
 endif
 
 #########################

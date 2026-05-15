@@ -26,6 +26,18 @@ artifacts. Users and testers must provide their own legally obtained files.
 - [Renderer notes](docs/ios-port/RENDERER.md)
 - [Public release checklist](docs/ios-port/PUBLICATION.md)
 
+## Repository Layout
+
+DukeX keeps the QEMU/xemu source tree at the repository root because the
+upstream build system expects that layout. The main DukeX-specific areas are:
+
+- `ios/`: native Swift shell, assets, settings UI, and device build scripts.
+- `docs/ios-port/`: DukeX iOS build, renderer, and release notes.
+- `hw/xbox/`, `target/i386/`, `tcg/`, `ui/`, `net/`, `block/`: core emulator
+  code used by the embedded iOS runtime.
+- `docs/upstream/`: preserved upstream QEMU reference files that are useful for
+  provenance but not part of the first-stop DukeX workflow.
+
 ## Upstream
 
 DukeX is based on xemu, which is itself based on QEMU. For upstream xemu
