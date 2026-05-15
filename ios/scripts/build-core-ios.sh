@@ -6,7 +6,7 @@ SOURCE_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 BUILD_DIR="${XEMU_IOS_BUILD_DIR:-${SOURCE_DIR}/build-ios-arm64}"
 IOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-26.3}"
 SDK_NAME="${SDK_NAME:-iphoneos}"
-VCPKG_PREFIX="${VITA3K_IOS_VCPKG_PREFIX:-${VCPKG_ROOT:-}/installed/arm64-ios}"
+VCPKG_PREFIX="${XEMU_IOS_VCPKG_PREFIX:-${VCPKG_ROOT:-}/installed/arm64-ios}"
 MOLTENVK_ROOT="${MOLTENVK_ROOT:-}"
 XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-sigaltstack}"
 
@@ -21,7 +21,7 @@ for path in "${SOURCE_DIR}" "${BUILD_DIR}"; do
 done
 
 if [[ -z "${VCPKG_PREFIX}" || ! -d "${VCPKG_PREFIX}" ]]; then
-  printf 'Missing arm64-ios vcpkg prefix. Set VITA3K_IOS_VCPKG_PREFIX or VCPKG_ROOT.\n' >&2
+  printf 'Missing arm64-ios vcpkg prefix. Set XEMU_IOS_VCPKG_PREFIX or VCPKG_ROOT.\n' >&2
   exit 1
 fi
 

@@ -8,9 +8,13 @@ real path during setup, so a symlink from a clean path is not sufficient.
 Build the embedded iOS core first:
 
 ```sh
+export VCPKG_ROOT="<path-to-vcpkg-root>"
 export MOLTENVK_ROOT="<path-to-MoltenVK-package>"
 ios/scripts/build-core-ios.sh
 ```
+
+Alternatively, set `XEMU_IOS_VCPKG_PREFIX` directly to an existing `arm64-ios`
+vcpkg prefix.
 
 Expected output:
 

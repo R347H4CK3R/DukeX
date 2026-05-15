@@ -51,3 +51,9 @@ For renderer review, start with:
 - `hw/xbox/nv2a/pgraph/vk/texture.c`
 - `ios/XemuIOS/XemuIOS/NativeMetalPresenter.swift`
 - `ios/XemuIOS/XemuIOS/EmulatorCoreRuntime.swift`
+
+## Related Docs
+
+- `docs/ios-port/BUILDING.md`: local build and signing setup.
+- `docs/ios-port/RENDERER.md`: presenter and Vulkan/MoltenVK notes.
+- `docs/ios-port/PUBLICATION.md`: public release checklist.

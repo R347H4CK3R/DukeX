@@ -93,7 +93,6 @@ struct NetworkSettings {
     static let defaultProtocol = "udp"
 
     let forceInsigniaNAT: Bool
-    let insigniaPacketCapture: Bool
     let dnsServer: String
     let hostPort: String
     let guestPort: String

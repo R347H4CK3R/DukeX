@@ -80,20 +80,6 @@ struct XemuLaunchPlan: Identifiable {
         setenv("XEMU_IOS_UNIVERSAL_JIT", universalJITEnabled ? "1" : "0", 1)
         setenv("XEMU_IOS_VK_PIPELINE_CACHE_PATH", shaderCacheURL.path, 1)
         setenv("XEMU_IOS_FORCE_INSIGNIA_NAT", networkSettings.forceInsigniaNAT ? "1" : "0", 1)
-        if networkSettings.insigniaPacketCapture {
-            let captureDirectoryURL = documentsURL.appendingPathComponent(
-                "InsigniaCaptures",
-                isDirectory: true
-            )
-            try FileManager.default.createDirectory(
-                at: captureDirectoryURL,
-                withIntermediateDirectories: true
-            )
-            let captureURL = captureDirectoryURL.appendingPathComponent("latest.pcap")
-            setenv("XEMU_IOS_NET_CAPTURE_PATH", captureURL.path, 1)
-        } else {
-            unsetenv("XEMU_IOS_NET_CAPTURE_PATH")
-        }
         if let dnsServer = networkSettings.effectiveDNSServer {
             setenv("XEMU_IOS_NAT_DIRECT_DNS", dnsServer, 1)
         } else {

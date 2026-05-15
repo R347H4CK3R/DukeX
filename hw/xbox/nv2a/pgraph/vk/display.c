@@ -1466,7 +1466,7 @@ static void ios_create_xenios_presenter_resources(PGRAPHState *pg)
     }
 
     d->presenter_format = d->swapchain_format;
-    IOS_SWAPCHAIN_LOG("XeniOS-style shader presenter created format=%d",
+    IOS_SWAPCHAIN_LOG("iOS shader presenter created format=%d",
                       d->swapchain_format);
 }
 

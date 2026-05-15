@@ -782,7 +782,7 @@ static int alloc_code_gen_buffer(size_t size, int splitwx, Error **errp)
 
         /*
          * Xemu writes translated code into the RW alias. The RX mapping shares
-         * the same pages, matching the current XeniOS iOS 26 broker path.
+         * the same pages, matching the external iOS 26 JIT broker path.
          */
         return PROT_READ | PROT_WRITE;
     }

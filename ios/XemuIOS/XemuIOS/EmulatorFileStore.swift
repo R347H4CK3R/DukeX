@@ -126,7 +126,6 @@ final class EmulatorFileStore: ObservableObject {
     var networkSettings: NetworkSettings {
         NetworkSettings(
             forceInsigniaNAT: forceInsigniaNATEnabled,
-            insigniaPacketCapture: false,
             dnsServer: natDNSServer,
             hostPort: natHostPort,
             guestPort: natGuestPort,
