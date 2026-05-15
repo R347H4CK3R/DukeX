@@ -117,7 +117,7 @@ static inline void slirp_smb_cleanup(SlirpState *s) { }
 #ifdef CONFIG_IOS
 #define XEMU_IOS_DNS_REDIRECT_LIMIT 64
 
-typedef struct XemuIOSDnsFrameInfo {
+typedef struct DukeXDnsFrameInfo {
     size_t l3_offset;
     size_t l4_offset;
     int csum_flags;
@@ -126,30 +126,30 @@ typedef struct XemuIOSDnsFrameInfo {
     uint16_t dst_port;
     uint32_t src_ip;
     uint32_t dst_ip;
-} XemuIOSDnsFrameInfo;
+} DukeXDnsFrameInfo;
 
-typedef struct XemuIOSDnsRedirect {
+typedef struct DukeXDnsRedirect {
     bool active;
     uint8_t proto;
     uint16_t guest_port;
     uint32_t guest_ip;
     uint32_t original_dns;
-} XemuIOSDnsRedirect;
+} DukeXDnsRedirect;
 
-static XemuIOSDnsRedirect xemu_ios_dns_redirects[XEMU_IOS_DNS_REDIRECT_LIMIT];
+static DukeXDnsRedirect xemu_ios_dns_redirects[XEMU_IOS_DNS_REDIRECT_LIMIT];
 static unsigned xemu_ios_dns_redirect_next;
 static unsigned xemu_ios_dns_query_log_count;
 static unsigned xemu_ios_dns_response_log_count;
 static unsigned xemu_ios_dns_local_log_count;
 static unsigned xemu_ios_net_trace_log_count;
 
-typedef struct XemuIOSInsigniaZone {
+typedef struct DukeXInsigniaZone {
     const char *name;
     const char *target;
     uint32_t cached_ip;
-} XemuIOSInsigniaZone;
+} DukeXInsigniaZone;
 
-static XemuIOSInsigniaZone xemu_ios_insignia_zones[] = {
+static DukeXInsigniaZone xemu_ios_insignia_zones[] = {
     { "macs.xboxlive.com", "macs.insig.uk" },
     { "as.xboxlive.com", "as.insig.uk" },
     { "tgs.xboxlive.com", "tgs.insig.uk" },
@@ -234,7 +234,7 @@ static bool xemu_ios_l3_offset(const uint8_t *pkt, size_t size,
 }
 
 static bool xemu_ios_dns_frame_info(const uint8_t *pkt, size_t size,
-                                    XemuIOSDnsFrameInfo *info)
+                                    DukeXDnsFrameInfo *info)
 {
     uint16_t eth_proto;
     const struct ip_header *ip;
@@ -306,9 +306,9 @@ static bool xemu_ios_dns_frame_info(const uint8_t *pkt, size_t size,
     }
 }
 
-static void xemu_ios_store_dns_redirect(const XemuIOSDnsFrameInfo *info)
+static void xemu_ios_store_dns_redirect(const DukeXDnsFrameInfo *info)
 {
-    XemuIOSDnsRedirect *entry;
+    DukeXDnsRedirect *entry;
 
     entry = &xemu_ios_dns_redirects[xemu_ios_dns_redirect_next];
     entry->active = true;
@@ -320,7 +320,7 @@ static void xemu_ios_store_dns_redirect(const XemuIOSDnsFrameInfo *info)
         (xemu_ios_dns_redirect_next + 1) % XEMU_IOS_DNS_REDIRECT_LIMIT;
 }
 
-static bool xemu_ios_find_dns_redirect(const XemuIOSDnsFrameInfo *info,
+static bool xemu_ios_find_dns_redirect(const DukeXDnsFrameInfo *info,
                                        uint32_t *original_dns)
 {
     unsigned i;
@@ -329,7 +329,7 @@ static bool xemu_ios_find_dns_redirect(const XemuIOSDnsFrameInfo *info,
         unsigned idx = (xemu_ios_dns_redirect_next +
                         XEMU_IOS_DNS_REDIRECT_LIMIT - 1 - i) %
                        XEMU_IOS_DNS_REDIRECT_LIMIT;
-        XemuIOSDnsRedirect *entry = &xemu_ios_dns_redirects[idx];
+        DukeXDnsRedirect *entry = &xemu_ios_dns_redirects[idx];
 
         if (entry->active &&
             entry->proto == info->proto &&
@@ -374,7 +374,7 @@ static bool xemu_ios_trace_port(uint16_t port)
 }
 
 static void xemu_ios_tcp_flags(const uint8_t *pkt,
-                               const XemuIOSDnsFrameInfo *info,
+                               const DukeXDnsFrameInfo *info,
                                char *buf,
                                size_t len)
 {
@@ -412,7 +412,7 @@ static void xemu_ios_trace_net_packet(const char *direction,
                                       const void *pkt,
                                       size_t size)
 {
-    XemuIOSDnsFrameInfo info;
+    DukeXDnsFrameInfo info;
     char src[INET_ADDRSTRLEN];
     char dst[INET_ADDRSTRLEN];
     char flags[8];
@@ -452,7 +452,7 @@ static void xemu_ios_trace_net_packet(const char *direction,
     xemu_ios_net_trace_log_count++;
 }
 
-static XemuIOSInsigniaZone *xemu_ios_find_insignia_zone(const char *name)
+static DukeXInsigniaZone *xemu_ios_find_insignia_zone(const char *name)
 {
     int i;
 
@@ -465,7 +465,7 @@ static XemuIOSInsigniaZone *xemu_ios_find_insignia_zone(const char *name)
     return NULL;
 }
 
-static bool xemu_ios_resolve_insignia_zone(XemuIOSInsigniaZone *zone,
+static bool xemu_ios_resolve_insignia_zone(DukeXInsigniaZone *zone,
                                            uint32_t *addr)
 {
     struct addrinfo hints = { 0 };
@@ -563,8 +563,8 @@ static bool xemu_ios_answer_insignia_dns(SlirpState *s,
                                          const uint8_t *pkt,
                                          size_t size)
 {
-    XemuIOSDnsFrameInfo info;
-    XemuIOSInsigniaZone *zone;
+    DukeXDnsFrameInfo info;
+    DukeXInsigniaZone *zone;
     const struct eth_header *eth;
     const struct ip_header *req_ip;
     const udp_header *req_udp;
@@ -688,7 +688,7 @@ static bool xemu_ios_answer_insignia_dns(SlirpState *s,
 static uint8_t *xemu_ios_redirect_dns_query(const uint8_t *pkt, size_t size)
 {
     struct in_addr direct_dns;
-    XemuIOSDnsFrameInfo info;
+    DukeXDnsFrameInfo info;
     struct ip_header *ip;
     uint8_t *copy;
 
@@ -726,7 +726,7 @@ static uint8_t *xemu_ios_redirect_dns_query(const uint8_t *pkt, size_t size)
 static uint8_t *xemu_ios_redirect_dns_response(const void *pkt, size_t size)
 {
     struct in_addr direct_dns;
-    XemuIOSDnsFrameInfo info;
+    DukeXDnsFrameInfo info;
     uint32_t original_dns;
     struct ip_header *ip;
     uint8_t *copy;

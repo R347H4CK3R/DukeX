@@ -22,8 +22,7 @@ hook in `tcg/ios-jit.c` uses this to decide whether to issue the iOS 26
 
 Core build note: QEMU/Xemu `configure` rejects source and build paths containing
 spaces or colons. Core configure/build checks need an actual no-space checkout
-or copy such as `/Users/michaelweekley/xemu-ios-core`; a symlink is not enough
-because the Python venv step resolves the real path.
+or copy, not a symlink, because the Python venv step resolves the real path.
 
 From that no-space workspace, run the first iPhoneOS arm64 build pass with:
 
@@ -41,7 +40,7 @@ That build produces:
   Swift app.
 
 The Xcode app target runs `ios/scripts/embed-core-ios.sh` and copies
-`libxemu-ios-core.dylib` into `XemuIOS.app/Frameworks`. The Swift launch path
+`libxemu-ios-core.dylib` into `DukeX.app/Frameworks`. The Swift launch path
 uses `dlopen`, resolves `xemu_ios_main`, and passes `-config_path` plus the
 generated `Documents/xemu-ios.toml`.
 

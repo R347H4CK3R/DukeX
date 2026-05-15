@@ -1,5 +1,5 @@
 name: Feature Request
-description: Request a new feature for xemu
+description: Request a new feature for DukeX
 labels: [enhancement]
 body:
   - type: markdown
@@ -8,11 +8,9 @@ body:
         Thanks for taking the time to fill out this feature request!
 
         Before submitting this request, please check the pre-submission checklist:
-        - Have you read the [documentation](https://xemu.app/docs)?
-        - Have you checked the [FAQ](https://xemu.app/docs/faq/)?
         - Have you searched to see if this feature has been requested before?
-
-        If you have questions about how to provide the information below, join the Discord server to get help from the community.
+        - Is the request specific to DukeX rather than upstream xemu?
+        - If this is device-specific, include your iPhone model and iOS version.
   - type: textarea
     id: feature-request
     attributes:

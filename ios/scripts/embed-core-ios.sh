@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 SOURCE_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 CORE_DYLIB="${XEMU_IOS_CORE_DYLIB:-${SOURCE_DIR}/build-ios-arm64/libxemu-ios-core.dylib}"
 SLIRP_DYLIB="${XEMU_IOS_SLIRP_DYLIB:-${SOURCE_DIR}/build-ios-arm64/subprojects/slirp/libslirp.0.dylib}"
-MOLTENVK_FRAMEWORK="${MOLTENVK_FRAMEWORK:-/Users/michaelweekley/.local/tools/moltenvk-ios/MoltenVK/dynamic/MoltenVK.xcframework/ios-arm64/MoltenVK.framework}"
+MOLTENVK_FRAMEWORK="${MOLTENVK_FRAMEWORK:-}"
 
 if [[ ! -f "${CORE_DYLIB}" ]]; then
   cat >&2 <<EOF
@@ -45,10 +45,10 @@ chmod 755 "${DESTINATION}"
 cp "${SLIRP_DYLIB}" "${SLIRP_DESTINATION}"
 chmod 755 "${SLIRP_DESTINATION}"
 
-if [[ ! -d "${MOLTENVK_FRAMEWORK}" ]]; then
+if [[ -z "${MOLTENVK_FRAMEWORK}" || ! -d "${MOLTENVK_FRAMEWORK}" ]]; then
   cat >&2 <<EOF
 Missing MoltenVK iOS framework:
-  ${MOLTENVK_FRAMEWORK}
+  ${MOLTENVK_FRAMEWORK:-<unset>}
 
 Set MOLTENVK_FRAMEWORK to the ios-arm64 MoltenVK.framework.
 EOF
