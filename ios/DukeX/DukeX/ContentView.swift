@@ -219,6 +219,9 @@ struct ContentView: View {
                 profileStore.refresh()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .dukeXReturnToGamesRequested)) { _ in
+            selectedTab = .games
+        }
     }
 
     private var environmentRequestsAutoLaunch: Bool {
