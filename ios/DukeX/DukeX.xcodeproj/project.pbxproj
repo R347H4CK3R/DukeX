@@ -355,7 +355,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.0.1;
 					PRODUCT_BUNDLE_IDENTIFIER = com.mafty.dukex;
 				PRODUCT_NAME = DukeX;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -384,7 +384,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.0.1;
 					PRODUCT_BUNDLE_IDENTIFIER = com.mafty.dukex;
 				PRODUCT_NAME = DukeX;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
