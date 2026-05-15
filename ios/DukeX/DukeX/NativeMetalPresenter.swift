@@ -18,7 +18,7 @@ private final class NativeMetalPresenterViewController: UIViewController {
     }
 }
 
-private struct XemuIOSDisplayStats {
+private struct DukeXDisplayStats {
     var sampleID: UInt64 = 0
     var presenterFPS: Double = 0
     var nv2aFPS: UInt32 = 0
@@ -56,7 +56,7 @@ private final class XemuDisplayStatsBridge {
     private typealias CopyDisplayStats = @convention(c) (UnsafeMutableRawPointer?) -> CInt
     private var copyDisplayStats: CopyDisplayStats?
 
-    func sample() -> XemuIOSDisplayStats? {
+    func sample() -> DukeXDisplayStats? {
         if copyDisplayStats == nil {
             resolve()
         }
@@ -65,7 +65,7 @@ private final class XemuDisplayStatsBridge {
             return nil
         }
 
-        var stats = XemuIOSDisplayStats()
+        var stats = DukeXDisplayStats()
         let copied = withUnsafeMutablePointer(to: &stats) { pointer in
             copyDisplayStats(UnsafeMutableRawPointer(pointer))
         }

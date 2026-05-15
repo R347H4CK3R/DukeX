@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A10000000000000000000001 /* XemuIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* XemuIOSApp.swift */; };
+		A10000000000000000000001 /* DukeXApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* DukeXApp.swift */; };
 		A10000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* ContentView.swift */; };
 		A10000000000000000000003 /* EmulatorFileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* EmulatorFileStore.swift */; };
 		A10000000000000000000004 /* XemuLaunchPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* XemuLaunchPlan.swift */; };
@@ -28,14 +28,14 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		A10000000000000000000010 /* XemuIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = XemuIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A10000000000000000000011 /* XemuIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XemuIOSApp.swift; sourceTree = "<group>"; };
+		A10000000000000000000010 /* DukeX.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DukeX.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000011 /* DukeXApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DukeXApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A10000000000000000000013 /* EmulatorFileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorFileStore.swift; sourceTree = "<group>"; };
 		A10000000000000000000014 /* XemuLaunchPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XemuLaunchPlan.swift; sourceTree = "<group>"; };
 		A10000000000000000000015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A10000000000000000000016 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A10000000000000000000017 /* XemuIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = XemuIOS.entitlements; sourceTree = "<group>"; };
+		A10000000000000000000017 /* DukeX.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DukeX.entitlements; sourceTree = "<group>"; };
 		A10000000000000000000018 /* EmulatorCoreRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorCoreRuntime.swift; sourceTree = "<group>"; };
 		A10000000000000000000019 /* EarlyMetalDiagnostics.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = EarlyMetalDiagnostics.m; sourceTree = "<group>"; };
 		B10000000000000000000011 /* GameLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameLibraryView.swift; sourceTree = "<group>"; };
@@ -65,15 +65,15 @@
 		A10000000000000000000030 = {
 			isa = PBXGroup;
 			children = (
-				A10000000000000000000031 /* XemuIOS */,
+				A10000000000000000000031 /* DukeX */,
 				A10000000000000000000032 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		A10000000000000000000031 /* XemuIOS */ = {
+		A10000000000000000000031 /* DukeX */ = {
 			isa = PBXGroup;
 			children = (
-				A10000000000000000000011 /* XemuIOSApp.swift */,
+				A10000000000000000000011 /* DukeXApp.swift */,
 				A10000000000000000000012 /* ContentView.swift */,
 				B10000000000000000000011 /* GameLibraryView.swift */,
 				B10000000000000000000012 /* ProfileView.swift */,
@@ -92,15 +92,15 @@
 				A10000000000000000000019 /* EarlyMetalDiagnostics.m */,
 				A10000000000000000000015 /* Assets.xcassets */,
 				A10000000000000000000016 /* Info.plist */,
-				A10000000000000000000017 /* XemuIOS.entitlements */,
+				A10000000000000000000017 /* DukeX.entitlements */,
 			);
-			path = XemuIOS;
+			path = DukeX;
 			sourceTree = "<group>";
 		};
 		A10000000000000000000032 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				A10000000000000000000010 /* XemuIOS.app */,
+				A10000000000000000000010 /* DukeX.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -108,9 +108,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		A10000000000000000000040 /* XemuIOS */ = {
+		A10000000000000000000040 /* DukeX */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = A10000000000000000000070 /* Build configuration list for PBXNativeTarget "XemuIOS" */;
+			buildConfigurationList = A10000000000000000000070 /* Build configuration list for PBXNativeTarget "DukeX" */;
 			buildPhases = (
 				A10000000000000000000050 /* Sources */,
 				A10000000000000000000020 /* Frameworks */,
@@ -121,9 +121,9 @@
 			);
 			dependencies = (
 			);
-			name = XemuIOS;
-			productName = XemuIOS;
-			productReference = A10000000000000000000010 /* XemuIOS.app */;
+			name = DukeX;
+			productName = DukeX;
+			productReference = A10000000000000000000010 /* DukeX.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -141,7 +141,7 @@
 					};
 				};
 			};
-			buildConfigurationList = A10000000000000000000061 /* Build configuration list for PBXProject "XemuIOS" */;
+			buildConfigurationList = A10000000000000000000061 /* Build configuration list for PBXProject "DukeX" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -154,7 +154,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				A10000000000000000000040 /* XemuIOS */,
+				A10000000000000000000040 /* DukeX */,
 			);
 		};
 /* End PBXProject section */
@@ -201,7 +201,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A10000000000000000000001 /* XemuIOSApp.swift in Sources */,
+				A10000000000000000000001 /* DukeXApp.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				B10000000000000000000001 /* GameLibraryView.swift in Sources */,
 				B10000000000000000000002 /* ProfileView.swift in Sources */,
@@ -344,12 +344,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconGC;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = XemuIOS/XemuIOS.entitlements;
+				CODE_SIGN_ENTITLEMENTS = DukeX/DukeX.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 					DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = XemuIOS/Info.plist;
+				INFOPLIST_FILE = DukeX/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.3;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -373,12 +373,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconGC;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = XemuIOS/XemuIOS.entitlements;
+				CODE_SIGN_ENTITLEMENTS = DukeX/DukeX.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 					DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = XemuIOS/Info.plist;
+				INFOPLIST_FILE = DukeX/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.3;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -400,7 +400,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A10000000000000000000061 /* Build configuration list for PBXProject "XemuIOS" */ = {
+		A10000000000000000000061 /* Build configuration list for PBXProject "DukeX" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A10000000000000000000062 /* Debug */,
@@ -409,7 +409,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		A10000000000000000000070 /* Build configuration list for PBXNativeTarget "XemuIOS" */ = {
+		A10000000000000000000070 /* Build configuration list for PBXNativeTarget "DukeX" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A10000000000000000000071 /* Debug */,

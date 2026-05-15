@@ -14,6 +14,9 @@ before publishing a tagged tester build.
   Xcode DerivedData.
 - Prefer public-facing docs under `docs/ios-port/`; avoid committing private
   handoff notes or tester-specific findings.
+- The inherited upstream desktop/release GitHub Actions are intentionally not
+  enabled on this branch. Add DukeX-specific iOS CI once the build inputs can be
+  reproduced without private signing material.
 
 ## Licensing And Attribution
 
@@ -57,8 +60,8 @@ git diff --check
 
 MOLTENVK_FRAMEWORK="<path-to-ios-arm64-MoltenVK.framework>" \
 xcodebuild \
-  -project ios/XemuIOS/XemuIOS.xcodeproj \
-  -scheme XemuIOS \
+  -project ios/DukeX/DukeX.xcodeproj \
+  -scheme DukeX \
   -configuration Release \
   -sdk iphoneos \
   -destination "generic/platform=iOS" \

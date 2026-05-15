@@ -3,8 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 SOURCE_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
-PROJECT="${SOURCE_DIR}/ios/XemuIOS/XemuIOS.xcodeproj"
-SCHEME="${XEMU_IOS_SCHEME:-XemuIOS}"
+PROJECT="${SOURCE_DIR}/ios/DukeX/DukeX.xcodeproj"
+SCHEME="${XEMU_IOS_SCHEME:-DukeX}"
 BUNDLE_ID="${XEMU_IOS_BUNDLE_ID:-com.mafty.dukex}"
 DERIVED_DATA="${XEMU_IOS_DERIVED_DATA:-${SOURCE_DIR}/build-ios-xcode}"
 CONFIGURATION="${XEMU_IOS_CONFIGURATION:-Debug}"
@@ -14,7 +14,7 @@ if [[ -n "${XEMU_IOS_DISPLAY_NAME:-}" ]]; then
 elif [[ "${BUNDLE_ID}" == "com.mafty.dukex" || "${BUNDLE_ID}" == "com.mafty.DukeX" ]]; then
   DISPLAY_NAME="DukeX"
 else
-  DISPLAY_NAME="XemuIOS"
+  DISPLAY_NAME="DukeX"
 fi
 
 detect_device_id() {

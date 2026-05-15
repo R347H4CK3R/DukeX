@@ -27,8 +27,8 @@ Build and install through Xcode or `xcodebuild`. Typical command-line build:
 
 ```sh
 xcodebuild \
-  -project ios/XemuIOS/XemuIOS.xcodeproj \
-  -scheme XemuIOS \
+  -project ios/DukeX/DukeX.xcodeproj \
+  -scheme DukeX \
   -configuration Release \
   -destination "generic/platform=iOS" \
   DEVELOPMENT_TEAM="<APPLE_TEAM_ID>" \

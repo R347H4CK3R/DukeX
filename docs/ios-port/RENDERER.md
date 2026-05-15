@@ -15,8 +15,8 @@ through MoltenVK into a native `CAMetalLayer`.
 
 The primary Swift entry points are:
 
-- `ios/XemuIOS/XemuIOS/EmulatorCoreRuntime.swift`
-- `ios/XemuIOS/XemuIOS/NativeMetalPresenter.swift`
+- `ios/DukeX/DukeX/EmulatorCoreRuntime.swift`
+- `ios/DukeX/DukeX/NativeMetalPresenter.swift`
 
 The primary renderer files are:
 

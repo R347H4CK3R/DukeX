@@ -49,8 +49,8 @@ For renderer review, start with:
 - `hw/xbox/nv2a/pgraph/vk/renderer.h`
 - `hw/xbox/nv2a/pgraph/vk/shaders.c`
 - `hw/xbox/nv2a/pgraph/vk/texture.c`
-- `ios/XemuIOS/XemuIOS/NativeMetalPresenter.swift`
-- `ios/XemuIOS/XemuIOS/EmulatorCoreRuntime.swift`
+- `ios/DukeX/DukeX/NativeMetalPresenter.swift`
+- `ios/DukeX/DukeX/EmulatorCoreRuntime.swift`
 
 ## Related Docs
 

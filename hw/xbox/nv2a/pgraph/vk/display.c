@@ -102,7 +102,7 @@ typedef struct IOSDisplayPerfWindow {
     gint64 total_us;
 } IOSDisplayPerfWindow;
 
-typedef struct XemuIOSDisplayStats {
+typedef struct DukeXDisplayStats {
     uint64_t sample_id;
     double presenter_fps;
     uint32_t nv2a_fps;
@@ -132,11 +132,13 @@ typedef struct XemuIOSDisplayStats {
     int32_t shader_generations;
     int32_t texture_uploads;
     int32_t surface_uploads;
-} XemuIOSDisplayStats;
+} DukeXDisplayStats;
 
-static XemuIOSDisplayStats ios_latest_display_stats;
+static DukeXDisplayStats ios_latest_display_stats;
 
-int xemu_ios_copy_display_stats(XemuIOSDisplayStats *out_stats)
+int xemu_ios_copy_display_stats(DukeXDisplayStats *out_stats);
+
+int xemu_ios_copy_display_stats(DukeXDisplayStats *out_stats)
 {
     if (!out_stats || !ios_latest_display_stats.sample_id) {
         return 0;
@@ -200,7 +202,7 @@ static void ios_display_stats_update(PGRAPHState *pg,
         (g_nv2a_stats.frame_ptr + NV2A_PROF_NUM_FRAMES - 1) %
         NV2A_PROF_NUM_FRAMES;
 
-    ios_latest_display_stats = (XemuIOSDisplayStats){
+    ios_latest_display_stats = (DukeXDisplayStats){
         .sample_id = ios_latest_display_stats.sample_id + 1,
         .presenter_fps =
             elapsed_us > 0 ? (double)window.frames * 1000000.0 / elapsed_us : 0.0,

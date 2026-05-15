@@ -40,7 +40,7 @@ That build produces:
   Swift app.
 
 The Xcode app target runs `ios/scripts/embed-core-ios.sh` and copies
-`libxemu-ios-core.dylib` into `XemuIOS.app/Frameworks`. The Swift launch path
+`libxemu-ios-core.dylib` into `DukeX.app/Frameworks`. The Swift launch path
 uses `dlopen`, resolves `xemu_ios_main`, and passes `-config_path` plus the
 generated `Documents/xemu-ios.toml`.
 

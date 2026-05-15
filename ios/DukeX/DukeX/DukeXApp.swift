@@ -4,7 +4,7 @@ import GameController
 import SwiftUI
 
 @main
-struct XemuIOSApp: App {
+struct DukeXApp: App {
     @StateObject private var store = EmulatorFileStore()
 
     init() {

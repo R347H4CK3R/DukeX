@@ -1,22 +1,17 @@
 name: General Issue
-description: Report a general issue with xemu, not specific to one or more particular titles
+description: Report a DukeX issue, not specific to one particular game
 labels: [bug, triage]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to fill out this bug report! This template is for reporting non-title-specific issues with xemu.
+        Thanks for taking the time to fill out this bug report. This template is for reporting DukeX app, install, UI, JIT, input, or system issues that are not tied to one specific game.
 
         Before submitting this bug report, please check the pre-submission checklist:
-        - Have you read the [documentation](https://xemu.app/docs)?
-        - Have you checked the [FAQ](https://xemu.app/docs/faq/)?
-        - Are you using the latest version of xemu?
-        - Have you joined the Discord community to ask for help?
+        - Are you using the latest DukeX build?
         - Have you checked to see if this issue has already been submitted?
-        - Have you tried updating your platform drivers?
-        - Have you ruled out a bad dump of your game disc?
-
-        If you have questions about how to provide the information below, join the Discord server to get help from the community.
+        - Have you confirmed whether JIT was enabled for the launch?
+        - Have you confirmed your required system files are present in the app's BIOS folder?
   - type: textarea
     id: bug-description
     attributes:
@@ -26,19 +21,14 @@ body:
 
         Tip: You can attach images by clicking this area to highlight it and then dragging files in.
       placeholder: |
-        Controller force feedback no longer works after reconnecting.
+        Controller input no longer works after reconnecting.
 
         Steps to reproduce this issue:
-        1. Launch xemu
-        2. Connect controller (PlayStation Dual Shock 4 CUH-ZCT1U) to system
-        3. Open Input dialog within xemu
-        4. On Port 1, select DS4 controller
-        5. Hold right trigger to activate rumble motors in input tester
-        6. Right rumble motor is activated
-        5. Disconnect controller from system by unplugging
-        6. Reconnect, xemu automatically rebinds
-        7. Hold trigger to activate rumble motors in input tester
-        8. Force feedback does not work
+        1. Launch DukeX
+        2. Connect a controller
+        3. Launch the dashboard
+        4. Disconnect and reconnect the controller
+        5. Input no longer reaches the emulator
     validations:
       required: true
   - type: textarea
@@ -51,10 +41,10 @@ body:
     validations:
       required: true
   - type: textarea
-    id: xemu-version
+    id: dukex-version
     attributes:
-      label: xemu Version
-      description: Affected xemu version. You can find the xemu version within xemu by navigating to <kbd>Help</kbd>&rarr;<kbd>About</kbd>. If known, include the last known-working version of xemu.
+      label: DukeX Version
+      description: Affected DukeX build or commit. If known, include the last known-working build.
       placeholder: |
         0.0.0-00-g0000000000
 
@@ -67,10 +57,11 @@ body:
       label: System Information
       description: Basic information about your system.
       placeholder: |
-        OS: Windows 10
-        CPU: Intel(R) Core(TM) i7-8850H CPU @ 2.60GHz
-        GPU: NVIDIA Quadro P2000
-        GPU Driver: 3.3.0 NVIDIA 450.119.03
+        Device: iPhone 16 Pro
+        iOS: 26.3.1
+        Install method: sideload
+        JIT method: StikDebug Universal.js
+        TB cache size: 128 MB
   - type: textarea
     id: additional-context
     attributes:
