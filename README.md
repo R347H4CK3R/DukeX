@@ -1,78 +1,85 @@
-<p align="center">
-  <img src="docs/assets/branding/dukex-icon.png" alt="DukeX app icon" width="96">
-</p>
+<div align="center">
+  <img src="docs/assets/branding/dukex-logo.png" alt="DukeX" width="360">
+  <p>
+    <strong>Original Xbox emulation for iOS, built from xemu with a native Swift interface.</strong>
+  </p>
+  <p>
+    <img src="https://img.shields.io/badge/status-alpha-8f95c4?style=flat-square" alt="Status: alpha">
+    <img src="https://img.shields.io/badge/platform-iOS%20arm64-111827?style=flat-square" alt="Platform: iOS arm64">
+    <img src="https://img.shields.io/badge/renderer-MoltenVK%20%2B%20Metal-1f6feb?style=flat-square" alt="Renderer: MoltenVK and Metal">
+    <img src="https://img.shields.io/badge/JIT-Universal.js-2f855a?style=flat-square" alt="JIT: Universal.js">
+  </p>
+</div>
 
-<p align="center">
-  <img src="docs/assets/branding/dukex-logo.png" alt="DukeX" width="520">
-</p>
-
-<p align="center">
-  <strong>An experimental iOS-focused original Xbox emulator frontend built on xemu.</strong>
-</p>
-
-<p align="center">
-  <img src="docs/assets/branding/stikstore-badge.png" alt="Available on StikStore" width="220">
-  <img src="docs/assets/branding/sidestore-badge.png" alt="Available on SideStore" width="220">
-</p>
-
-DukeX embeds the [xemu](https://xemu.app) core in a native Swift shell, adds an
-iOS-first library/settings interface, and presents the Vulkan renderer through
+DukeX is an experimental iOS-focused frontend for [xemu](https://xemu.app).
+It embeds the xemu core in a native Swift shell, provides an iPhone-friendly
+library and settings experience, and presents the Vulkan renderer through
 MoltenVK and a native `CAMetalLayer`.
 
-This repository does not include Xbox system files, game images, signing
-certificates, provisioning profiles, MoltenVK binaries, or sideloaded release
-artifacts. Users and testers must provide their own legally obtained files.
+> DukeX does not include Xbox system files, game images, signing certificates,
+> provisioning profiles, MoltenVK binaries, or sideloaded release artifacts.
+> Users and testers must provide their own legally obtained files.
 
-## Current Status
+## At a Glance
 
-- Device target: iPhoneOS arm64, currently developed against iOS 26.3.
-- Runtime: TCG with the iOS Universal.js JIT flow used by StikDebug.
-- Renderer: xemu Vulkan renderer through MoltenVK with a native Metal
-  presenter.
-- UI: native Swift library, profile, and settings tabs.
-- Known gaps remain in rendering correctness, Metal HUD visibility, and
-  game-by-game performance.
+| Area | Alpha State |
+| --- | --- |
+| Target | iPhoneOS arm64, currently developed against iOS 26.3. |
+| Runtime | TCG with the iOS Universal.js JIT flow used by StikDebug. |
+| Graphics | xemu Vulkan renderer through MoltenVK with a native Metal presenter. |
+| Interface | Native SwiftUI library, profile, and settings tabs. |
+| Networking | Insignia-oriented NAT defaults with user-configurable settings. |
+| Known work | Rendering correctness, Metal HUD visibility, and title-by-title tuning. |
 
 ## Features
 
-- Native SwiftUI app shell designed for iPhone rather than desktop xemu UI.
-- Two-column game library with cover art, per-game launch, and dashboard launch.
-- User-accessible `BIOS`, `ROMs`, and `Covers` folders through iOS file sharing.
-- Automatic StikDebug handoff support for the Universal.js JIT workflow.
-- MoltenVK-backed Metal presenter with portrait and landscape-aware display
-  sizing.
-- Controller support through iOS GameController APIs.
-- Game Mode entitlement and metadata for supported iOS versions.
-- Insignia-oriented networking defaults with configurable NAT settings.
-- Per-game configuration import and shader-cache clearing from the game menu.
-- Built-in FPS/system statistics HUD for device-side testing.
-- Advanced runtime tuning for TCG translation block cache size.
+| Category | Details |
+| --- | --- |
+| Game library | Two-column library, cover artwork, game launch, dashboard launch, and long-press actions. |
+| File management | User-accessible `BIOS`, `ROMs`, and `Covers` folders through iOS file sharing. |
+| JIT workflow | Optional automatic StikDebug handoff for the Universal.js JIT flow. |
+| Display | MoltenVK-backed Metal presenter with portrait and landscape-aware sizing. |
+| Input | Controller support through iOS GameController APIs. |
+| Online setup | Insignia-focused NAT defaults plus editable network settings. |
+| Per-game tuning | Custom config import and shader-cache clearing from each game menu. |
+| Diagnostics | Built-in FPS/system statistics HUD for device-side testing. |
+| Advanced runtime | TCG translation block cache size controls for performance testing. |
 
-## Distribution
+## Availability
 
-Public alpha builds are intended for sideload distribution through StikStore and
-SideStore, with release artifacts published from GitHub Releases when testing
-opens. DukeX is currently alpha software; compatibility and performance vary by
-title, device, iOS version, and JIT availability.
+DukeX alpha builds are intended for sideload distribution through StikStore and
+SideStore, with release artifacts published through GitHub Releases when public
+testing opens.
+
+<p align="center">
+  <img src="docs/assets/branding/stikstore-badge.png" alt="Available on StikStore" width="170">
+  <img src="docs/assets/branding/sidestore-badge.png" alt="Available on SideStore" width="170">
+</p>
+
+Compatibility and performance vary by title, device, iOS version, and JIT
+availability. DukeX should be treated as early alpha software.
 
 ## Dependencies
 
-Runtime and testing dependencies:
+### Runtime
 
-- iPhone or iPad running a supported iOS/iPadOS version.
-- StikDebug with Universal.js assigned to the DukeX bundle identifier for JIT on
-  iOS 26 or later.
-- Legally obtained Xbox flash BIOS, MCPX ROM, HDD image, and XISO game images.
-- Optional Insignia account and registered dashboard for online service testing.
+| Requirement | Notes |
+| --- | --- |
+| Supported iPhone or iPad | Physical iOS/iPadOS hardware is required for device testing. |
+| StikDebug | Required for the Universal.js JIT workflow on iOS 26 or later. |
+| Xbox system files | Flash BIOS, MCPX ROM, and HDD image must be legally obtained by the user. |
+| Game images | XISO files must be legally obtained by the user. |
+| Insignia account | Optional, used for online service testing with a registered dashboard. |
 
-Build dependencies:
+### Build
 
-- macOS with Xcode 26 or newer.
-- iPhoneOS SDK and command-line developer tools.
-- MoltenVK iOS framework and headers.
-- vcpkg `arm64-ios` dependency prefix used by the embedded xemu core.
-- Meson, Ninja, Python, and the standard xemu/QEMU build toolchain.
-- Apple signing assets only when creating a signed device build.
+| Requirement | Notes |
+| --- | --- |
+| macOS and Xcode | Xcode 26 or newer with the iPhoneOS SDK. |
+| MoltenVK | iOS framework and headers are required locally, but are not committed. |
+| vcpkg | `arm64-ios` dependency prefix used by the embedded xemu core. |
+| Build tools | Meson, Ninja, Python, and the standard xemu/QEMU build toolchain. |
+| Signing assets | Required only for signed device builds or sideload release preparation. |
 
 ## Documentation
 
@@ -86,18 +93,19 @@ Build dependencies:
 DukeX keeps the QEMU/xemu source tree at the repository root because the
 upstream build system expects that layout. The main DukeX-specific areas are:
 
-- `ios/`: native Swift shell, assets, settings UI, and device build scripts.
-- `docs/ios-port/`: DukeX iOS build, renderer, and release notes.
-- `docs/assets/branding/`: README and release-facing DukeX image assets.
-- `hw/xbox/`, `target/i386/`, `tcg/`, `ui/`, `net/`, `block/`: core emulator
-  code used by the embedded iOS runtime.
-- `docs/upstream/`: preserved upstream QEMU reference files that are useful for
-  provenance but not part of the first-stop DukeX workflow.
+| Path | Purpose |
+| --- | --- |
+| `ios/` | Native Swift shell, assets, settings UI, and device build scripts. |
+| `docs/ios-port/` | DukeX iOS build, renderer, and release notes. |
+| `docs/assets/branding/` | README and release-facing DukeX image assets. |
+| `hw/xbox/`, `target/i386/`, `tcg/`, `ui/`, `net/`, `block/` | Core emulator code used by the embedded iOS runtime. |
+| `docs/upstream/` | Preserved upstream QEMU reference files for provenance and contributor context. |
 
-## Upstream
+## Upstream And Licensing
 
 DukeX is based on xemu, which is itself based on QEMU. For upstream xemu
 information, visit [xemu.app](https://xemu.app).
 
 QEMU/xemu licensing information remains in `LICENSE`, `COPYING`, and source
-file headers throughout the tree.
+file headers throughout the tree. DukeX is not affiliated with Microsoft, Xbox,
+or the xemu project.
