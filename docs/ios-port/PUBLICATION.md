@@ -45,11 +45,14 @@ Before publishing, run a scan similar to:
 ```sh
 rg -n "YOUR_NAME|YOUR_HANDLE|YOUR_EMAIL|YOUR_TEAM_ID|YOUR_DEVICE_ID|/Users/[^[:space:]]+" \
   ios docs/ios-port README.md .gitignore
+
+git ls-files README.md CONTRIBUTING.md docs/ios-port ios .github | \
+  rg "(\\.ipa|\\.xcarchive|\\.dSYM|\\.p12|\\.cer|\\.mobileprovision|\\.provisionprofile|\\.qcow2|device-artifacts|build-artifacts)"
 ```
 
-The scan should not report committed iOS port files. Upstream QEMU/xemu files
-may contain unrelated paths, names, or provenance text; review any matches
-before editing upstream material.
+The scans should not report committed iOS port files. Upstream QEMU/xemu files
+may contain unrelated paths, names, or provenance text; review any match before
+editing inherited material.
 
 ## Validation
 

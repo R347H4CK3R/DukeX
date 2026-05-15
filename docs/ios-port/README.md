@@ -1,6 +1,6 @@
-# DukeX iOS Port Notes
+# DukeX iOS Port
 
-DukeX is an iOS-focused Xemu fork that embeds the emulator core in a native
+DukeX is an iOS-focused xemu fork that embeds the emulator core in a native
 Swift application shell. The app manages user-facing library folders, launch
 configuration, JIT handoff, and a MoltenVK-backed Metal presenter for rendering
 guest output on iPhone.
@@ -10,7 +10,7 @@ The iOS shell creates these folders in app Documents:
 - `BIOS`: flash BIOS, MCPX boot ROM, EEPROM, and HDD image.
 - `ROMs`: XISO game images.
 - `Covers`: user-supplied library cover art.
-- `GameConfigs`: optional per-game Xemu configuration overrides.
+- `GameConfigs`: optional per-game xemu configuration overrides.
 - `ShaderCaches`: per-game pipeline cache storage.
 
 Runtime dependencies are intentionally not included in source control. Testers
@@ -52,7 +52,7 @@ For renderer review, start with:
 - `ios/DukeX/DukeX/NativeMetalPresenter.swift`
 - `ios/DukeX/DukeX/EmulatorCoreRuntime.swift`
 
-## Related Docs
+## Related Documents
 
 - `docs/ios-port/BUILDING.md`: local build and signing setup.
 - `docs/ios-port/RENDERER.md`: presenter and Vulkan/MoltenVK notes.

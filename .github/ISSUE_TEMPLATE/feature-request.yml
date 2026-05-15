@@ -1,35 +1,35 @@
 name: Feature Request
-description: Request a new feature for DukeX
+description: Propose a focused DukeX feature or workflow improvement
 labels: [enhancement]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to fill out this feature request!
-
-        Before submitting this request, please check the pre-submission checklist:
-        - Have you searched to see if this feature has been requested before?
-        - Is the request specific to DukeX rather than upstream xemu?
-        - If this is device-specific, include your iPhone model and iOS version.
+        Before opening a request, check for an existing issue and make sure the
+        request is specific to DukeX rather than upstream xemu.
   - type: textarea
     id: feature-request
     attributes:
-      label: Feature Request
-      description: |
-        A brief description of the requested feature. If appropriate, include screenshots or videos.
-
-        Tip: You can attach images by clicking this area to highlight it and then dragging files in.
+      label: Proposal
+      description: Describe the feature, workflow, or compatibility improvement.
+    validations:
+      required: true
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case
+      description: Explain who benefits and how the change would be used on-device.
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
       label: Alternatives
-      description: Possible alternative options that you have considered.
+      description: Other approaches considered, if any.
     validations:
       required: false
   - type: textarea
     id: additional-context
     attributes:
       label: Additional Context
-      description: Any other context or screenshots about the feature request.
+      description: Device details, screenshots, links, or notes that help frame the request.

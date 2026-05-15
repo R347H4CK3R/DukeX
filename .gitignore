@@ -47,5 +47,13 @@ xcuserdata/
 # Device diagnostics and local release packaging
 *.crash
 *.ips
+*.xcresult/
+*.xcresult
+/build-artifacts/
+/device-artifacts/
 DukeX_Backups/
 DukeX_Test_Releases/
+
+# Local environment files
+.env
+.env.*

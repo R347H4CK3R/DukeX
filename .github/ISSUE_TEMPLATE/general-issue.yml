@@ -5,21 +5,14 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to fill out this bug report. This template is for reporting DukeX app, install, UI, JIT, input, or system issues that are not tied to one specific game.
-
-        Before submitting this bug report, please check the pre-submission checklist:
-        - Are you using the latest DukeX build?
-        - Have you checked to see if this issue has already been submitted?
-        - Have you confirmed whether JIT was enabled for the launch?
-        - Have you confirmed your required system files are present in the app's BIOS folder?
+        Use this template for app, install, UI, JIT, input, or system issues
+        that are not tied to one specific title. Check for an existing issue
+        first and include whether JIT was enabled.
   - type: textarea
     id: bug-description
     attributes:
-      label: Bug Description
-      description: |
-        A brief description of the problem, including steps to reproduce the issue and any relevant screenshots of the problem.
-
-        Tip: You can attach images by clicking this area to highlight it and then dragging files in.
+      label: Problem
+      description: Describe the issue and the steps needed to reproduce it.
       placeholder: |
         Controller input no longer works after reconnecting.
 
@@ -35,7 +28,7 @@ body:
     id: expected-behavior
     attributes:
       label: Expected Behavior
-      description: A brief description of the expected behavior.
+      description: What should have happened instead?
       placeholder: |
         Rumble should work after reconnecting.
     validations:
@@ -55,7 +48,7 @@ body:
     id: system-information
     attributes:
       label: System Information
-      description: Basic information about your system.
+      description: Device, iOS version, install method, JIT path, and relevant settings.
       placeholder: |
         Device: iPhone 16 Pro
         iOS: 26.3.1
@@ -66,4 +59,4 @@ body:
     id: additional-context
     attributes:
       label: Additional Context
-      description: Any additional information or log output.
+      description: Screenshots, logs, or details that do not fit above.

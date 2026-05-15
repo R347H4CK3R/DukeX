@@ -217,7 +217,7 @@ final class EmulatorCoreRuntime: ObservableObject {
                 in: .userDomainMask
             )[0]
             let logDirectoryURL = documentsURL.appendingPathComponent(
-                "XemuLogs",
+                "DukeXLogs",
                 isDirectory: true
             )
             try FileManager.default.createDirectory(
@@ -228,7 +228,7 @@ final class EmulatorCoreRuntime: ObservableObject {
             let logURL = logDirectoryURL.appendingPathComponent("latest.log")
             let header = """
 
-            === Xemu iOS Launch ===
+            === DukeX Launch ===
             Date: \(ISO8601DateFormatter().string(from: Date()))
             Target: \(plan.gameName)
             Universal.js JIT: \(plan.universalJITEnabled ? "enabled" : "disabled")
@@ -244,8 +244,20 @@ final class EmulatorCoreRuntime: ObservableObject {
             setbuf(stderr, nil)
             return logURL
         } catch {
-            NSLog("Unable to prepare Xemu run log: %@", error.localizedDescription)
+            NSLog("Unable to prepare DukeX run log: %@", error.localizedDescription)
             return nil
+        }
+    }
+
+    private static func setEnvironment(_ values: [(String, String)]) {
+        for (name, value) in values {
+            setenv(name, value, 1)
+        }
+    }
+
+    private static func unsetEnvironment(_ names: [String]) {
+        for name in names {
+            unsetenv(name)
         }
     }
 
@@ -258,71 +270,80 @@ final class EmulatorCoreRuntime: ObservableObject {
         session: NativeMetalPresenterSession
     ) -> Int32 {
         MetalDiagnostics.configurePerformanceHUD()
-        setenv("XEMU_IOS_UNIVERSAL_JIT", universalJITEnabled ? "1" : "0", 1)
         let bundleIdentifier = Bundle.main.bundleIdentifier?.lowercased() ?? ""
         let useVulkanSwapchain = bundleIdentifier.hasPrefix("com.mafty.dukex")
         let presentPacingMode = PresentPacingMode.current
-        setenv("XEMU_IOS_VK_SWAPCHAIN", useVulkanSwapchain ? "1" : "0", 1)
-        setenv("XEMU_IOS_NATIVE_METAL_PRESENTER", useVulkanSwapchain ? "1" : "0", 1)
         let forceThirtyFPSLock =
-            UserDefaults.standard.object(forKey: "DukeXForceThirtyFPSLockEnabled") as? Bool ?? false
+            UserDefaults.standard.object(forKey: EmulatorFileStore.forceThirtyFPSLockEnabledKey) as? Bool ?? false
         let effectivePresentFPS = forceThirtyFPSLock ? "30" : presentPacingMode.presentFPS
         let effectivePresentMode = forceThirtyFPSLock ? "fifo" : presentPacingMode.vulkanPresentMode
         let effectiveDisplaySync = forceThirtyFPSLock ? true : presentPacingMode.displaySyncEnabled
         let effectiveNominalFPS = forceThirtyFPSLock ? "30" : presentPacingMode.nominalFramesPerSecond
-        setenv("XEMU_IOS_VK_SWAPCHAIN_TRACE", "0", 1)
-        setenv("XEMU_IOS_PRESENTER_PORTRAIT_SCALE", "1.0", 1)
-        setenv("XEMU_IOS_PRESENTER_PORTRAIT_ALIGN_X", "0.5", 1)
-        setenv("XEMU_IOS_PRESENTER_PORTRAIT_ALIGN_Y", "0.5", 1)
-        setenv("XEMU_IOS_PRESENTER_LANDSCAPE_SCALE", "1.0", 1)
-        setenv("XEMU_IOS_PRESENTER_LANDSCAPE_ALIGN_X", "0.5", 1)
-        setenv("XEMU_IOS_PRESENTER_LANDSCAPE_ALIGN_Y", "0.5", 1)
-        setenv("XEMU_IOS_PRESENTER_ASPECT", "auto", 1)
-        setenv("XEMU_IOS_PRESENTER_LINEAR_FILTER", "1", 1)
-        setenv("XEMU_IOS_PRESENTER_FLIP_X", "0", 1)
-        setenv("XEMU_IOS_PRESENTER_FLIP_Y", "1", 1)
-        setenv("XEMU_IOS_VK_PRESENT_FPS", effectivePresentFPS, 1)
-        setenv("XEMU_IOS_VK_PRESENT_MODE", effectivePresentMode, 1)
-        setenv("XEMU_IOS_DISPLAY_SYNC", effectiveDisplaySync ? "1" : "0", 1)
-        setenv("XEMU_IOS_NOMINAL_FPS", effectiveNominalFPS, 1)
-        setenv("MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS", "0", 1)
-        setenv("XEMU_IOS_HOST_DEPTH_INTERPOLATION", "0", 1)
-        setenv("XEMU_IOS_HOST_DEPTH_INTERPOLATION_MODE", "perspective", 1)
-        setenv("XEMU_IOS_STRICT_SURFACE_TEXTURE_FORMATS", "0", 1)
-        setenv("XEMU_IOS_DISPLAY_PERF_STATS", "0", 1)
-        setenv("XEMU_IOS_SURFACE_STATS", "0", 1)
-        setenv("XEMU_IOS_SURFACE_TEXTURE_TRACE", "0", 1)
-        setenv("XEMU_IOS_FALLBACK_GENERATION_FILTER", "1", 1)
-        setenv("XEMU_IOS_SKIP_GL_FINISH", "1", 1)
-        unsetenv("XEMU_IOS_TCG_MAX_INSNS")
-        unsetenv("XEMU_IOS_TCG_IRQ_INSNS")
-        unsetenv("XEMU_IOS_TCG_NOCHAIN")
-        setenv("XEMU_IOS_TCG_TRACE", "0", 1)
-        setenv("XEMU_IOS_IRQ_TRACE", "0", 1)
-        setenv("XEMU_IOS_TCG_WATCHDOG", "off", 1)
-        setenv("XEMU_IOS_COROUTINE_PRIME_COUNT", "640", 1)
-        setenv("XEMU_IOS_SYNC_DMA", "0", 1)
-        setenv("XEMU_IOS_NV2A_READ_TRACE", "0", 1)
-        setenv("XEMU_IOS_PCI_TRACE", "0", 1)
-        setenv("XEMU_IOS_NV2A_WRITE_TRACE", "0", 1)
-        setenv("XEMU_IOS_SYNC_RAW", "0", 1)
-        setenv("XEMU_IOS_QCOW2_TRACE", "0", 1)
-        setenv("XEMU_IOS_BLK_TRACE", "0", 1)
-        setenv("XEMU_IOS_DMA_TRACE", "0", 1)
-        setenv("XEMU_IOS_COROUTINE_TRACE", "0", 1)
-        setenv("XEMU_IOS_VK_SUBMIT_TRACE", "0", 1)
-        setenv("XEMU_IOS_RR_RETURN_TRACE", "0", 1)
-        setenv("XEMU_IOS_IDE_TRACE", "0", 1)
-        setenv("XEMU_IOS_PVIDEO_TRACE", "0", 1)
-        setenv("XEMU_IOS_VK_RENDERER_TRACE", "0", 1)
-        setenv("XEMU_IOS_VK_MEMORY_TRACE", "0", 1)
-        setenv("XEMU_IOS_FRAMEBUFFER_TRACE", "0", 1)
-        setenv("XEMU_IOS_VK_TEXTURE_TRACE", "0", 1)
-        setenv("XEMU_IOS_RENDER_TRACE", "0", 1)
-        setenv("XEMU_IOS_IO_TRACE", "0", 1)
-        setenv("XEMU_IOS_TCG_EXIT_TRACE", "0", 1)
-        setenv("XEMU_IOS_NET_TRACE", "0", 1)
-        unsetenv("XEMU_IOS_DIRECT_RWX_COPY")
+
+        setEnvironment([
+            ("XEMU_IOS_UNIVERSAL_JIT", universalJITEnabled ? "1" : "0"),
+            ("XEMU_IOS_VK_SWAPCHAIN", useVulkanSwapchain ? "1" : "0"),
+            ("XEMU_IOS_NATIVE_METAL_PRESENTER", useVulkanSwapchain ? "1" : "0"),
+            ("XEMU_IOS_PRESENTER_PORTRAIT_SCALE", "1.0"),
+            ("XEMU_IOS_PRESENTER_PORTRAIT_ALIGN_X", "0.5"),
+            ("XEMU_IOS_PRESENTER_PORTRAIT_ALIGN_Y", "0.5"),
+            ("XEMU_IOS_PRESENTER_LANDSCAPE_SCALE", "1.0"),
+            ("XEMU_IOS_PRESENTER_LANDSCAPE_ALIGN_X", "0.5"),
+            ("XEMU_IOS_PRESENTER_LANDSCAPE_ALIGN_Y", "0.5"),
+            ("XEMU_IOS_PRESENTER_ASPECT", "auto"),
+            ("XEMU_IOS_PRESENTER_LINEAR_FILTER", "1"),
+            ("XEMU_IOS_PRESENTER_FLIP_X", "0"),
+            ("XEMU_IOS_PRESENTER_FLIP_Y", "1"),
+            ("XEMU_IOS_VK_PRESENT_FPS", effectivePresentFPS),
+            ("XEMU_IOS_VK_PRESENT_MODE", effectivePresentMode),
+            ("XEMU_IOS_DISPLAY_SYNC", effectiveDisplaySync ? "1" : "0"),
+            ("XEMU_IOS_NOMINAL_FPS", effectiveNominalFPS),
+            ("MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS", "0"),
+            ("XEMU_IOS_HOST_DEPTH_INTERPOLATION", "0"),
+            ("XEMU_IOS_HOST_DEPTH_INTERPOLATION_MODE", "perspective"),
+            ("XEMU_IOS_STRICT_SURFACE_TEXTURE_FORMATS", "0"),
+            ("XEMU_IOS_FALLBACK_GENERATION_FILTER", "1"),
+            ("XEMU_IOS_SKIP_GL_FINISH", "1"),
+            ("XEMU_IOS_TCG_WATCHDOG", "off"),
+            ("XEMU_IOS_COROUTINE_PRIME_COUNT", "640")
+        ])
+
+        setEnvironment([
+            ("XEMU_IOS_VK_SWAPCHAIN_TRACE", "0"),
+            ("XEMU_IOS_DISPLAY_PERF_STATS", "0"),
+            ("XEMU_IOS_SURFACE_STATS", "0"),
+            ("XEMU_IOS_SURFACE_TEXTURE_TRACE", "0"),
+            ("XEMU_IOS_TCG_TRACE", "0"),
+            ("XEMU_IOS_IRQ_TRACE", "0"),
+            ("XEMU_IOS_SYNC_DMA", "0"),
+            ("XEMU_IOS_NV2A_READ_TRACE", "0"),
+            ("XEMU_IOS_PCI_TRACE", "0"),
+            ("XEMU_IOS_NV2A_WRITE_TRACE", "0"),
+            ("XEMU_IOS_SYNC_RAW", "0"),
+            ("XEMU_IOS_QCOW2_TRACE", "0"),
+            ("XEMU_IOS_BLK_TRACE", "0"),
+            ("XEMU_IOS_DMA_TRACE", "0"),
+            ("XEMU_IOS_COROUTINE_TRACE", "0"),
+            ("XEMU_IOS_VK_SUBMIT_TRACE", "0"),
+            ("XEMU_IOS_RR_RETURN_TRACE", "0"),
+            ("XEMU_IOS_IDE_TRACE", "0"),
+            ("XEMU_IOS_PVIDEO_TRACE", "0"),
+            ("XEMU_IOS_VK_RENDERER_TRACE", "0"),
+            ("XEMU_IOS_VK_MEMORY_TRACE", "0"),
+            ("XEMU_IOS_FRAMEBUFFER_TRACE", "0"),
+            ("XEMU_IOS_VK_TEXTURE_TRACE", "0"),
+            ("XEMU_IOS_RENDER_TRACE", "0"),
+            ("XEMU_IOS_IO_TRACE", "0"),
+            ("XEMU_IOS_TCG_EXIT_TRACE", "0"),
+            ("XEMU_IOS_NET_TRACE", "0")
+        ])
+
+        unsetEnvironment([
+            "XEMU_IOS_TCG_MAX_INSNS",
+            "XEMU_IOS_TCG_IRQ_INSNS",
+            "XEMU_IOS_TCG_NOCHAIN",
+            "XEMU_IOS_DIRECT_RWX_COPY"
+        ])
         NSLog("XEMU_IOS_UNIVERSAL_JIT=%@", universalJITEnabled ? "1" : "0")
         NSLog("XEMU_IOS_VK_SWAPCHAIN=%@", useVulkanSwapchain ? "1" : "0")
         NSLog(

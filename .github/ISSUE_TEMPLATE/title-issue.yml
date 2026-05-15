@@ -6,13 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to fill out this bug report! This template is for reporting specific video, audio, or other types of issues with one or more titles.
-
-        Before submitting this bug report, please check the pre-submission checklist:
-        - Have you checked to see if this issue has already been submitted?
-        - Are you using the latest DukeX build?
-        - Have you confirmed whether JIT was enabled for the launch?
-        - Have you ruled out a bad dump of your game disc?
+        Use this template for title-specific video, audio, performance, input,
+        networking, or compatibility issues. Check for an existing issue first
+        and confirm whether JIT was enabled.
   - type: textarea
     id: game-title
     attributes:
@@ -25,11 +21,8 @@ body:
   - type: textarea
     id: bug-description
     attributes:
-      label: Bug Description
-      description: |
-        A brief description of the problem, including steps to reproduce the issue and any relevant screenshots of the problem.
-
-        Tip: You can attach images by clicking this area to highlight it and then dragging files in.
+      label: Problem
+      description: Describe the issue and the steps needed to reproduce it.
       placeholder: |
         HUD elements in campaign missions are not visible. See attached screenshot for example.
 
@@ -45,7 +38,7 @@ body:
     id: expected-behavior
     attributes:
       label: Expected Behavior
-      description: A brief description of the expected behavior.
+      description: What should have happened instead?
       placeholder: |
         When playing campaign missions, HUD elements are expected in all four corners. See attached screenshot for example.
 
@@ -67,7 +60,7 @@ body:
     id: system-information
     attributes:
       label: System Information
-      description: Basic information about your system.
+      description: Device, iOS version, install method, JIT path, and relevant settings.
       placeholder: |
         Device: iPhone 16 Pro
         iOS: 26.3.1
@@ -78,4 +71,4 @@ body:
     id: additional-context
     attributes:
       label: Additional Context
-      description: Any additional information or log output.
+      description: Screenshots, videos, logs, or additional notes.

@@ -1,6 +1,6 @@
 # Renderer Overview
 
-The current iOS renderer path keeps Xemu's Vulkan renderer active and presents
+The current iOS renderer path keeps xemu's Vulkan renderer active and presents
 through MoltenVK into a native `CAMetalLayer`.
 
 ## Presenter Path

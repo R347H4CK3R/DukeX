@@ -1,6 +1,6 @@
 # Building DukeX for iOS
 
-Use a checkout path without spaces or colons. QEMU/Xemu configure resolves the
+Use a checkout path without spaces or colons. QEMU/xemu configure resolves the
 real path during setup, so a symlink from a clean path is not sufficient.
 
 ## Core
@@ -56,4 +56,4 @@ local MoltenVK package before building the app target.
 ## Local Files Not Committed
 
 Do not commit signing certificates, provisioning profiles, built IPAs, crash
-logs, device logs, or local Xcode build products.
+logs, device logs, copied HDD images, or local Xcode build products.

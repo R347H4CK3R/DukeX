@@ -115,7 +115,7 @@
 				A10000000000000000000050 /* Sources */,
 				A10000000000000000000020 /* Frameworks */,
 				A10000000000000000000051 /* Resources */,
-				A10000000000000000000052 /* Embed Xemu Core */,
+				A10000000000000000000052 /* Embed Core Runtime */,
 			);
 			buildRules = (
 			);
@@ -171,7 +171,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		A10000000000000000000052 /* Embed Xemu Core */ = {
+		A10000000000000000000052 /* Embed Core Runtime */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -183,7 +183,7 @@
 					"$(SRCROOT)/../../build-ios-arm64/libxemu-ios-core.dylib",
 					"$(SRCROOT)/../../build-ios-arm64/subprojects/slirp/libslirp.0.dylib",
 				);
-			name = "Embed Xemu Core";
+			name = "Embed Core Runtime";
 			outputFileListPaths = (
 			);
 				outputPaths = (

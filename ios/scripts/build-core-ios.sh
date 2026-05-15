@@ -13,7 +13,7 @@ XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-sigaltstack}"
 for path in "${SOURCE_DIR}" "${BUILD_DIR}"; do
   case "${path}" in
     *[[:space:]:]*)
-      printf 'Xemu configure rejects spaces or colons in source/build paths.\n' >&2
+      printf 'xemu configure rejects spaces or colons in source/build paths.\n' >&2
       printf 'Source: %s\nBuild:  %s\n' "${SOURCE_DIR}" "${BUILD_DIR}" >&2
       exit 1
       ;;
