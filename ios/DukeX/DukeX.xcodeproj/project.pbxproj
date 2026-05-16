@@ -14,17 +14,33 @@
 		A10000000000000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* Assets.xcassets */; };
 		A10000000000000000000006 /* EmulatorCoreRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* EmulatorCoreRuntime.swift */; };
 		A10000000000000000000007 /* EarlyMetalDiagnostics.m in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000019 /* EarlyMetalDiagnostics.m */; };
-		B10000000000000000000001 /* GameLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* GameLibraryView.swift */; };
+		B10000000000000000000001 /* GamesLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* GamesLibraryView.swift */; };
 		B10000000000000000000002 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* ProfileView.swift */; };
 		B10000000000000000000003 /* DocumentImportPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* DocumentImportPicker.swift */; };
 		B10000000000000000000004 /* SettingsRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* SettingsRows.swift */; };
 		B10000000000000000000005 /* AutoJITCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* AutoJITCoordinator.swift */; };
 		B10000000000000000000006 /* LaunchPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* LaunchPlanView.swift */; };
-		B10000000000000000000007 /* NativeMetalPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000017 /* NativeMetalPresenter.swift */; };
+		B10000000000000000000007 /* NativeMetalPresenterHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000017 /* NativeMetalPresenterHost.swift */; };
 		B10000000000000000000008 /* XISOGameTitleReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000018 /* XISOGameTitleReader.swift */; };
 		B10000000000000000000009 /* EmulatorLibraryModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* EmulatorLibraryModels.swift */; };
 		B1000000000000000000000A /* InsigniaProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001A /* InsigniaProfileStore.swift */; };
 		B1000000000000000000000B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001B /* SettingsView.swift */; };
+		C10000000000000000000001 /* AppNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000011 /* AppNotifications.swift */; };
+		C10000000000000000000002 /* GameControllerBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000012 /* GameControllerBootstrap.swift */; };
+		C10000000000000000000003 /* MetalDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000013 /* MetalDiagnostics.swift */; };
+		C10000000000000000000004 /* GameCoverTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000014 /* GameCoverTile.swift */; };
+		C10000000000000000000005 /* GamesEmptyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000015 /* GamesEmptyState.swift */; };
+		C10000000000000000000006 /* ProfileLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000016 /* ProfileLoginView.swift */; };
+		C10000000000000000000007 /* ProfileRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000017 /* ProfileRows.swift */; };
+		C10000000000000000000008 /* NativeMetalPresenterSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000018 /* NativeMetalPresenterSession.swift */; };
+		C10000000000000000000009 /* NativeMetalPresenterViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000019 /* NativeMetalPresenterViewController.swift */; };
+		C1000000000000000000000A /* GameplayExitOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000001A /* GameplayExitOverlayView.swift */; };
+		C1000000000000000000000B /* DisplayStatsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000001B /* DisplayStatsModels.swift */; };
+		C1000000000000000000000C /* DisplayStatsBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000001C /* DisplayStatsBridge.swift */; };
+		C1000000000000000000000D /* AppResourceMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000001D /* AppResourceMonitor.swift */; };
+		C1000000000000000000000E /* StatsHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000001E /* StatsHUDView.swift */; };
+		C1000000000000000000000F /* NativeMetalPresenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000001F /* NativeMetalPresenterView.swift */; };
+		C10000000000000000000010 /* LayerConfigurators.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000020 /* LayerConfigurators.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,17 +54,33 @@
 		A10000000000000000000017 /* DukeX.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DukeX.entitlements; sourceTree = "<group>"; };
 		A10000000000000000000018 /* EmulatorCoreRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorCoreRuntime.swift; sourceTree = "<group>"; };
 		A10000000000000000000019 /* EarlyMetalDiagnostics.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = EarlyMetalDiagnostics.m; sourceTree = "<group>"; };
-		B10000000000000000000011 /* GameLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameLibraryView.swift; sourceTree = "<group>"; };
+		B10000000000000000000011 /* GamesLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GamesLibraryView.swift; sourceTree = "<group>"; };
 		B10000000000000000000012 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		B10000000000000000000013 /* DocumentImportPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentImportPicker.swift; sourceTree = "<group>"; };
 		B10000000000000000000014 /* SettingsRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsRows.swift; sourceTree = "<group>"; };
 		B10000000000000000000015 /* AutoJITCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoJITCoordinator.swift; sourceTree = "<group>"; };
 		B10000000000000000000016 /* LaunchPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchPlanView.swift; sourceTree = "<group>"; };
-		B10000000000000000000017 /* NativeMetalPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMetalPresenter.swift; sourceTree = "<group>"; };
+		B10000000000000000000017 /* NativeMetalPresenterHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMetalPresenterHost.swift; sourceTree = "<group>"; };
 		B10000000000000000000018 /* XISOGameTitleReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XISOGameTitleReader.swift; sourceTree = "<group>"; };
 		B10000000000000000000019 /* EmulatorLibraryModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorLibraryModels.swift; sourceTree = "<group>"; };
 		B1000000000000000000001A /* InsigniaProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsigniaProfileStore.swift; sourceTree = "<group>"; };
 		B1000000000000000000001B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		C10000000000000000000011 /* AppNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppNotifications.swift; sourceTree = "<group>"; };
+		C10000000000000000000012 /* GameControllerBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameControllerBootstrap.swift; sourceTree = "<group>"; };
+		C10000000000000000000013 /* MetalDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalDiagnostics.swift; sourceTree = "<group>"; };
+		C10000000000000000000014 /* GameCoverTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameCoverTile.swift; sourceTree = "<group>"; };
+		C10000000000000000000015 /* GamesEmptyState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GamesEmptyState.swift; sourceTree = "<group>"; };
+		C10000000000000000000016 /* ProfileLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileLoginView.swift; sourceTree = "<group>"; };
+		C10000000000000000000017 /* ProfileRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileRows.swift; sourceTree = "<group>"; };
+		C10000000000000000000018 /* NativeMetalPresenterSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMetalPresenterSession.swift; sourceTree = "<group>"; };
+		C10000000000000000000019 /* NativeMetalPresenterViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMetalPresenterViewController.swift; sourceTree = "<group>"; };
+		C1000000000000000000001A /* GameplayExitOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameplayExitOverlayView.swift; sourceTree = "<group>"; };
+		C1000000000000000000001B /* DisplayStatsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayStatsModels.swift; sourceTree = "<group>"; };
+		C1000000000000000000001C /* DisplayStatsBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayStatsBridge.swift; sourceTree = "<group>"; };
+		C1000000000000000000001D /* AppResourceMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppResourceMonitor.swift; sourceTree = "<group>"; };
+		C1000000000000000000001E /* StatsHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsHUDView.swift; sourceTree = "<group>"; };
+		C1000000000000000000001F /* NativeMetalPresenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMetalPresenterView.swift; sourceTree = "<group>"; };
+		C10000000000000000000020 /* LayerConfigurators.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerConfigurators.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -73,26 +105,13 @@
 		A10000000000000000000031 /* DukeX */ = {
 			isa = PBXGroup;
 			children = (
-				A10000000000000000000011 /* DukeXApp.swift */,
-				A10000000000000000000012 /* ContentView.swift */,
-				B10000000000000000000011 /* GameLibraryView.swift */,
-				B10000000000000000000012 /* ProfileView.swift */,
-				B1000000000000000000001A /* InsigniaProfileStore.swift */,
-				B1000000000000000000001B /* SettingsView.swift */,
-				B10000000000000000000013 /* DocumentImportPicker.swift */,
-				B10000000000000000000014 /* SettingsRows.swift */,
-				B10000000000000000000015 /* AutoJITCoordinator.swift */,
-				B10000000000000000000016 /* LaunchPlanView.swift */,
-				B10000000000000000000019 /* EmulatorLibraryModels.swift */,
-				A10000000000000000000013 /* EmulatorFileStore.swift */,
-				B10000000000000000000018 /* XISOGameTitleReader.swift */,
-				A10000000000000000000018 /* EmulatorCoreRuntime.swift */,
-				B10000000000000000000017 /* NativeMetalPresenter.swift */,
-				A10000000000000000000014 /* XemuLaunchPlan.swift */,
-				A10000000000000000000019 /* EarlyMetalDiagnostics.m */,
-				A10000000000000000000015 /* Assets.xcassets */,
-				A10000000000000000000016 /* Info.plist */,
-				A10000000000000000000017 /* DukeX.entitlements */,
+				D10000000000000000000100 /* App */,
+				D10000000000000000000110 /* Features */,
+				D10000000000000000000120 /* Runtime */,
+				D10000000000000000000130 /* Library */,
+				D10000000000000000000140 /* Presenter */,
+				D10000000000000000000150 /* Services */,
+				D10000000000000000000160 /* Resources */,
 			);
 			path = DukeX;
 			sourceTree = "<group>";
@@ -103,6 +122,203 @@
 				A10000000000000000000010 /* DukeX.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000100 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000011 /* DukeXApp.swift */,
+				A10000000000000000000012 /* ContentView.swift */,
+				C10000000000000000000011 /* AppNotifications.swift */,
+				C10000000000000000000012 /* GameControllerBootstrap.swift */,
+				C10000000000000000000013 /* MetalDiagnostics.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000110 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				D10000000000000000000111 /* Games */,
+				D10000000000000000000112 /* Profile */,
+				D10000000000000000000113 /* Settings */,
+				D10000000000000000000114 /* Launch */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000111 /* Games */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000011 /* GamesLibraryView.swift */,
+				C10000000000000000000014 /* GameCoverTile.swift */,
+				C10000000000000000000015 /* GamesEmptyState.swift */,
+			);
+			path = Games;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000112 /* Profile */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000012 /* ProfileView.swift */,
+				C10000000000000000000016 /* ProfileLoginView.swift */,
+				C10000000000000000000017 /* ProfileRows.swift */,
+			);
+			path = Profile;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000113 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				B1000000000000000000001B /* SettingsView.swift */,
+				B10000000000000000000014 /* SettingsRows.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000114 /* Launch */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000016 /* LaunchPlanView.swift */,
+			);
+			path = Launch;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000120 /* Runtime */ = {
+			isa = PBXGroup;
+			children = (
+				D10000000000000000000121 /* Core */,
+				D10000000000000000000122 /* JIT */,
+				D10000000000000000000123 /* LaunchPlan */,
+			);
+			path = Runtime;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000121 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000018 /* EmulatorCoreRuntime.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000122 /* JIT */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000015 /* AutoJITCoordinator.swift */,
+			);
+			path = JIT;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000123 /* LaunchPlan */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000014 /* XemuLaunchPlan.swift */,
+			);
+			path = LaunchPlan;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000130 /* Library */ = {
+			isa = PBXGroup;
+			children = (
+				D10000000000000000000131 /* Store */,
+				D10000000000000000000132 /* Models */,
+				D10000000000000000000133 /* Import */,
+			);
+			path = Library;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000131 /* Store */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000013 /* EmulatorFileStore.swift */,
+			);
+			path = Store;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000132 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000019 /* EmulatorLibraryModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000133 /* Import */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000013 /* DocumentImportPicker.swift */,
+				B10000000000000000000018 /* XISOGameTitleReader.swift */,
+			);
+			path = Import;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000140 /* Presenter */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000017 /* NativeMetalPresenterHost.swift */,
+				C10000000000000000000018 /* NativeMetalPresenterSession.swift */,
+				C10000000000000000000019 /* NativeMetalPresenterViewController.swift */,
+				D10000000000000000000141 /* Metal */,
+				D10000000000000000000142 /* HUD */,
+				D10000000000000000000143 /* ExitOverlay */,
+			);
+			path = Presenter;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000141 /* Metal */ = {
+			isa = PBXGroup;
+			children = (
+				C1000000000000000000001F /* NativeMetalPresenterView.swift */,
+				C10000000000000000000020 /* LayerConfigurators.swift */,
+			);
+			path = Metal;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000142 /* HUD */ = {
+			isa = PBXGroup;
+			children = (
+				C1000000000000000000001B /* DisplayStatsModels.swift */,
+				C1000000000000000000001C /* DisplayStatsBridge.swift */,
+				C1000000000000000000001D /* AppResourceMonitor.swift */,
+				C1000000000000000000001E /* StatsHUDView.swift */,
+			);
+			path = HUD;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000143 /* ExitOverlay */ = {
+			isa = PBXGroup;
+			children = (
+				C1000000000000000000001A /* GameplayExitOverlayView.swift */,
+			);
+			path = ExitOverlay;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000150 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				D10000000000000000000151 /* Insignia */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000151 /* Insignia */ = {
+			isa = PBXGroup;
+			children = (
+				B1000000000000000000001A /* InsigniaProfileStore.swift */,
+			);
+			path = Insignia;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000160 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000019 /* EarlyMetalDiagnostics.m */,
+				A10000000000000000000015 /* Assets.xcassets */,
+				A10000000000000000000016 /* Info.plist */,
+				A10000000000000000000017 /* DukeX.entitlements */,
+			);
+			name = Resources;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -203,20 +419,36 @@
 			files = (
 				A10000000000000000000001 /* DukeXApp.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
-				B10000000000000000000001 /* GameLibraryView.swift in Sources */,
+				C10000000000000000000001 /* AppNotifications.swift in Sources */,
+				C10000000000000000000002 /* GameControllerBootstrap.swift in Sources */,
+				C10000000000000000000003 /* MetalDiagnostics.swift in Sources */,
+				B10000000000000000000001 /* GamesLibraryView.swift in Sources */,
+				C10000000000000000000004 /* GameCoverTile.swift in Sources */,
+				C10000000000000000000005 /* GamesEmptyState.swift in Sources */,
 				B10000000000000000000002 /* ProfileView.swift in Sources */,
+				C10000000000000000000006 /* ProfileLoginView.swift in Sources */,
+				C10000000000000000000007 /* ProfileRows.swift in Sources */,
 				B1000000000000000000000A /* InsigniaProfileStore.swift in Sources */,
 				B1000000000000000000000B /* SettingsView.swift in Sources */,
-				B10000000000000000000003 /* DocumentImportPicker.swift in Sources */,
 				B10000000000000000000004 /* SettingsRows.swift in Sources */,
+				B10000000000000000000003 /* DocumentImportPicker.swift in Sources */,
 				B10000000000000000000005 /* AutoJITCoordinator.swift in Sources */,
 				B10000000000000000000006 /* LaunchPlanView.swift in Sources */,
 				B10000000000000000000009 /* EmulatorLibraryModels.swift in Sources */,
 				A10000000000000000000003 /* EmulatorFileStore.swift in Sources */,
 				B10000000000000000000008 /* XISOGameTitleReader.swift in Sources */,
 				A10000000000000000000006 /* EmulatorCoreRuntime.swift in Sources */,
-				B10000000000000000000007 /* NativeMetalPresenter.swift in Sources */,
 				A10000000000000000000004 /* XemuLaunchPlan.swift in Sources */,
+				B10000000000000000000007 /* NativeMetalPresenterHost.swift in Sources */,
+				C10000000000000000000008 /* NativeMetalPresenterSession.swift in Sources */,
+				C10000000000000000000009 /* NativeMetalPresenterViewController.swift in Sources */,
+				C1000000000000000000000A /* GameplayExitOverlayView.swift in Sources */,
+				C1000000000000000000000B /* DisplayStatsModels.swift in Sources */,
+				C1000000000000000000000C /* DisplayStatsBridge.swift in Sources */,
+				C1000000000000000000000D /* AppResourceMonitor.swift in Sources */,
+				C1000000000000000000000E /* StatsHUDView.swift in Sources */,
+				C1000000000000000000000F /* NativeMetalPresenterView.swift in Sources */,
+				C10000000000000000000010 /* LayerConfigurators.swift in Sources */,
 				A10000000000000000000007 /* EarlyMetalDiagnostics.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
