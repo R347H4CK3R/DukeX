@@ -13,7 +13,7 @@ struct SettingsView: View {
                     Label("Universal.js JIT", systemImage: "bolt.horizontal.circle")
                 }
 
-                Text("Required for devices running iOS 26 or later.")
+                Text("Used only on iOS 26 or later. Older iOS versions use the standard JIT path.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 

@@ -19,9 +19,10 @@ The shell writes `Documents/xemu-ios.toml` with core settings:
 - `sys.files.hdd_path` for the HDD image.
 - `sys.files.dvd_path` for the selected game.
 
-Universal.js integration is represented by `XEMU_IOS_UNIVERSAL_JIT=1`. The TCG
-hook in `tcg/ios-jit.c` uses this to decide whether to issue the iOS 26
-`brk #0xf00d` prepare-region request expected by StikDebug's Universal.js.
+Universal.js integration is represented by `XEMU_IOS_UNIVERSAL_JIT=1` on iOS
+26 or later. The TCG hook in `tcg/ios-jit.c` uses this to decide whether to
+issue the iOS 26 `brk #0xf00d` prepare-region request expected by StikDebug's
+Universal.js. Older supported iOS versions leave this path disabled.
 
 Core build note: QEMU/xemu `configure` rejects source and build paths containing
 spaces or colons. Core configure/build checks need an actual no-space checkout
@@ -33,7 +34,7 @@ From that no-space workspace, run the first iPhoneOS arm64 build pass with:
 ios/scripts/build-core-ios.sh
 ```
 
-The script targets an iOS `26.3` deployment baseline.
+The script targets an iOS `18.0` deployment baseline.
 
 That build produces:
 

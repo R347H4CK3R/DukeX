@@ -68,6 +68,23 @@ struct UserMessage: Identifiable {
     let detail: String
 }
 
+enum UniversalJITSupport {
+    static var requiresUniversalJS: Bool {
+        if #available(iOS 26.0, *) {
+            return true
+        }
+        return false
+    }
+
+    static func effectiveEnabled(for setting: Bool) -> Bool {
+        setting && requiresUniversalJS
+    }
+
+    static func environmentValue(for setting: Bool) -> String {
+        effectiveEnabled(for: setting) ? "1" : "0"
+    }
+}
+
 struct FolderStorageUsage: Equatable {
     struct Folder: Equatable {
         static let zero = Folder(byteCount: 0)

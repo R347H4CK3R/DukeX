@@ -63,9 +63,9 @@ body:
       description: Device, iOS version, install method, JIT path, and relevant settings.
       placeholder: |
         Device: iPhone 16 Pro
-        iOS: 26.3.1
+        iOS: 18.0 or later
         Install method: sideload
-        JIT method: StikDebug Universal.js
+        JIT method: standard sideload JIT, or StikDebug Universal.js on iOS 26+
         TB cache size: 128 MB
   - type: textarea
     id: additional-context

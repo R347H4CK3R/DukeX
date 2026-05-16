@@ -31,8 +31,9 @@ before publishing a tagged tester build.
 ## Runtime Requirements
 
 - iPhoneOS arm64 device build.
-- iOS 26.3 deployment baseline in the Xcode project and core build scripts.
-- StikDebug with Universal.js assigned to the app bundle identifier for JIT.
+- iOS 18.0 deployment baseline in the Xcode project and core build scripts.
+- StikDebug with Universal.js assigned to the app bundle identifier for JIT on
+  iOS 26 or later.
 - A local MoltenVK package:
   - `MOLTENVK_ROOT` for headers during core build.
   - `MOLTENVK_FRAMEWORK` for app embedding.

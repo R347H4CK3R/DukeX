@@ -5,9 +5,9 @@
   </p>
   <p>
     <img src="https://img.shields.io/badge/status-alpha-8f95c4?style=flat-square" alt="Status: alpha">
-    <img src="https://img.shields.io/badge/platform-iOS%20arm64-111827?style=flat-square" alt="Platform: iOS arm64">
+    <img src="https://img.shields.io/badge/platform-iOS%2018%2B%20arm64-111827?style=flat-square" alt="Platform: iOS 18+ arm64">
     <img src="https://img.shields.io/badge/renderer-MoltenVK%20%2B%20Metal-1f6feb?style=flat-square" alt="Renderer: MoltenVK and Metal">
-    <img src="https://img.shields.io/badge/JIT-Universal.js-2f855a?style=flat-square" alt="JIT: Universal.js">
+    <img src="https://img.shields.io/badge/JIT-version%20aware-2f855a?style=flat-square" alt="JIT: version aware">
   </p>
 </div>
 
@@ -23,8 +23,9 @@ MoltenVK and a native `CAMetalLayer`.
 
 ## At a Glance
 
-- Device target: iPhoneOS arm64, currently developed against iOS 26.3.
-- Runtime: TCG with the iOS Universal.js JIT flow used by StikDebug.
+- Device target: iPhoneOS arm64, install target iOS 18.0 or later.
+- Runtime: TCG with version-aware JIT setup; iOS 26 or later uses the
+  StikDebug Universal.js flow.
 - Graphics: xemu Vulkan renderer through MoltenVK with a native Metal
   presenter.
 - Interface: native SwiftUI library, profile, and settings tabs.
@@ -38,7 +39,7 @@ MoltenVK and a native `CAMetalLayer`.
 | --- | --- |
 | Game library | Two-column library, cover artwork, game launch, dashboard launch, and long-press actions. |
 | File management | User-accessible `BIOS`, `ROMs`, and `Covers` folders through iOS file sharing. |
-| JIT workflow | Optional automatic StikDebug handoff for the Universal.js JIT flow. |
+| JIT workflow | Optional automatic StikDebug handoff for the iOS 26+ Universal.js JIT flow. |
 | Display | MoltenVK-backed Metal presenter with portrait and landscape-aware sizing. |
 | Input | Controller support through iOS GameController APIs. |
 | Online setup | Insignia-focused NAT defaults plus editable network settings. |
@@ -65,8 +66,9 @@ availability. DukeX should be treated as early alpha software.
 ### Runtime
 
 - Supported iPhone or iPad hardware for device testing.
-- StikDebug with Universal.js assigned to the DukeX bundle identifier for JIT on
-  iOS 26 or later.
+- iOS 18.0 or later. iOS 26 or later requires StikDebug with Universal.js
+  assigned to the DukeX bundle identifier for JIT; older supported iOS versions
+  use the standard sideload JIT path.
 - Legally obtained Xbox flash BIOS, MCPX ROM, and HDD image.
 - Legally obtained XISO game images.
 - Optional Insignia account and registered dashboard for online service testing.

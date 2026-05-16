@@ -28,12 +28,13 @@ must provide their own legally obtained Xbox system files and game images.
 
 ## JIT
 
-The current device workflow expects StikDebug with Universal.js assigned to the
-app bundle identifier. The app can open the StikDebug URL scheme before launch
-and then resume the pending game launch after returning.
+DukeX installs on iOS 18.0 or later. On iOS 26 or later, the current device
+workflow expects StikDebug with Universal.js assigned to the app bundle
+identifier. The app can open the StikDebug URL scheme before launch and then
+resume the pending game launch after returning.
 
-The shell passes `XEMU_IOS_UNIVERSAL_JIT=1` to the core when Universal.js JIT is
-enabled in Settings.
+The shell passes `XEMU_IOS_UNIVERSAL_JIT=1` to the core only when Universal.js
+JIT is enabled in Settings and the device is running iOS 26 or later.
 
 ## Networking
 
