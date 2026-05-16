@@ -16,9 +16,10 @@ It embeds the xemu core in a native Swift shell, provides an iPhone-friendly
 library and settings experience, and presents the Vulkan renderer through
 MoltenVK and a native `CAMetalLayer`.
 
-> DukeX does not include Xbox system files, game images, signing certificates,
-> provisioning profiles, MoltenVK binaries, or sideloaded release artifacts.
-> Users and testers must provide their own legally obtained files.
+> DukeX does not include Xbox system files, game images, or signing
+> certificates. Users and testers are required to provide their own legally
+> obtained files. DukeX is intended solely for legitimate emulation and
+> preservation purposes, and is not designed for use with pirated materials.
 
 ## At a Glance
 
