@@ -22,6 +22,7 @@ final class EmulatorFileStore: ObservableObject {
         didSet {
             UserDefaults.standard.set(universalJITEnabled, forKey: Self.universalJITKey)
             setenv("XEMU_IOS_UNIVERSAL_JIT", UniversalJITSupport.environmentValue(for: universalJITEnabled), 1)
+            setenv("XEMU_IOS_JIT_MODE", UniversalJITSupport.currentMode.environmentValue, 1)
         }
     }
     @Published var autoJITBeforeLaunchEnabled: Bool {
@@ -159,6 +160,7 @@ final class EmulatorFileStore: ObservableObject {
         natPortProtocol = UserDefaults.standard.string(forKey: Self.natPortProtocolKey) ?? NetworkSettings.defaultProtocol
         selectedGameID = UserDefaults.standard.string(forKey: Self.selectedGameIDKey) ?? ""
         setenv("XEMU_IOS_UNIVERSAL_JIT", UniversalJITSupport.environmentValue(for: universalJITEnabled), 1)
+        setenv("XEMU_IOS_JIT_MODE", UniversalJITSupport.currentMode.environmentValue, 1)
     }
 
     func prepareAndRefresh() async {

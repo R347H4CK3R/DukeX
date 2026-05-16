@@ -61,6 +61,7 @@ final class StikDebugAutoJITCoordinator: ObservableObject {
 
     func requestJIT(
         for target: AutoJITLaunchTarget,
+        scriptName: String?,
         onFailure: @escaping (UserMessage) -> Void
     ) {
         guard let bundleID = Bundle.main.bundleIdentifier else {
@@ -68,7 +69,7 @@ final class StikDebugAutoJITCoordinator: ObservableObject {
             return
         }
 
-        guard let url = makeStikDebugURL(bundleID: bundleID) else {
+        guard let url = makeStikDebugURL(bundleID: bundleID, scriptName: scriptName) else {
             onFailure(UserMessage(title: "Auto JIT Failed", detail: "Unable to create the StikDebug launch URL."))
             return
         }
@@ -205,14 +206,17 @@ final class StikDebugAutoJITCoordinator: ObservableObject {
         clearPending()
     }
 
-    private func makeStikDebugURL(bundleID: String) -> URL? {
+    private func makeStikDebugURL(bundleID: String, scriptName: String?) -> URL? {
         var components = URLComponents()
         components.scheme = "stikjit"
         components.host = "enable-jit"
-        components.queryItems = [
-            URLQueryItem(name: "bundle-id", value: bundleID),
-            URLQueryItem(name: "script-name", value: "Universal.js")
+        var queryItems = [
+            URLQueryItem(name: "bundle-id", value: bundleID)
         ]
+        if let scriptName {
+            queryItems.append(URLQueryItem(name: "script-name", value: scriptName))
+        }
+        components.queryItems = queryItems
         return components.url
     }
 }

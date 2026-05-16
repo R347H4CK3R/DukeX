@@ -5,6 +5,8 @@ struct XemuLaunchPlan: Identifiable {
     let id = UUID()
     let configURL: URL
     let arguments: [String]
+    let jitMode: RuntimeJITMode
+    let requiresJITHandoff: Bool
     let universalJITEnabled: Bool
     let gameName: String
     let isDashboard: Bool
@@ -31,6 +33,8 @@ struct XemuLaunchPlan: Identifiable {
         let dvdPath = game?.url.path ?? ""
         let launchName = game?.displayName ?? "Xbox Dashboard"
         let customConfigURL = game?.customConfigURL
+        let jitMode = UniversalJITSupport.currentMode
+        let requiresJITHandoff = UniversalJITSupport.requiresJITHandoff(for: universalJITEnabled)
         let effectiveUniversalJITEnabled = UniversalJITSupport.effectiveEnabled(for: universalJITEnabled)
         let eepromPathLine = eeprom.map {
             "eeprom_path = \(tomlQuoted($0.url.path))\n"
@@ -80,6 +84,7 @@ struct XemuLaunchPlan: Identifiable {
             try toml.write(to: configURL, atomically: true, encoding: .utf8)
         }
         setenv("XEMU_IOS_UNIVERSAL_JIT", effectiveUniversalJITEnabled ? "1" : "0", 1)
+        setenv("XEMU_IOS_JIT_MODE", jitMode.environmentValue, 1)
         setenv("XEMU_IOS_VK_PIPELINE_CACHE_PATH", shaderCacheURL.path, 1)
         setenv("XEMU_IOS_FORCE_INSIGNIA_NAT", networkSettings.forceInsigniaNAT ? "1" : "0", 1)
         if let dnsServer = networkSettings.effectiveDNSServer {
@@ -88,13 +93,21 @@ struct XemuLaunchPlan: Identifiable {
             unsetenv("XEMU_IOS_NAT_DIRECT_DNS")
         }
 
+        let accelOptions: [String] = ([
+            "thread=single",
+            "tb-size=\(tbCacheSize.launchArgumentValue)",
+            jitMode == .wxReprotection ? "split-wx=on" : nil
+        ] as [String?]).compactMap { $0 }
+
         return XemuLaunchPlan(
             configURL: customConfigURL ?? configURL,
             arguments: [
                 "xemu-ios",
-                "-accel", "tcg,thread=single,tb-size=\(tbCacheSize.launchArgumentValue)",
+                "-accel", "tcg,\(accelOptions.joined(separator: ","))",
                 "-config_path", (customConfigURL ?? configURL).path
             ],
+            jitMode: jitMode,
+            requiresJITHandoff: requiresJITHandoff,
             universalJITEnabled: effectiveUniversalJITEnabled,
             gameName: launchName,
             isDashboard: game == nil

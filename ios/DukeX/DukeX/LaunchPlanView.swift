@@ -12,8 +12,11 @@ struct LaunchPlanView: View {
                 }
 
                 Section("JIT") {
-                    Label(plan.universalJITEnabled ? "Universal.js" : "Disabled",
-                          systemImage: plan.universalJITEnabled ? "bolt.horizontal.circle.fill" : "bolt.slash")
+                    Label(plan.jitMode.title, systemImage: plan.jitMode.systemImage)
+                    if plan.jitMode == .universalJS {
+                        Label(plan.universalJITEnabled ? "Universal.js enabled" : "Universal.js disabled",
+                              systemImage: plan.universalJITEnabled ? "bolt.horizontal.circle.fill" : "bolt.slash")
+                    }
                 }
 
                 Section("Config") {

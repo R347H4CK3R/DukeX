@@ -310,13 +310,13 @@ struct ContentView: View {
 
     private func launch(_ target: AutoJITLaunchTarget) throws {
         let plan = try makePlan(for: target)
-        guard plan.universalJITEnabled && store.autoJITBeforeLaunchEnabled else {
+        guard plan.requiresJITHandoff && store.autoJITBeforeLaunchEnabled else {
             runtime.launch(plan: plan)
             return
         }
 
         try runtime.prepareBeforeAutoJIT()
-        autoJIT.requestJIT(for: target) { message in
+        autoJIT.requestJIT(for: target, scriptName: plan.jitMode.stikDebugScriptName) { message in
             store.message = message
         }
         scheduleAutoJITFallbackIfNeeded()

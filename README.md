@@ -66,9 +66,9 @@ availability. DukeX should be treated as early alpha software.
 ### Runtime
 
 - Supported iPhone or iPad hardware for device testing.
-- iOS 18.0 or later. iOS 26 or later requires StikDebug with Universal.js
-  assigned to the DukeX bundle identifier for JIT; older supported iOS versions
-  use the standard sideload JIT path.
+- iOS 18.0 or later. iOS 18.x uses W^X reprotection after JIT has
+  been enabled for the process. iOS 26 or later requires StikDebug with
+  Universal.js assigned to the DukeX bundle identifier.
 - Legally obtained Xbox flash BIOS, MCPX ROM, and HDD image.
 - Legally obtained XISO game images.
 - Optional Insignia account and registered dashboard for online service testing.
@@ -84,6 +84,7 @@ availability. DukeX should be treated as early alpha software.
 
 ## Documentation
 
+- [Changelog](CHANGELOG.md)
 - [iOS port overview](docs/ios-port/README.md)
 - [iOS build instructions](docs/ios-port/BUILDING.md)
 - [Renderer notes](docs/ios-port/RENDERER.md)

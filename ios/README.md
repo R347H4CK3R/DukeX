@@ -19,10 +19,11 @@ The shell writes `Documents/xemu-ios.toml` with core settings:
 - `sys.files.hdd_path` for the HDD image.
 - `sys.files.dvd_path` for the selected game.
 
-Universal.js integration is represented by `XEMU_IOS_UNIVERSAL_JIT=1` on iOS
-26 or later. The TCG hook in `tcg/ios-jit.c` uses this to decide whether to
-issue the iOS 26 `brk #0xf00d` prepare-region request expected by StikDebug's
-Universal.js. Older supported iOS versions leave this path disabled.
+DukeX chooses the JIT path by iOS version. iOS 18.x uses QEMU TCG's
+split W^X mapping path after the process has been granted JIT. iOS 26 or later
+uses the Universal.js path exposed as `XEMU_IOS_UNIVERSAL_JIT=1`, which lets
+the TCG hook in `tcg/ios-jit.c` issue the `brk #0xf00d` prepare-region request
+expected by StikDebug's Universal.js.
 
 Core build note: QEMU/xemu `configure` rejects source and build paths containing
 spaces or colons. Core configure/build checks need an actual no-space checkout

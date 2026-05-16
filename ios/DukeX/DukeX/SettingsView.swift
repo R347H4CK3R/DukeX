@@ -13,7 +13,7 @@ struct SettingsView: View {
                     Label("Universal.js JIT", systemImage: "bolt.horizontal.circle")
                 }
 
-                Text("Used only on iOS 26 or later. Older iOS versions use the standard JIT path.")
+                Text("Required on iOS 26 or later. iOS 18.x uses W^X reprotection after JIT is enabled.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
@@ -21,7 +21,7 @@ struct SettingsView: View {
                     Label("Auto-enable via StikDebug", systemImage: "arrow.triangle.2.circlepath")
                 }
 
-                Text("Automatically enables JIT before launching a game.")
+                Text("Automatically enables the active JIT path before launching a game.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 

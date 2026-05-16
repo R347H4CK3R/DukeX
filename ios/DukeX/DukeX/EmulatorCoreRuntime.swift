@@ -69,6 +69,7 @@ final class EmulatorCoreRuntime: ObservableObject {
         do {
             let entryPoint = try loadEntryPoint()
             let arguments = plan.arguments
+            let jitMode = plan.jitMode
             let universalJITEnabled = plan.universalJITEnabled
             let setExternalMetalLayer = loadSetExternalMetalLayer()
             let requestShutdown = loadRequestShutdown()
@@ -85,6 +86,7 @@ final class EmulatorCoreRuntime: ObservableObject {
                 let status = Self.invoke(
                     entryPoint,
                     arguments: arguments,
+                    jitMode: jitMode,
                     universalJITEnabled: universalJITEnabled,
                     setExternalMetalLayer: setExternalMetalLayer,
                     requestShutdown: requestShutdown,
@@ -231,6 +233,8 @@ final class EmulatorCoreRuntime: ObservableObject {
             === DukeX Launch ===
             Date: \(ISO8601DateFormatter().string(from: Date()))
             Target: \(plan.gameName)
+            JIT Path: \(plan.jitMode.title)
+            JIT Handoff: \(plan.requiresJITHandoff ? "required" : "not required")
             Universal.js JIT: \(plan.universalJITEnabled ? "enabled" : "disabled")
             Config: \(plan.configURL.path)
             Arguments: \(arguments.joined(separator: " "))
@@ -264,6 +268,7 @@ final class EmulatorCoreRuntime: ObservableObject {
     private static func invoke(
         _ entryPoint: XemuMain,
         arguments: [String],
+        jitMode: RuntimeJITMode,
         universalJITEnabled: Bool,
         setExternalMetalLayer: XemuSetExternalMetalLayer?,
         requestShutdown: XemuRequestShutdown?,
@@ -281,6 +286,7 @@ final class EmulatorCoreRuntime: ObservableObject {
         let effectiveNominalFPS = forceThirtyFPSLock ? "30" : presentPacingMode.nominalFramesPerSecond
 
         setEnvironment([
+            ("XEMU_IOS_JIT_MODE", jitMode.environmentValue),
             ("XEMU_IOS_UNIVERSAL_JIT", universalJITEnabled ? "1" : "0"),
             ("XEMU_IOS_VK_SWAPCHAIN", useVulkanSwapchain ? "1" : "0"),
             ("XEMU_IOS_NATIVE_METAL_PRESENTER", useVulkanSwapchain ? "1" : "0"),
@@ -344,6 +350,7 @@ final class EmulatorCoreRuntime: ObservableObject {
             "XEMU_IOS_TCG_NOCHAIN",
             "XEMU_IOS_DIRECT_RWX_COPY"
         ])
+        NSLog("XEMU_IOS_JIT_MODE=%@", jitMode.environmentValue)
         NSLog("XEMU_IOS_UNIVERSAL_JIT=%@", universalJITEnabled ? "1" : "0")
         NSLog("XEMU_IOS_VK_SWAPCHAIN=%@", useVulkanSwapchain ? "1" : "0")
         NSLog(

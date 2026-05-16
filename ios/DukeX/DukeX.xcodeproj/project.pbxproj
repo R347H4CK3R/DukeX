@@ -346,7 +346,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = DukeX/DukeX.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 14;
 					DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = DukeX/Info.plist;
@@ -355,7 +355,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.3;
+				MARKETING_VERSION = 0.1.4;
 					PRODUCT_BUNDLE_IDENTIFIER = com.mafty.dukex;
 				PRODUCT_NAME = DukeX;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -375,7 +375,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = DukeX/DukeX.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 14;
 					DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = DukeX/Info.plist;
@@ -384,7 +384,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.3;
+				MARKETING_VERSION = 0.1.4;
 					PRODUCT_BUNDLE_IDENTIFIER = com.mafty.dukex;
 				PRODUCT_NAME = DukeX;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

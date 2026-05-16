@@ -68,12 +68,65 @@ struct UserMessage: Identifiable {
     let detail: String
 }
 
-enum UniversalJITSupport {
-    static var requiresUniversalJS: Bool {
+enum RuntimeJITMode: String {
+    case wxReprotection
+    case universalJS
+
+    static var current: RuntimeJITMode {
         if #available(iOS 26.0, *) {
-            return true
+            return .universalJS
         }
-        return false
+        return .wxReprotection
+    }
+
+    var title: String {
+        switch self {
+        case .wxReprotection:
+            return "W^X reprotection"
+        case .universalJS:
+            return "Universal.js"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .wxReprotection:
+            return "lock.rotation"
+        case .universalJS:
+            return "bolt.horizontal.circle.fill"
+        }
+    }
+
+    var environmentValue: String {
+        switch self {
+        case .wxReprotection:
+            return "wx-reprotection"
+        case .universalJS:
+            return "universal-js"
+        }
+    }
+
+    var usesUniversalJS: Bool {
+        self == .universalJS
+    }
+
+    var stikDebugScriptName: String? {
+        switch self {
+        case .wxReprotection:
+            return nil
+        case .universalJS:
+            return "Universal.js"
+        }
+    }
+}
+
+enum UniversalJITSupport {
+    static var currentMode: RuntimeJITMode {
+        RuntimeJITMode.current
+    }
+
+    static var requiresUniversalJS: Bool {
+        currentMode.usesUniversalJS
     }
 
     static func effectiveEnabled(for setting: Bool) -> Bool {
@@ -82,6 +135,15 @@ enum UniversalJITSupport {
 
     static func environmentValue(for setting: Bool) -> String {
         effectiveEnabled(for: setting) ? "1" : "0"
+    }
+
+    static func requiresJITHandoff(for setting: Bool) -> Bool {
+        switch currentMode {
+        case .wxReprotection:
+            return true
+        case .universalJS:
+            return setting
+        }
     }
 }
 

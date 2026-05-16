@@ -632,8 +632,8 @@ static int alloc_code_gen_buffer_splitwx_vmremap(size_t size, Error **errp)
     vm_prot_t cur_prot, max_prot;
 
     /* Map the read-write portion via normal anon memory. */
-    if (!alloc_code_gen_buffer_anon(size, PROT_READ | PROT_WRITE,
-                                    MAP_PRIVATE | MAP_ANONYMOUS, errp)) {
+    if (alloc_code_gen_buffer_anon(size, PROT_READ | PROT_WRITE,
+                                   MAP_PRIVATE | MAP_ANONYMOUS, errp) < 0) {
         return -1;
     }
 
@@ -786,6 +786,7 @@ static int alloc_code_gen_buffer(size_t size, int splitwx, Error **errp)
          */
         return PROT_READ | PROT_WRITE;
     }
+
 #endif
 
     /*
@@ -797,10 +798,13 @@ static int alloc_code_gen_buffer(size_t size, int splitwx, Error **errp)
     prot = PROT_NONE;
     flags = MAP_PRIVATE | MAP_ANONYMOUS;
 #ifdef CONFIG_DARWIN
-    /* Applicable to both iOS and macOS (Apple Silicon). */
+# ifndef CONFIG_IOS
+    /* macOS Apple Silicon uses MAP_JIT. iOS uses the StikDebug-granted
+     * W^X reprotection path unless Universal.js handled allocation above. */
     if (!splitwx) {
         flags |= MAP_JIT;
     }
+# endif
 #endif
 
     return alloc_code_gen_buffer_anon(size, prot, flags, errp);
