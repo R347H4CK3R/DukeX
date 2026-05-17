@@ -4,6 +4,7 @@ import UIKit
 struct GameCoverTile: View {
     let game: LibraryFile
     let canLaunch: Bool
+    let liveStatus: GameLiveStatus?
     let launch: () -> Void
     let addCover: () -> Void
     let importConfig: () -> Void
@@ -11,26 +12,21 @@ struct GameCoverTile: View {
     let requestRemoveGame: () -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             Button(action: launch) {
-                cover
-                    .aspectRatio(0.70, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-                    }
+                coverWithLiveStatus
             }
             .buttonStyle(.plain)
             .disabled(!canLaunch)
 
             Button(action: launch) {
                 Text(game.displayName)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
-                    .frame(maxWidth: .infinity, minHeight: 38, alignment: .top)
+                    .lineSpacing(0)
+                    .frame(maxWidth: .infinity, minHeight: 28, alignment: .top)
             }
             .buttonStyle(.plain)
             .disabled(!canLaunch)
@@ -67,6 +63,25 @@ struct GameCoverTile: View {
             Button(role: .destructive, action: requestRemoveGame) {
                 Label("Remove Game", systemImage: "trash")
             }
+        }
+    }
+
+    @ViewBuilder
+    private var coverWithLiveStatus: some View {
+        ZStack(alignment: .topTrailing) {
+            cover
+
+            if let liveStatus {
+                LiveStatusBadge(status: liveStatus)
+                    .padding(7)
+                    .allowsHitTesting(false)
+            }
+        }
+        .aspectRatio(0.70, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
         }
     }
 

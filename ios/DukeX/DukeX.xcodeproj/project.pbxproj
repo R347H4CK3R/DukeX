@@ -41,6 +41,8 @@
 		C1000000000000000000000E /* StatsHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000001E /* StatsHUDView.swift */; };
 		C1000000000000000000000F /* NativeMetalPresenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000001F /* NativeMetalPresenterView.swift */; };
 		C10000000000000000000010 /* LayerConfigurators.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000020 /* LayerConfigurators.swift */; };
+		E10000000000000000000001 /* LiveStatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000011 /* LiveStatusBadge.swift */; };
+		E10000000000000000000002 /* InsigniaLiveStatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000012 /* InsigniaLiveStatusStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -81,6 +83,8 @@
 		C1000000000000000000001E /* StatsHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsHUDView.swift; sourceTree = "<group>"; };
 		C1000000000000000000001F /* NativeMetalPresenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMetalPresenterView.swift; sourceTree = "<group>"; };
 		C10000000000000000000020 /* LayerConfigurators.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerConfigurators.swift; sourceTree = "<group>"; };
+		E10000000000000000000011 /* LiveStatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveStatusBadge.swift; sourceTree = "<group>"; };
+		E10000000000000000000012 /* InsigniaLiveStatusStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsigniaLiveStatusStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -153,6 +157,7 @@
 				B10000000000000000000011 /* GamesLibraryView.swift */,
 				C10000000000000000000014 /* GameCoverTile.swift */,
 				C10000000000000000000015 /* GamesEmptyState.swift */,
+				E10000000000000000000011 /* LiveStatusBadge.swift */,
 			);
 			path = Games;
 			sourceTree = "<group>";
@@ -306,6 +311,7 @@
 			isa = PBXGroup;
 			children = (
 				B1000000000000000000001A /* InsigniaProfileStore.swift */,
+				E10000000000000000000012 /* InsigniaLiveStatusStore.swift */,
 			);
 			path = Insignia;
 			sourceTree = "<group>";
@@ -425,10 +431,12 @@
 				B10000000000000000000001 /* GamesLibraryView.swift in Sources */,
 				C10000000000000000000004 /* GameCoverTile.swift in Sources */,
 				C10000000000000000000005 /* GamesEmptyState.swift in Sources */,
+				E10000000000000000000001 /* LiveStatusBadge.swift in Sources */,
 				B10000000000000000000002 /* ProfileView.swift in Sources */,
 				C10000000000000000000006 /* ProfileLoginView.swift in Sources */,
 				C10000000000000000000007 /* ProfileRows.swift in Sources */,
 				B1000000000000000000000A /* InsigniaProfileStore.swift in Sources */,
+				E10000000000000000000002 /* InsigniaLiveStatusStore.swift in Sources */,
 				B1000000000000000000000B /* SettingsView.swift in Sources */,
 				B10000000000000000000004 /* SettingsRows.swift in Sources */,
 				B10000000000000000000003 /* DocumentImportPicker.swift in Sources */,

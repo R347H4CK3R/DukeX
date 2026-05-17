@@ -391,12 +391,21 @@ final class EmulatorFileStore: ObservableObject {
                 return nil
             }
             let size = Int64(values.fileSize ?? values.totalFileAllocatedSize ?? 0)
-            return LibraryFile(url: fileURL, size: size, kind: .unknown, titleName: nil, coverURL: nil, customConfigURL: nil)
+            return LibraryFile(
+                url: fileURL,
+                size: size,
+                kind: .unknown,
+                titleName: nil,
+                titleID: nil,
+                coverURL: nil,
+                customConfigURL: nil
+            )
         }
     }
 
     private func makeGameLibraryFile(from file: LibraryFile) -> LibraryFile {
-        let title = XISOGameTitleReader.titleName(in: file.url)
+        let metadata = XISOGameTitleReader.metadata(in: file.url)
+        let title = metadata?.titleName
         let cover = existingCoverURL(for: file.url, titleName: title, size: file.size)
         let customConfig = existingCustomConfigURL(for: file.url, titleName: title, size: file.size)
         return LibraryFile(
@@ -404,6 +413,7 @@ final class EmulatorFileStore: ObservableObject {
             size: file.size,
             kind: .game,
             titleName: title,
+            titleID: metadata?.titleID,
             coverURL: cover,
             customConfigURL: customConfig
         )

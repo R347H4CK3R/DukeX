@@ -23,6 +23,14 @@ struct InsigniaActiveGame: Codable, Identifiable, Equatable {
     let detail: String
 }
 
+struct InsigniaSupportedGame: Codable, Identifiable, Equatable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let serial: String
+    let titleID: String
+}
+
 struct InsigniaDashboardView: UIViewControllerRepresentable {
     let url: URL
 
@@ -36,6 +44,18 @@ struct InsigniaDashboardView: UIViewControllerRepresentable {
 
 enum InsigniaPublicService {
     static let dashboardURL = URL(string: "https://insignia.live/dashboard/")!
+    static let gamesURL = URL(string: "https://insignia.live/games")!
+
+    static func fetchLiveStatusSnapshot() async throws -> InsigniaLiveStatusSnapshot {
+        async let publicSnapshot = fetchPublicSnapshot()
+        async let supportedGames = fetchSupportedGames()
+
+        let (snapshot, games) = try await (publicSnapshot, supportedGames)
+        return InsigniaLiveStatusSnapshot(
+            supportedGames: games,
+            activeGames: snapshot.activeGames
+        )
+    }
 
     static func fetchPublicSnapshot() async throws -> InsigniaPublicSnapshot {
         let url = URL(string: "https://insignia.live/")!
@@ -55,6 +75,17 @@ enum InsigniaPublicService {
         )
     }
 
+    static func fetchSupportedGames() async throws -> [InsigniaSupportedGame] {
+        let (data, response) = try await URLSession.shared.data(from: gamesURL)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode),
+              let html = String(data: data, encoding: .utf8) else {
+            throw ServiceError.unavailable
+        }
+
+        return supportedGames(from: html)
+    }
     private static func firstStatistic(named label: String, in html: String) -> String? {
         let pattern = "<h3>\\s*([0-9,]+)\\s*</h3>\\s*<p>\\s*\(NSRegularExpression.escapedPattern(for: label))\\s*</p>"
         return firstMatch(pattern: pattern, in: html).first
@@ -64,7 +95,6 @@ enum InsigniaPublicService {
         let pattern = #"<tr>\s*<td>\s*<a href="[^"]+">\s*<img[\s\S]*?</a>\s*<a href="[^"]+">([\s\S]*?)</a>\s*<br />\s*<small[^>]*>([\s\S]*?)</small>\s*</td>\s*<td>\s*([\s\S]*?)<br />\s*<small[^>]*>([\s\S]*?)</small>\s*</td>\s*<td[^>]*>\s*([0-9]+)\s*</td>\s*<td[^>]*>\s*([\s\S]*?)\s*</td>"#
 
         return matches(pattern: pattern, in: html)
-            .prefix(8)
             .compactMap { captures -> InsigniaActiveGame? in
                 guard captures.count == 6 else {
                     return nil
@@ -89,6 +119,33 @@ enum InsigniaPublicService {
                     serial: serial,
                     onlineUsers: onlineUsers,
                     detail: detail
+                )
+            }
+    }
+
+    private static func supportedGames(from html: String) -> [InsigniaSupportedGame] {
+        let pattern = #"<tr>\s*<td>\s*<a href="[^"]+">\s*<img[\s\S]*?</a>\s*<a href="[^"]+">([\s\S]*?)</a>\s*<br />\s*<small[^>]*>([\s\S]*?)</small>\s*</td>\s*<td>\s*([\s\S]*?)<br />\s*<small[^>]*>([\s\S]*?)</small>\s*</td>"#
+
+        return matches(pattern: pattern, in: html)
+            .compactMap { captures -> InsigniaSupportedGame? in
+                guard captures.count == 4 else {
+                    return nil
+                }
+
+                let title = cleanedHTML(captures[0])
+                let subtitle = cleanedHTML(captures[1])
+                let publisherCode = cleanedHTML(captures[2])
+                let titleID = cleanedHTML(captures[3]).uppercased()
+                guard !titleID.isEmpty else {
+                    return nil
+                }
+
+                return InsigniaSupportedGame(
+                    id: titleID,
+                    title: title.isEmpty ? subtitle : title,
+                    subtitle: subtitle,
+                    serial: publisherCode,
+                    titleID: titleID
                 )
             }
     }

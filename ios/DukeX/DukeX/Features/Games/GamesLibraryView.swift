@@ -4,6 +4,7 @@ struct GamesLibraryView: View {
     @EnvironmentObject private var store: EmulatorFileStore
 
     let runtimeState: EmulatorCoreRuntime.RunState
+    let liveStatusStore: InsigniaLiveStatusStore
     let launchDashboard: () -> Void
     let launchGame: (LibraryFile) -> Void
     let importGames: () -> Void
@@ -53,6 +54,7 @@ struct GamesLibraryView: View {
                             GameCoverTile(
                                 game: game,
                                 canLaunch: store.systemFilesReady && runtimeState.canLaunch,
+                                liveStatus: liveStatusStore.status(for: game),
                                 launch: { launchGame(game) },
                                 addCover: { addCover(game) },
                                 importConfig: { importConfig(game) },

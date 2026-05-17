@@ -15,6 +15,7 @@ struct ContentView: View {
     @StateObject private var runtime = EmulatorCoreRuntime()
     @StateObject private var autoJIT = StikDebugAutoJITCoordinator()
     @StateObject private var profileStore = InsigniaProfileStore()
+    @StateObject private var liveStatusStore = InsigniaLiveStatusStore()
     @State private var importTarget: ImportTarget?
     @State private var autoLaunchAttempted = false
     @State private var coverSelectionTarget: LibraryFile?
@@ -33,6 +34,7 @@ struct ContentView: View {
             NavigationStack {
                 GamesLibraryView(
                     runtimeState: runtime.state,
+                    liveStatusStore: liveStatusStore,
                     launchDashboard: launchDashboard,
                     launchGame: launchGame,
                     importGames: { importTarget = .games },
@@ -188,6 +190,7 @@ struct ContentView: View {
         }
         .onAppear {
             runtime.refresh()
+            liveStatusStore.refresh()
             if !environmentRequestsAutoLaunch {
                 resumePendingAutoJITLaunchIfNeeded()
             }
@@ -215,7 +218,9 @@ struct ContentView: View {
             }
         }
         .onChange(of: selectedTab) { _, newTab in
-            if newTab == .profile {
+            if newTab == .games {
+                liveStatusStore.refresh()
+            } else if newTab == .profile {
                 profileStore.refresh()
             }
         }
@@ -278,6 +283,7 @@ struct ContentView: View {
                     Task {
                         await store.prepareAndRefresh()
                         runtime.refresh()
+                        liveStatusStore.refresh()
                     }
                 } label: {
                     Image(systemName: "arrow.clockwise")

@@ -15,6 +15,7 @@ struct LibraryFile: Identifiable, Equatable {
     let size: Int64
     let kind: Kind
     let titleName: String?
+    let titleID: String?
     let coverURL: URL?
     let customConfigURL: URL?
 

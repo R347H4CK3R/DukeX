@@ -4,6 +4,11 @@ enum XISOGameTitleReader {
     private static let sectorSize: UInt64 = 2_048
     private static let xboxMediaMagic = Data("MICROSOFT*XBOX*MEDIA".utf8)
 
+    struct Metadata {
+        let titleName: String?
+        let titleID: String?
+    }
+
     struct DirectoryEntry {
         let name: String
         let sector: UInt32
@@ -16,7 +21,7 @@ enum XISOGameTitleReader {
         let rootDirectorySize: UInt32
     }
 
-    static func titleName(in url: URL) -> String? {
+    static func metadata(in url: URL) -> Metadata? {
         do {
             let handle = try FileHandle(forReadingFrom: url)
             defer {
@@ -34,10 +39,17 @@ enum XISOGameTitleReader {
                 offset: xbeOffset,
                 fileSize: Int(defaultXBE.size)
             )
-            return titleName(fromXBEHeaders: xbeHeaders)
+            return Metadata(
+                titleName: titleName(fromXBEHeaders: xbeHeaders),
+                titleID: titleID(fromXBEHeaders: xbeHeaders)
+            )
         } catch {
             return nil
         }
+    }
+
+    static func titleName(in url: URL) -> String? {
+        metadata(in: url)?.titleName
     }
 
     private static func findVolumeDescriptor(in handle: FileHandle) throws -> VolumeDescriptor? {
@@ -182,6 +194,29 @@ enum XISOGameTitleReader {
             if !title.isEmpty {
                 return title
             }
+        }
+
+        return nil
+    }
+
+    private static func titleID(fromXBEHeaders headers: Data) -> String? {
+        guard littleEndianUInt32(in: headers, at: 0) == 0x4845_4258,
+              let baseAddress = littleEndianUInt32(in: headers, at: 0x104),
+              let certificateAddress = littleEndianUInt32(in: headers, at: 0x118) else {
+            return nil
+        }
+
+        let candidateOffsets = [
+            certificateOffset(certificateAddress, relativeTo: baseAddress),
+            certificateOffset(certificateAddress, relativeTo: 0x0001_0000)
+        ].compactMap { $0 }
+
+        for certificateOffset in candidateOffsets where certificateOffset + 0x0C <= headers.count {
+            guard let titleID = littleEndianUInt32(in: headers, at: certificateOffset + 0x08),
+                  titleID != 0 else {
+                continue
+            }
+            return String(format: "%08X", titleID)
         }
 
         return nil
