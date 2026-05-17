@@ -90,7 +90,7 @@ so entries focus on tester-visible behavior and port-specific runtime changes.
 
 - Bundle identifier changed to `com.mafty.dukex`.
 - App display name, app switcher name, and branding standardized on DukeX.
-- README and release-facing documentation refreshed for private alpha testing.
+- README and release-facing documentation refreshed for alpha testing.
 
 ### Known Issues
 

@@ -1,4 +1,5 @@
 /GNUmakefile
+.DS_Store
 /build/
 /build-ios-*/
 /build-ios-xcode-*/

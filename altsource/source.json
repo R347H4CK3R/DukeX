@@ -28,7 +28,7 @@
           "date": "2026-05-16",
           "localizedDescription": "Adds Insignia live indicators to the Games tab for titles with detected Xbox Live support, refreshes live status when the Games tab becomes active, captures title IDs during XISO import, and reorganizes the DukeX iOS source tree into app, feature, library, presenter, runtime, and service folders. The build keeps the iOS 18.x W^X JIT path and the iOS 26+ StikDebug Universal.js workflow.",
           "downloadURL": "https://github.com/MaftyManicEMU/DukeX/releases/download/v0.1.5/DukeX.Alpha.Build.v0.1.5.ipa",
-          "size": 14380143,
+          "size": 14380846,
           "minOSVersion": "18.0"
         }
       ],
