@@ -46,6 +46,25 @@ so entries focus on tester-visible behavior and port-specific runtime changes.
 - iOS 18.x requires JIT to be enabled for the app process, but does
   not use Universal.js.
 
+## v0.1.3 - Alpha Tester Build
+
+### Changed
+
+- Lowered the DukeX app and embedded core deployment target from iOS 26.3 to
+  iOS 18.0.
+- Preserved the iOS 26+ Universal.js JIT path while avoiding the Universal.js
+  handoff on iOS 18.x devices.
+- Updated runtime settings copy, build scripts, documentation, and issue
+  templates to reflect the iOS 18.0+ install target.
+- Bumped the app version to `0.1.3`, build `13`.
+
+### Notes
+
+- iOS 26 or later still requires StikDebug with Universal.js assigned to
+  DukeX for JIT.
+- iOS 18.x devices use the standard sideload/JIT workflow and are not forced
+  through the Universal.js path.
+
 ## v0.1.2 - Alpha Tester Build
 
 ### Added
