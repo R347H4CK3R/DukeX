@@ -1,0 +1,73 @@
+{
+  "name": "DukeX",
+  "identifier": "com.mafty.dukex.source",
+  "subtitle": "Xbox Emulation on iOS",
+  "description": "DukeX is an experimental iOS-focused frontend for xemu. It embeds the xemu core in a native Swift shell, provides an iPhone-friendly library and settings experience, and presents the Vulkan renderer through MoltenVK and a native CAMetalLayer. DukeX does not include Xbox system files, game images, or signing certificates. Users and testers are required to provide their own legally obtained files. DukeX is intended solely for legitimate emulation and preservation purposes, and is not designed for use with pirated materials.",
+  "iconURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/dukex-icon.png",
+  "headerURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/store-overview.png",
+  "website": "https://github.com/MaftyManicEMU/DukeX",
+  "tintColor": "#8FCA39",
+  "featuredApps": [
+    "com.mafty.dukex"
+  ],
+  "apps": [
+    {
+      "name": "DukeX",
+      "bundleIdentifier": "com.mafty.dukex",
+      "developerName": "Manic EMU Development Team",
+      "subtitle": "Original Xbox emulation for iOS, built from xemu with a native Swift interface.",
+      "localizedDescription": "DukeX is an experimental iOS-focused frontend for xemu. It embeds the xemu core in a native Swift shell, provides an iPhone-friendly library and settings experience, and presents the Vulkan renderer through MoltenVK and a native CAMetalLayer.\n\nCurrent alpha features include a native SwiftUI library, profile, and settings interface; user-accessible BIOS, ROMs, Covers, GameConfigs, and ShaderCaches folders; game launch and dashboard launch; per-game cover art; custom config import; shader-cache clearing; Insignia-oriented NAT defaults; Insignia live indicators for supported titles; built-in FPS/system statistics; app-owned launch logs; and translation block cache size controls for performance testing.\n\nDukeX installs on iOS 18.0 or later. iOS 18.x uses W^X reprotection after JIT has been enabled for the process. iOS 26 or later requires StikDebug with Universal.js assigned to the DukeX bundle identifier.\n\nDukeX does not include Xbox system files, game images, or signing certificates. Users and testers are required to provide their own legally obtained files. DukeX is intended solely for legitimate emulation and preservation purposes, and is not designed for use with pirated materials.",
+      "iconURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/dukex-icon.png",
+      "tintColor": "#8FCA39",
+      "category": "games",
+      "versions": [
+        {
+          "version": "0.1.5",
+          "buildVersion": "15",
+          "marketingVersion": "Alpha Build v0.1.5",
+          "date": "2026-05-16",
+          "localizedDescription": "Adds Insignia live indicators to the Games tab for titles with detected Xbox Live support, refreshes live status when the Games tab becomes active, captures title IDs during XISO import, and reorganizes the DukeX iOS source tree into app, feature, library, presenter, runtime, and service folders. The build keeps the iOS 18.x W^X JIT path and the iOS 26+ StikDebug Universal.js workflow.",
+          "downloadURL": "https://github.com/MaftyManicEMU/DukeX/releases/download/v0.1.5/DukeX.Alpha.Build.v0.1.5.ipa",
+          "size": 14380143,
+          "minOSVersion": "18.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {}
+      }
+    }
+  ],
+  "news": [
+    {
+      "title": "DukeX Alpha Build v0.1.5",
+      "identifier": "dukex-alpha-0.1.5",
+      "caption": "Adds Insignia live indicators, automatic Games tab live-status refresh, title ID capture during XISO import, and the reorganized DukeX iOS source layout.",
+      "date": "2026-05-16",
+      "tintColor": "#8FCA39",
+      "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/store-screenshots.png",
+      "notify": false,
+      "appID": "com.mafty.dukex"
+    },
+    {
+      "title": "Insignia-Oriented Multiplayer",
+      "identifier": "dukex-insignia-live-test",
+      "caption": "DukeX includes Insignia-oriented NAT defaults, an app-side profile tab, and game library live indicators for supported titles.",
+      "date": "2026-05-16",
+      "tintColor": "#8FCA39",
+      "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/store-online.png",
+      "notify": false,
+      "appID": "com.mafty.dukex"
+    },
+    {
+      "title": "Built With Manic EMU",
+      "identifier": "dukex-manic-emu-team",
+      "caption": "DukeX is brought to you by the Manic EMU Development Team.",
+      "date": "2026-05-16",
+      "tintColor": "#8FCA39",
+      "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/store-team.png",
+      "notify": false,
+      "appID": "com.mafty.dukex"
+    }
+  ]
+}

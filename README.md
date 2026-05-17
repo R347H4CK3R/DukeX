@@ -51,9 +51,10 @@ MoltenVK and a native `CAMetalLayer`.
 
 ## Availability
 
-Current DukeX alpha builds are published through GitHub Releases for private
-tester sideloading. Public sideload distribution through StikStore and
-SideStore is planned for later release work.
+Current DukeX alpha builds are published through GitHub Releases for tester
+sideloading. The repository also includes canonical AltStore/SideStore metadata
+under [`altsource/source.json`](altsource/source.json) for public distribution
+work.
 
 Compatibility and performance vary by title, device, iOS version, and JIT
 availability. DukeX should be treated as early alpha software.
@@ -99,6 +100,7 @@ upstream build system expects that layout. The main DukeX-specific areas are:
 | Path | Purpose |
 | --- | --- |
 | `ios/` | Native Swift shell, assets, settings UI, and device build scripts. |
+| `altsource/` | AltStore/SideStore source metadata and store-facing image assets. |
 | `docs/ios-port/` | DukeX iOS build and renderer notes. |
 | `docs/assets/branding/` | README and release-facing DukeX image assets. |
 | `hw/xbox/`, `target/i386/`, `tcg/`, `ui/`, `net/`, `block/` | Core emulator code used by the embedded iOS runtime. |

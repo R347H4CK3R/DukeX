@@ -3,6 +3,13 @@
 All notable DukeX alpha changes are tracked here. DukeX is still experimental,
 so entries focus on tester-visible behavior and port-specific runtime changes.
 
+## Unreleased
+
+### Added
+
+- Added canonical AltStore/SideStore source metadata and store-facing image
+  assets under `altsource/`.
+
 ## v0.1.5 - Alpha Tester Build
 
 ### Added
