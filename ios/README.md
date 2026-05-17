@@ -11,6 +11,7 @@ Runtime folders created in app Documents:
 - `Covers`: user-selected game cover art.
 - `GameConfigs`: optional per-game xemu configuration overrides.
 - `ShaderCaches`: per-title renderer cache storage.
+- `DukeXLogs`: app-owned launch logs, including `latest.log`.
 
 The shell writes `Documents/xemu-ios.toml` with core settings:
 
@@ -71,3 +72,4 @@ Useful overrides:
 - `XEMU_IOS_BUNDLE_ID`: unique bundle identifier.
 - `XEMU_IOS_DEVICE_ID`: target device UDID.
 - `XEMU_IOS_LAUNCH=0`: install but do not launch.
+- `XEMU_IOS_SKIP_CORE_BUILD=1`: reuse the existing core build.

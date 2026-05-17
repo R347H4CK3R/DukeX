@@ -23,6 +23,7 @@ MoltenVK and a native `CAMetalLayer`.
 
 ## At a Glance
 
+- Latest documented alpha: `v0.1.5`.
 - Device target: iPhoneOS arm64, install target iOS 18.0 or later.
 - Runtime: TCG with version-aware JIT setup; iOS 26 or later uses the
   StikDebug Universal.js flow.
@@ -37,21 +38,22 @@ MoltenVK and a native `CAMetalLayer`.
 
 | Category | Details |
 | --- | --- |
-| Game library | Two-column library, cover artwork, game launch, dashboard launch, and long-press actions. |
-| File management | User-accessible `BIOS`, `ROMs`, and `Covers` folders through iOS file sharing. |
+| Game library | Two-column library, cover artwork, game launch, dashboard launch, long-press actions, and Insignia live indicators for supported titles. |
+| File management | User-accessible `BIOS`, `ROMs`, `Covers`, `GameConfigs`, and `ShaderCaches` folders through iOS file sharing. |
 | JIT workflow | Optional automatic StikDebug handoff for the iOS 26+ Universal.js JIT flow. |
 | Display | MoltenVK-backed Metal presenter with portrait and landscape-aware sizing. |
 | Input | Controller support through iOS GameController APIs. |
 | Online setup | Insignia-focused NAT defaults plus editable network settings. |
+| Profile | App-side Insignia profile tab with cached public status and dashboard login handoff. |
 | Per-game tuning | Custom config import and shader-cache clearing from each game menu. |
-| Diagnostics | Built-in FPS/system statistics HUD for device-side testing. |
+| Diagnostics | Built-in FPS/system statistics HUD and app-owned launch logs for device-side testing. |
 | Advanced runtime | TCG translation block cache size controls for performance testing. |
 
 ## Availability
 
-DukeX alpha builds are intended for sideload distribution through StikStore and
-SideStore, with release artifacts published through GitHub Releases when public
-testing opens.
+Current DukeX alpha builds are published through GitHub Releases for private
+tester sideloading. Public sideload distribution through StikStore and
+SideStore is planned for later release work.
 
 Compatibility and performance vary by title, device, iOS version, and JIT
 availability. DukeX should be treated as early alpha software.
@@ -88,7 +90,6 @@ availability. DukeX should be treated as early alpha software.
 - [iOS port overview](docs/ios-port/README.md)
 - [iOS build instructions](docs/ios-port/BUILDING.md)
 - [Renderer notes](docs/ios-port/RENDERER.md)
-- [Public release checklist](docs/ios-port/PUBLICATION.md)
 
 ## Repository Layout
 
@@ -98,7 +99,7 @@ upstream build system expects that layout. The main DukeX-specific areas are:
 | Path | Purpose |
 | --- | --- |
 | `ios/` | Native Swift shell, assets, settings UI, and device build scripts. |
-| `docs/ios-port/` | DukeX iOS build, renderer, and release notes. |
+| `docs/ios-port/` | DukeX iOS build and renderer notes. |
 | `docs/assets/branding/` | README and release-facing DukeX image assets. |
 | `hw/xbox/`, `target/i386/`, `tcg/`, `ui/`, `net/`, `block/` | Core emulator code used by the embedded iOS runtime. |
 | `docs/upstream/` | Preserved upstream QEMU reference files for provenance and contributor context. |

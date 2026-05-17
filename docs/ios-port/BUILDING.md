@@ -20,6 +20,7 @@ Expected output:
 
 - `build-ios-arm64/qemu-system-i386`
 - `build-ios-arm64/libxemu-ios-core.dylib`
+- `build-ios-arm64/subprojects/slirp/libslirp.0.dylib`
 
 ## App
 
@@ -48,10 +49,16 @@ Useful environment overrides:
 - `XEMU_IOS_SKIP_CORE_BUILD=1`: reuse an existing core build.
 
 The app target runs `ios/scripts/embed-core-ios.sh`, which copies
-`build-ios-arm64/libxemu-ios-core.dylib` into the app bundle.
+`build-ios-arm64/libxemu-ios-core.dylib`, `libslirp.0.dylib`, and the local
+MoltenVK framework into the app bundle.
 
 Set `MOLTENVK_FRAMEWORK` to the `ios-arm64/MoltenVK.framework` path from your
 local MoltenVK package before building the app target.
+
+For unsigned local verification builds, add `CODE_SIGNING_ALLOWED=NO` to the
+`xcodebuild` invocation. Sideload release packaging is kept outside the
+repository and should not introduce AppleDouble `._*` files, resource forks, or
+extended attributes into the IPA payload.
 
 ## Local Files Not Committed
 

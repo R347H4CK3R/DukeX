@@ -15,8 +15,14 @@ through MoltenVK into a native `CAMetalLayer`.
 
 The primary Swift entry points are:
 
-- `ios/DukeX/DukeX/EmulatorCoreRuntime.swift`
-- `ios/DukeX/DukeX/NativeMetalPresenter.swift`
+- `ios/DukeX/DukeX/Runtime/Core/EmulatorCoreRuntime.swift`
+- `ios/DukeX/DukeX/Presenter/NativeMetalPresenterHost.swift`
+- `ios/DukeX/DukeX/Presenter/NativeMetalPresenterSession.swift`
+- `ios/DukeX/DukeX/Presenter/NativeMetalPresenterViewController.swift`
+- `ios/DukeX/DukeX/Presenter/Metal/NativeMetalPresenterView.swift`
+- `ios/DukeX/DukeX/Presenter/Metal/LayerConfigurators.swift`
+- `ios/DukeX/DukeX/Presenter/HUD/StatsHUDView.swift`
+- `ios/DukeX/DukeX/Presenter/ExitOverlay/GameplayExitOverlayView.swift`
 
 The primary renderer files are:
 
@@ -37,6 +43,7 @@ Current user-facing controls include:
 - Metal HUD request toggle.
 - Stats HUD toggle.
 - TB cache size: 64 MB, 128 MB, or 256 MB.
+- Per-game shader cache clearing from the Games tab long-press menu.
 
 ## Known Issues
 

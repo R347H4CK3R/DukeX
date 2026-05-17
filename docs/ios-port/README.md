@@ -12,6 +12,7 @@ The iOS shell creates these folders in app Documents:
 - `Covers`: user-supplied library cover art.
 - `GameConfigs`: optional per-game xemu configuration overrides.
 - `ShaderCaches`: per-game pipeline cache storage.
+- `DukeXLogs`: app-owned launch diagnostics, including `latest.log`.
 
 Runtime dependencies are intentionally not included in source control. Testers
 must provide their own legally obtained Xbox system files and game images.
@@ -19,6 +20,8 @@ must provide their own legally obtained Xbox system files and game images.
 ## Current Status
 
 - Native Swift library/settings/profile UI is functional.
+- The game library can show Insignia live indicators for supported titles and
+  refreshes those indicators when the Games tab becomes active.
 - Launching games through the embedded core works on-device with JIT enabled.
 - Rendering uses the Vulkan renderer through MoltenVK and a native
   `CAMetalLayer` presenter.
@@ -53,11 +56,12 @@ For renderer review, start with:
 - `hw/xbox/nv2a/pgraph/vk/renderer.h`
 - `hw/xbox/nv2a/pgraph/vk/shaders.c`
 - `hw/xbox/nv2a/pgraph/vk/texture.c`
-- `ios/DukeX/DukeX/NativeMetalPresenter.swift`
-- `ios/DukeX/DukeX/EmulatorCoreRuntime.swift`
+- `ios/DukeX/DukeX/Presenter/Metal/NativeMetalPresenterView.swift`
+- `ios/DukeX/DukeX/Presenter/Metal/LayerConfigurators.swift`
+- `ios/DukeX/DukeX/Presenter/NativeMetalPresenterHost.swift`
+- `ios/DukeX/DukeX/Runtime/Core/EmulatorCoreRuntime.swift`
 
 ## Related Documents
 
 - `docs/ios-port/BUILDING.md`: local build and signing setup.
 - `docs/ios-port/RENDERER.md`: presenter and Vulkan/MoltenVK notes.
-- `docs/ios-port/PUBLICATION.md`: public release checklist.
