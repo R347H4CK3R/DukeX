@@ -3,6 +3,25 @@
 All notable DukeX alpha changes are tracked here. DukeX is still experimental,
 so entries focus on tester-visible behavior and port-specific runtime changes.
 
+## v0.1.5 - Alpha Tester Build
+
+### Added
+
+- Added Insignia live indicators to the Games tab for titles with detected
+  Xbox Live support.
+- Added automatic live-status refresh when the Games tab becomes active.
+- Added title ID capture during XISO import so per-title services can key
+  against stable game metadata instead of display names alone.
+
+### Changed
+
+- Reorganized the DukeX iOS source tree into app, feature, library, presenter,
+  runtime, and service folders.
+- Split the large presenter and SwiftUI surface into smaller files for HUD,
+  Metal layer setup, exit overlay, game library, profile, and settings code.
+- Tuned game tiles for the live badge layout while keeping the existing
+  two-column library presentation.
+
 ## v0.1.4 - Alpha Tester Build
 
 ### Added
