@@ -1,14 +1,35 @@
 # Changelog
 
-All notable DukeX alpha changes are tracked here. DukeX is still experimental,
-so entries focus on tester-visible behavior and port-specific runtime changes.
+All notable DukeX changes are tracked here. DukeX is still experimental, so
+entries focus on user-visible behavior and port-specific runtime changes.
 
 ## Unreleased
 
+## v1.0.0 - Initial Public Release
+
 ### Added
 
+- Added favorites, title, Live, and recent sorting to the Games tab.
+- Added per-game favorite toggles to each game's long-press menu.
+- Added portrait and landscape library column controls in Settings.
 - Added canonical AltStore/SideStore source metadata and store-facing image
   assets under `altsource/`.
+
+### Changed
+
+- Updated the game library layout to support orientation-specific column
+  counts while preserving the existing iPhone-first presentation.
+- Updated AltSource metadata and release-facing documentation for the v1.0.0
+  release.
+- Reorganized new Games tab code into smaller components for sorting, layout,
+  and persisted library state.
+
+### Fixed
+
+- Fixed cover imports being written back into `ROMs`; new and migrated cover
+  art now lives in the user-facing `Covers` folder.
+- Refreshed Settings folder size indicators whenever the Settings tab becomes
+  active.
 
 ## v0.1.5 - Alpha Tester Build
 

@@ -76,6 +76,10 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Library") {
+                LibraryColumnSettingsView(store: store)
+            }
+
             Section("Advanced") {
                 Picker(selection: $store.tbCacheSize) {
                     ForEach(TBCacheSize.allCases) { size in

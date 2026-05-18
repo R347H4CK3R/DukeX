@@ -5,10 +5,12 @@ struct GameCoverTile: View {
     let game: LibraryFile
     let canLaunch: Bool
     let liveStatus: GameLiveStatus?
+    let isFavorite: Bool
     let launch: () -> Void
     let addCover: () -> Void
     let importConfig: () -> Void
     let clearShaderCache: () -> Void
+    let toggleFavorite: () -> Void
     let requestRemoveGame: () -> Void
 
     var body: some View {
@@ -55,10 +57,12 @@ struct GameCoverTile: View {
                 Label("Clear Shader Cache", systemImage: "xmark.bin")
             }
 
-            Button(action: launch) {
-                Label("Launch Game", systemImage: "play.circle")
+            Button(action: toggleFavorite) {
+                Label(
+                    isFavorite ? "Remove Favorite" : "Add to Favorites",
+                    systemImage: isFavorite ? "star.slash" : "star"
+                )
             }
-            .disabled(!canLaunch)
 
             Button(role: .destructive, action: requestRemoveGame) {
                 Label("Remove Game", systemImage: "trash")

@@ -222,6 +222,8 @@ struct ContentView: View {
                 liveStatusStore.refresh()
             } else if newTab == .profile {
                 profileStore.refresh()
+            } else if newTab == .settings {
+                refreshLibraryForSettings()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .dukeXReturnToGamesRequested)) { _ in
@@ -233,6 +235,14 @@ struct ContentView: View {
         let environment = ProcessInfo.processInfo.environment
         return environment["XEMU_IOS_AUTO_LAUNCH_GAME"] == "1" ||
             environment["XEMU_IOS_AUTO_LAUNCH_DASHBOARD"] == "1"
+    }
+
+    private func refreshLibraryForSettings() {
+        do {
+            try store.refresh()
+        } catch {
+            store.message = UserMessage(title: "Library Not Refreshed", detail: error.localizedDescription)
+        }
     }
 
     @ToolbarContentBuilder

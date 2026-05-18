@@ -30,6 +30,14 @@ struct LibraryFile: Identifiable, Equatable {
         }
         return fallbackDisplayName
     }
+    var libraryIdentityKey: String {
+        if let titleID = titleID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !titleID.isEmpty {
+            return "title:\(titleID.uppercased())"
+        }
+
+        return "file:\(url.path)"
+    }
     var byteCount: String { ByteCountFormatter.string(fromByteCount: size, countStyle: .file) }
 }
 
@@ -60,6 +68,58 @@ enum ImportTarget: String, Identifiable {
                 .item
             ].compactMap { $0 }
         }
+    }
+}
+
+enum GameLibraryColumnCount: Int, CaseIterable, Identifiable {
+    case two = 2
+    case three = 3
+    case four = 4
+
+    static let portraitDefaultsKey = "DukeXPortraitGameLibraryColumnCount"
+    static let landscapeDefaultsKey = "DukeXLandscapeGameLibraryColumnCount"
+    private static let legacyDefaultsKey = "DukeXGameLibraryColumnCount"
+
+    static let portraitOptions: [GameLibraryColumnCount] = [.two, .three]
+    static let landscapeOptions: [GameLibraryColumnCount] = [.three, .four]
+
+    var id: Int { rawValue }
+    var columnCount: Int { rawValue }
+
+    static var currentPortrait: GameLibraryColumnCount {
+        if let value = storedValue(forKey: portraitDefaultsKey, allowedValues: portraitOptions) {
+            return value
+        }
+
+        return storedValue(forKey: legacyDefaultsKey, allowedValues: portraitOptions) ?? .two
+    }
+
+    static var currentLandscape: GameLibraryColumnCount {
+        storedValue(forKey: landscapeDefaultsKey, allowedValues: landscapeOptions) ?? .three
+    }
+
+    var title: String {
+        switch self {
+        case .two:
+            return "2 Columns"
+        case .three:
+            return "3 Columns"
+        case .four:
+            return "4 Columns"
+        }
+    }
+
+    private static func storedValue(forKey key: String,
+                                    allowedValues: [GameLibraryColumnCount]) -> GameLibraryColumnCount? {
+        guard UserDefaults.standard.object(forKey: key) != nil else {
+            return nil
+        }
+
+        let value = GameLibraryColumnCount(rawValue: UserDefaults.standard.integer(forKey: key))
+        guard let value, allowedValues.contains(value) else {
+            return nil
+        }
+        return value
     }
 }
 

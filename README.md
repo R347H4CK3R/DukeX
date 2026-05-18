@@ -4,7 +4,7 @@
     <strong>Original Xbox emulation for iOS, built from xemu with a native Swift interface.</strong>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/status-alpha-8f95c4?style=flat-square" alt="Status: alpha">
+    <img src="https://img.shields.io/badge/status-experimental-8f95c4?style=flat-square" alt="Status: experimental">
     <img src="https://img.shields.io/badge/platform-iOS%2018%2B%20arm64-111827?style=flat-square" alt="Platform: iOS 18+ arm64">
     <img src="https://img.shields.io/badge/renderer-MoltenVK%20%2B%20Metal-1f6feb?style=flat-square" alt="Renderer: MoltenVK and Metal">
     <img src="https://img.shields.io/badge/JIT-version%20aware-2f855a?style=flat-square" alt="JIT: version aware">
@@ -23,7 +23,7 @@ MoltenVK and a native `CAMetalLayer`.
 
 ## At a Glance
 
-- Latest documented alpha: `v0.1.5`.
+- Latest release: `v1.0.0`.
 - Device target: iPhoneOS arm64, install target iOS 18.0 or later.
 - Runtime: TCG with version-aware JIT setup; iOS 26 or later uses the
   StikDebug Universal.js flow.
@@ -38,7 +38,7 @@ MoltenVK and a native `CAMetalLayer`.
 
 | Category | Details |
 | --- | --- |
-| Game library | Two-column library, cover artwork, game launch, dashboard launch, long-press actions, and Insignia live indicators for supported titles. |
+| Game library | Cover artwork, game launch, dashboard launch, favorites/title/live/recent sorting, portrait and landscape column options, long-press actions, and Insignia live indicators for supported titles. |
 | File management | User-accessible `BIOS`, `ROMs`, `Covers`, `GameConfigs`, and `ShaderCaches` folders through iOS file sharing. |
 | JIT workflow | Optional automatic StikDebug handoff for the iOS 26+ Universal.js JIT flow. |
 | Display | MoltenVK-backed Metal presenter with portrait and landscape-aware sizing. |
@@ -51,13 +51,12 @@ MoltenVK and a native `CAMetalLayer`.
 
 ## Availability
 
-Current DukeX alpha builds are published through GitHub Releases for tester
-sideloading. The repository also includes canonical AltStore/SideStore metadata
-under [`altsource/source.json`](altsource/source.json) for public distribution
-work.
+Current DukeX builds are published through GitHub Releases for sideloading.
+The repository also includes canonical AltStore/SideStore metadata under
+[`altsource/source.json`](altsource/source.json) for public distribution.
 
 Compatibility and performance vary by title, device, iOS version, and JIT
-availability. DukeX should be treated as early alpha software.
+availability. DukeX should be treated as experimental software.
 
 <p align="center">
   <img src="docs/assets/branding/stikstore-badge.png" alt="Available on StikStore" width="170">

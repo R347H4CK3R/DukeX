@@ -56,6 +56,18 @@ final class EmulatorFileStore: ObservableObject {
             UserDefaults.standard.set(forceThirtyFPSLockEnabled, forKey: Self.forceThirtyFPSLockEnabledKey)
         }
     }
+    @Published var portraitGameLibraryColumnCount: GameLibraryColumnCount {
+        didSet {
+            UserDefaults.standard.set(portraitGameLibraryColumnCount.rawValue,
+                                      forKey: GameLibraryColumnCount.portraitDefaultsKey)
+        }
+    }
+    @Published var landscapeGameLibraryColumnCount: GameLibraryColumnCount {
+        didSet {
+            UserDefaults.standard.set(landscapeGameLibraryColumnCount.rawValue,
+                                      forKey: GameLibraryColumnCount.landscapeDefaultsKey)
+        }
+    }
     @Published var tbCacheSize: TBCacheSize {
         didSet {
             UserDefaults.standard.set(tbCacheSize.rawValue, forKey: TBCacheSize.defaultsKey)
@@ -152,6 +164,8 @@ final class EmulatorFileStore: ObservableObject {
         metalHUDEnabled = UserDefaults.standard.object(forKey: Self.metalHUDEnabledKey) as? Bool ?? false
         statsHUDEnabled = UserDefaults.standard.object(forKey: Self.statsHUDEnabledKey) as? Bool ?? true
         forceThirtyFPSLockEnabled = UserDefaults.standard.object(forKey: Self.forceThirtyFPSLockEnabledKey) as? Bool ?? false
+        portraitGameLibraryColumnCount = GameLibraryColumnCount.currentPortrait
+        landscapeGameLibraryColumnCount = GameLibraryColumnCount.currentLandscape
         tbCacheSize = TBCacheSize.current
         forceInsigniaNATEnabled = UserDefaults.standard.object(forKey: Self.forceInsigniaNATKey) as? Bool ?? true
         natDNSServer = UserDefaults.standard.string(forKey: Self.natDNSServerKey) ?? NetworkSettings.insigniaDNSServer
@@ -176,14 +190,6 @@ final class EmulatorFileStore: ObservableObject {
         try prepareDirectories()
         let systemFiles = try scanDirectory(biosDirectoryURL)
         let gameFiles = try scanDirectory(romsDirectoryURL)
-        let coverFiles = try scanDirectory(coversDirectoryURL)
-
-        folderStorageUsage = FolderStorageUsage(
-            bios: FolderStorageUsage.Folder(byteCount: totalSize(of: systemFiles)),
-            roms: FolderStorageUsage.Folder(byteCount: totalSize(of: gameFiles)),
-            covers: FolderStorageUsage.Folder(byteCount: totalSize(of: coverFiles))
-        )
-
         mcpx = systemFiles
             .filter { $0.url.pathExtension.caseInsensitiveCompare("bin") == .orderedSame && $0.size == 512 }
             .sorted(by: sortByName)
@@ -212,6 +218,8 @@ final class EmulatorFileStore: ObservableObject {
             .filter { isGame($0) }
             .map { makeGameLibraryFile(from: $0) }
             .sorted(by: sortByName)
+
+        try refreshFolderStorageUsage()
 
         if selectedGame == nil {
             let selectedName = UserDefaults.standard.string(forKey: Self.selectedGameNameKey)
@@ -300,9 +308,7 @@ final class EmulatorFileStore: ObservableObject {
     func assignCover(_ data: Data, to game: LibraryFile) throws {
         try prepareDirectories()
         let imageData = UIImage(data: data)?.jpegData(compressionQuality: 0.92) ?? data
-        for destination in coverWriteURLs(for: game) {
-            try imageData.write(to: destination, options: .atomic)
-        }
+        try imageData.write(to: coverURL(for: game), options: .atomic)
         try refresh()
     }
 
@@ -439,6 +445,14 @@ final class EmulatorFileStore: ObservableObject {
         files.reduce(Int64(0)) { $0 + $1.size }
     }
 
+    private func refreshFolderStorageUsage() throws {
+        folderStorageUsage = FolderStorageUsage(
+            bios: FolderStorageUsage.Folder(byteCount: totalSize(of: try scanDirectory(biosDirectoryURL))),
+            roms: FolderStorageUsage.Folder(byteCount: totalSize(of: try scanDirectory(romsDirectoryURL))),
+            covers: FolderStorageUsage.Folder(byteCount: totalSize(of: try scanDirectory(coversDirectoryURL)))
+        )
+    }
+
     private func coverURL(for game: LibraryFile) -> URL {
         coverURL(forGameAssetID: gameAssetID(for: game))
     }
@@ -459,22 +473,21 @@ final class EmulatorFileStore: ObservableObject {
         coversDirectoryURL.appendingPathComponent("cover-\(Self.stableID(for: url.path)).jpg")
     }
 
-    private func coverWriteURLs(for game: LibraryFile) -> [URL] {
-        uniqueURLs([
-            coverURL(for: game),
-            portableCoverURL(for: game)
-        ])
-    }
-
     private func existingCoverURL(for gameURL: URL, titleName: String?, size: Int64) -> URL? {
-        let portableURL = portableCoverURL(forGameURL: gameURL)
-        if FileManager.default.fileExists(atPath: portableURL.path) {
-            return portableURL
-        }
-
         let canonicalURL = coverURL(forGameAssetID: gameAssetID(forGameURL: gameURL, titleName: titleName, size: size))
         if FileManager.default.fileExists(atPath: canonicalURL.path) {
+            removePortableCoverIfDuplicated(for: gameURL, canonicalURL: canonicalURL)
             return canonicalURL
+        }
+
+        let portableURL = portableCoverURL(forGameURL: gameURL)
+        if FileManager.default.fileExists(atPath: portableURL.path) {
+            try? FileManager.default.copyItemIfNeeded(from: portableURL, to: canonicalURL)
+            if FileManager.default.fileExists(atPath: canonicalURL.path) {
+                try? FileManager.default.removeItem(at: portableURL)
+                return canonicalURL
+            }
+            return portableURL
         }
 
         let legacyURL = legacyCoverURL(forGameURL: gameURL)
@@ -483,15 +496,19 @@ final class EmulatorFileStore: ObservableObject {
         }
 
         try? FileManager.default.copyItemIfNeeded(from: legacyURL, to: canonicalURL)
-        try? FileManager.default.copyItemIfNeeded(from: legacyURL, to: portableURL)
-
-        if FileManager.default.fileExists(atPath: portableURL.path) {
-            return portableURL
-        }
         if FileManager.default.fileExists(atPath: canonicalURL.path) {
             return canonicalURL
         }
         return legacyURL
+    }
+
+    private func removePortableCoverIfDuplicated(for gameURL: URL, canonicalURL: URL) {
+        let portableURL = portableCoverURL(forGameURL: gameURL)
+        guard portableURL.standardizedFileURL.path != canonicalURL.standardizedFileURL.path,
+              FileManager.default.fileExists(atPath: portableURL.path) else {
+            return
+        }
+        try? FileManager.default.removeItem(at: portableURL)
     }
 
     private func customConfigURL(for game: LibraryFile) -> URL {
@@ -567,13 +584,6 @@ final class EmulatorFileStore: ObservableObject {
             .lowercased()
             .split(whereSeparator: { $0.isWhitespace })
             .joined(separator: " ")
-    }
-
-    private func uniqueURLs(_ urls: [URL]) -> [URL] {
-        var seen = Set<String>()
-        return urls.filter { url in
-            seen.insert(url.standardizedFileURL.path).inserted
-        }
     }
 
     private static func stableID(for string: String) -> String {
