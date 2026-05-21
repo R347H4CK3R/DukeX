@@ -128,6 +128,16 @@ final class EmulatorFileStore: ObservableObject {
         games.first { $0.id == selectedGameID }
     }
 
+    func game(matchingTitleID titleID: String) -> LibraryFile? {
+        guard let titleID = GameLaunchLink.normalizedTitleID(titleID) else {
+            return nil
+        }
+
+        return games.first {
+            GameLaunchLink.normalizedTitleID($0.titleID) == titleID
+        }
+    }
+
     var systemFilesReady: Bool {
         bios != nil && mcpx != nil && hdd != nil
     }

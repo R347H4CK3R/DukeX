@@ -39,6 +39,7 @@ struct ContentView: View {
                     launchGame: launchGame,
                     importGames: { importTarget = .games },
                     addCover: beginCoverSelection,
+                    copyLaunchLink: copyLaunchLink,
                     importConfig: beginConfigImport,
                     clearShaderCache: clearShaderCache,
                     requestRemoveGame: { removalConfirmationTarget = $0 }
@@ -229,6 +230,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .dukeXReturnToGamesRequested)) { _ in
             selectedTab = .games
         }
+        .onOpenURL { url in
+            handleLaunchLink(url)
+        }
     }
 
     private var environmentRequestsAutoLaunch: Bool {
@@ -351,6 +355,42 @@ struct ContentView: View {
 
     private func beginConfigImport(for game: LibraryFile) {
         configImportTarget = game
+    }
+
+    private func copyLaunchLink(for game: LibraryFile) {
+        guard let url = GameLaunchLink.url(for: game) else {
+            store.message = UserMessage(
+                title: "Launch Link Unavailable",
+                detail: "\(game.displayName) does not have a readable TitleID."
+            )
+            return
+        }
+
+        UIPasteboard.general.string = url.absoluteString
+        store.message = UserMessage(
+            title: "Launch Link Copied",
+            detail: url.absoluteString
+        )
+    }
+
+    private func handleLaunchLink(_ url: URL) {
+        guard let titleID = GameLaunchLink.titleID(from: url) else {
+            return
+        }
+
+        selectedTab = .games
+        Task { @MainActor in
+            await store.prepareAndRefresh()
+            guard let game = store.game(matchingTitleID: titleID) else {
+                store.message = UserMessage(
+                    title: "Game Not Found",
+                    detail: "No installed game matched TitleID \(titleID)."
+                )
+                return
+            }
+
+            launchGame(game)
+        }
     }
 
     private func clearShaderCache(for game: LibraryFile) {

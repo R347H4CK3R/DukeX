@@ -8,6 +8,7 @@ struct GameCoverTile: View {
     let isFavorite: Bool
     let launch: () -> Void
     let addCover: () -> Void
+    let copyLaunchLink: () -> Void
     let importConfig: () -> Void
     let clearShaderCache: () -> Void
     let toggleFavorite: () -> Void
@@ -47,6 +48,11 @@ struct GameCoverTile: View {
             Button(action: addCover) {
                 Label("Add Cover", systemImage: "photo")
             }
+
+            Button(action: copyLaunchLink) {
+                Label("Copy Launch Link", systemImage: "link")
+            }
+            .disabled(GameLaunchLink.url(for: game) == nil)
 
             Button(action: importConfig) {
                 Label(game.customConfigURL == nil ? "Import Config" : "Replace Config",

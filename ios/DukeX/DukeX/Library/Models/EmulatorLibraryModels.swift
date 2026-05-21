@@ -41,6 +41,55 @@ struct LibraryFile: Identifiable, Equatable {
     var byteCount: String { ByteCountFormatter.string(fromByteCount: size, countStyle: .file) }
 }
 
+enum GameLaunchLink {
+    static let scheme = "dukex"
+
+    static func url(for game: LibraryFile) -> URL? {
+        guard let titleID = normalizedTitleID(game.titleID) else {
+            return nil
+        }
+
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = "launch"
+        components.queryItems = [
+            URLQueryItem(name: "titleid", value: titleID)
+        ]
+        return components.url
+    }
+
+    static func titleID(from url: URL) -> String? {
+        guard url.scheme?.caseInsensitiveCompare(scheme) == .orderedSame else {
+            return nil
+        }
+
+        let route = url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard route.caseInsensitiveCompare("launch") == .orderedSame else {
+            return nil
+        }
+
+        let titleID = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first { $0.name.caseInsensitiveCompare("titleid") == .orderedSame }?
+            .value
+        return normalizedTitleID(titleID)
+    }
+
+    static func normalizedTitleID(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+
+        let titleID = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        guard !titleID.isEmpty else {
+            return nil
+        }
+        return titleID
+    }
+}
+
 enum ImportTarget: String, Identifiable {
     case systemFiles
     case games

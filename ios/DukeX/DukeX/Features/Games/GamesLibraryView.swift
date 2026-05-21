@@ -12,6 +12,7 @@ struct GamesLibraryView: View {
     let launchGame: (LibraryFile) -> Void
     let importGames: () -> Void
     let addCover: (LibraryFile) -> Void
+    let copyLaunchLink: (LibraryFile) -> Void
     let importConfig: (LibraryFile) -> Void
     let clearShaderCache: (LibraryFile) -> Void
     let requestRemoveGame: (LibraryFile) -> Void
@@ -66,6 +67,7 @@ struct GamesLibraryView: View {
                                         launchGame(game)
                                     },
                                     addCover: { addCover(game) },
+                                    copyLaunchLink: { copyLaunchLink(game) },
                                     importConfig: { importConfig(game) },
                                     clearShaderCache: { clearShaderCache(game) },
                                     toggleFavorite: { toggleFavorite(game) },
