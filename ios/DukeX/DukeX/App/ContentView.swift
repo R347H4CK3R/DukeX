@@ -16,6 +16,7 @@ struct ContentView: View {
     @StateObject private var autoJIT = StikDebugAutoJITCoordinator()
     @StateObject private var profileStore = InsigniaProfileStore()
     @StateObject private var liveStatusStore = InsigniaLiveStatusStore()
+    @StateObject private var gameMetadataStore = GameMetadataStore()
     @State private var importTarget: ImportTarget?
     @State private var autoLaunchAttempted = false
     @State private var coverSelectionTarget: LibraryFile?
@@ -24,6 +25,7 @@ struct ContentView: View {
     @State private var selectedProfileImageItem: PhotosPickerItem?
     @State private var isProfileImagePickerPresented = false
     @State private var configImportTarget: LibraryFile?
+    @State private var gameMetadataTarget: LibraryFile?
     @State private var removalConfirmationTarget: LibraryFile?
     @State private var isProfileLoginPresented = false
     @State private var isInsigniaDashboardPresented = false
@@ -35,6 +37,7 @@ struct ContentView: View {
                 GamesLibraryView(
                     runtimeState: runtime.state,
                     liveStatusStore: liveStatusStore,
+                    metadataStore: gameMetadataStore,
                     launchDashboard: launchDashboard,
                     launchGame: launchGame,
                     importGames: { importTarget = .games },
@@ -42,6 +45,7 @@ struct ContentView: View {
                     copyLaunchLink: copyLaunchLink,
                     importConfig: beginConfigImport,
                     clearShaderCache: clearShaderCache,
+                    editGameData: { gameMetadataTarget = $0 },
                     requestRemoveGame: { removalConfirmationTarget = $0 }
                 )
                 .navigationTitle("DukeX")
@@ -100,6 +104,15 @@ struct ContentView: View {
         .sheet(isPresented: $isInsigniaDashboardPresented) {
             InsigniaDashboardView(url: InsigniaPublicService.dashboardURL)
                 .ignoresSafeArea()
+        }
+        .sheet(item: $gameMetadataTarget) { game in
+            GameMetadataEditorView(
+                game: game,
+                metadata: gameMetadataStore.metadata(for: game),
+                save: { metadata in
+                    gameMetadataStore.setMetadata(metadata, for: game)
+                }
+            )
         }
         .sheet(item: $importTarget) { target in
             DocumentImportPicker(

@@ -68,6 +68,11 @@ final class EmulatorFileStore: ObservableObject {
                                       forKey: GameLibraryColumnCount.landscapeDefaultsKey)
         }
     }
+    @Published var gameLibraryListViewEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(gameLibraryListViewEnabled, forKey: Self.gameLibraryListViewEnabledKey)
+        }
+    }
     @Published var tbCacheSize: TBCacheSize {
         didSet {
             UserDefaults.standard.set(tbCacheSize.rawValue, forKey: TBCacheSize.defaultsKey)
@@ -111,6 +116,7 @@ final class EmulatorFileStore: ObservableObject {
     static let metalHUDEnabledKey = "DukeXMetalHUDEnabled"
     static let statsHUDEnabledKey = "DukeXStatsHUDEnabled"
     static let forceThirtyFPSLockEnabledKey = "DukeXForceThirtyFPSLockEnabled"
+    static let gameLibraryListViewEnabledKey = "DukeXGameLibraryListViewEnabled"
     static let forceInsigniaNATKey = "ForceInsigniaNATEnabled"
     static let natDNSServerKey = "NATDNSServer"
     static let natHostPortKey = "NATHostPort"
@@ -176,6 +182,7 @@ final class EmulatorFileStore: ObservableObject {
         forceThirtyFPSLockEnabled = UserDefaults.standard.object(forKey: Self.forceThirtyFPSLockEnabledKey) as? Bool ?? false
         portraitGameLibraryColumnCount = GameLibraryColumnCount.currentPortrait
         landscapeGameLibraryColumnCount = GameLibraryColumnCount.currentLandscape
+        gameLibraryListViewEnabled = UserDefaults.standard.object(forKey: Self.gameLibraryListViewEnabledKey) as? Bool ?? false
         tbCacheSize = TBCacheSize.current
         forceInsigniaNATEnabled = UserDefaults.standard.object(forKey: Self.forceInsigniaNATKey) as? Bool ?? true
         natDNSServer = UserDefaults.standard.string(forKey: Self.natDNSServerKey) ?? NetworkSettings.insigniaDNSServer

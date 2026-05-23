@@ -4,6 +4,10 @@ struct LibraryColumnSettingsView: View {
     @ObservedObject var store: EmulatorFileStore
 
     var body: some View {
+        Toggle(isOn: $store.gameLibraryListViewEnabled) {
+            Label("List View", systemImage: "list.bullet.rectangle")
+        }
+
         VStack(alignment: .leading, spacing: 8) {
             Label("Portrait View", systemImage: "rectangle.portrait")
                 .font(.subheadline.weight(.semibold))
@@ -15,6 +19,8 @@ struct LibraryColumnSettingsView: View {
             }
             .pickerStyle(.segmented)
         }
+        .disabled(store.gameLibraryListViewEnabled)
+        .opacity(store.gameLibraryListViewEnabled ? 0.45 : 1)
 
         VStack(alignment: .leading, spacing: 8) {
             Label("Landscape View", systemImage: "rectangle")
@@ -27,8 +33,10 @@ struct LibraryColumnSettingsView: View {
             }
             .pickerStyle(.segmented)
         }
+        .disabled(store.gameLibraryListViewEnabled)
+        .opacity(store.gameLibraryListViewEnabled ? 0.45 : 1)
 
-        Text("Portrait defaults to 2 columns. Landscape defaults to 3 columns.")
+        Text("Grid view defaults to 2 portrait columns and 3 landscape columns.")
             .font(.footnote)
             .foregroundStyle(.secondary)
     }

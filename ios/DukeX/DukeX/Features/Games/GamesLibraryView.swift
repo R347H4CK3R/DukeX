@@ -8,6 +8,7 @@ struct GamesLibraryView: View {
 
     let runtimeState: EmulatorCoreRuntime.RunState
     let liveStatusStore: InsigniaLiveStatusStore
+    let metadataStore: GameMetadataStore
     let launchDashboard: () -> Void
     let launchGame: (LibraryFile) -> Void
     let importGames: () -> Void
@@ -15,6 +16,7 @@ struct GamesLibraryView: View {
     let copyLaunchLink: (LibraryFile) -> Void
     let importConfig: (LibraryFile) -> Void
     let clearShaderCache: (LibraryFile) -> Void
+    let editGameData: (LibraryFile) -> Void
     let requestRemoveGame: (LibraryFile) -> Void
 
     var body: some View {
@@ -51,6 +53,31 @@ struct GamesLibraryView: View {
 
                     if store.games.isEmpty {
                         GamesEmptyState(importGames: importGames)
+                    } else if store.gameLibraryListViewEnabled {
+                        LazyVStack(spacing: 12) {
+                            ForEach(sortedGames) { game in
+                                GameListRow(
+                                    game: game,
+                                    metadata: metadataStore.metadata(for: game),
+                                    recentlyPlayedTime: recentlyPlayedTime(for: game),
+                                    isLandscape: geometry.size.width > geometry.size.height,
+                                    canLaunch: store.systemFilesReady && runtimeState.canLaunch,
+                                    liveStatus: liveStatusStore.status(for: game),
+                                    isFavorite: isFavorite(game),
+                                    launch: {
+                                        markRecentlyPlayed(game)
+                                        launchGame(game)
+                                    },
+                                    addCover: { addCover(game) },
+                                    copyLaunchLink: { copyLaunchLink(game) },
+                                    importConfig: { importConfig(game) },
+                                    clearShaderCache: { clearShaderCache(game) },
+                                    editGameData: { editGameData(game) },
+                                    toggleFavorite: { toggleFavorite(game) },
+                                    requestRemoveGame: { requestRemoveGame(game) }
+                                )
+                            }
+                        }
                     } else {
                         let activeColumnCount = gameLibraryColumnCount(for: geometry.size)
                         LazyVGrid(columns: GameLibraryGridMetrics.columns(for: activeColumnCount),
