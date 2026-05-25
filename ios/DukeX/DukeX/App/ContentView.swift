@@ -28,7 +28,6 @@ struct ContentView: View {
     @State private var gameMetadataTarget: LibraryFile?
     @State private var removalConfirmationTarget: LibraryFile?
     @State private var isProfileLoginPresented = false
-    @State private var isInsigniaDashboardPresented = false
     @State private var selectedTab: MainTab = .games
 
     var body: some View {
@@ -63,7 +62,6 @@ struct ContentView: View {
                 ProfileView(
                     profileStore: profileStore,
                     signIn: { isProfileLoginPresented = true },
-                    openDashboard: { isInsigniaDashboardPresented = true },
                     changeProfileImage: beginProfileImageSelection
                 )
                 .navigationTitle("DukeX")
@@ -96,14 +94,7 @@ struct ContentView: View {
             .tag(MainTab.settings)
         }
         .sheet(isPresented: $isProfileLoginPresented) {
-            ProfileLoginView(
-                profileStore: profileStore,
-                openDashboard: { isInsigniaDashboardPresented = true }
-            )
-        }
-        .sheet(isPresented: $isInsigniaDashboardPresented) {
-            InsigniaDashboardView(url: InsigniaPublicService.dashboardURL)
-                .ignoresSafeArea()
+            ProfileLoginView(profileStore: profileStore)
         }
         .sheet(item: $gameMetadataTarget) { game in
             GameMetadataEditorView(

@@ -3,38 +3,68 @@ import SwiftUI
 struct ProfileLoginView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var profileStore: InsigniaProfileStore
-    let openDashboard: () -> Void
-    @State private var gamertag: String
+    @State private var email = ""
+    @State private var password = ""
+    @State private var gamertag = ""
     @State private var errorText: String?
+    @State private var isSigningIn = false
 
-    init(profileStore: InsigniaProfileStore, openDashboard: @escaping () -> Void) {
+    init(profileStore: InsigniaProfileStore) {
         self.profileStore = profileStore
-        self.openDashboard = openDashboard
+        _email = State(initialValue: profileStore.session?.email ?? "")
         _gamertag = State(initialValue: profileStore.session?.gamertag ?? "")
     }
 
     var body: some View {
         NavigationStack {
             List {
-                Section("Insignia") {
-                    TextField("Gamertag", text: $gamertag)
-                        .textInputAutocapitalization(.words)
+                Section {
+                    TextField("Email", text: $email)
+                        .textContentType(.username)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+
+                    SecureField("Password", text: $password)
+                        .textContentType(.password)
 
                     if let errorText {
                         Text(errorText)
                             .font(.footnote)
                             .foregroundStyle(.red)
                     }
+                } header: {
+                    Text("Insignia Account")
+                } footer: {
+                    Text("DukeX stores only the session token returned by the unofficial Insignia auth service. Your password is sent only for sign-in and is not saved.")
                 }
 
                 Section {
                     Button {
-                        dismiss()
-                        openDashboard()
+                        Task {
+                            await signIn()
+                        }
                     } label: {
-                        Label("Open Insignia Dashboard", systemImage: "person.text.rectangle")
+                        HStack {
+                            Label("Sign In", systemImage: "person.crop.circle.badge.checkmark")
+                            Spacer()
+                            if isSigningIn {
+                                ProgressView()
+                            }
+                        }
                     }
+                    .disabled(isSigningIn || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
+
+                    Button {
+                        saveGamertagOnly()
+                    } label: {
+                        Label("Use Gamertag Only", systemImage: "person.crop.circle")
+                    }
+                    .disabled(isSigningIn || gamertag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    TextField("Gamertag for local lookup", text: $gamertag)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
                 }
 
                 Section {
@@ -55,18 +85,25 @@ struct ProfileLoginView: View {
                         dismiss()
                     }
                 }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        signIn()
-                    }
-                }
             }
         }
-        .presentationDetents([.medium])
+        .interactiveDismissDisabled(isSigningIn)
     }
 
-    private func signIn() {
+    private func signIn() async {
+        errorText = nil
+        isSigningIn = true
+        defer { isSigningIn = false }
+
+        do {
+            try await profileStore.signIn(email: email, password: password)
+            dismiss()
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+
+    private func saveGamertagOnly() {
         do {
             try profileStore.signIn(gamertag: gamertag)
             dismiss()
