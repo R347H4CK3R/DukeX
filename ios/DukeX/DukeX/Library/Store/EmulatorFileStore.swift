@@ -56,6 +56,11 @@ final class EmulatorFileStore: ObservableObject {
             UserDefaults.standard.set(forceThirtyFPSLockEnabled, forKey: Self.forceThirtyFPSLockEnabledKey)
         }
     }
+    @Published var depthClampEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(depthClampEnabled, forKey: Self.depthClampEnabledKey)
+        }
+    }
     @Published var portraitGameLibraryColumnCount: GameLibraryColumnCount {
         didSet {
             UserDefaults.standard.set(portraitGameLibraryColumnCount.rawValue,
@@ -116,6 +121,7 @@ final class EmulatorFileStore: ObservableObject {
     static let metalHUDEnabledKey = "DukeXMetalHUDEnabled"
     static let statsHUDEnabledKey = "DukeXStatsHUDEnabled"
     static let forceThirtyFPSLockEnabledKey = "DukeXForceThirtyFPSLockEnabled"
+    static let depthClampEnabledKey = "DukeXDepthClampEnabled"
     static let gameLibraryListViewEnabledKey = "DukeXGameLibraryListViewEnabled"
     static let forceInsigniaNATKey = "ForceInsigniaNATEnabled"
     static let natDNSServerKey = "NATDNSServer"
@@ -180,6 +186,7 @@ final class EmulatorFileStore: ObservableObject {
         metalHUDEnabled = UserDefaults.standard.object(forKey: Self.metalHUDEnabledKey) as? Bool ?? false
         statsHUDEnabled = UserDefaults.standard.object(forKey: Self.statsHUDEnabledKey) as? Bool ?? true
         forceThirtyFPSLockEnabled = UserDefaults.standard.object(forKey: Self.forceThirtyFPSLockEnabledKey) as? Bool ?? false
+        depthClampEnabled = UserDefaults.standard.object(forKey: Self.depthClampEnabledKey) as? Bool ?? false
         portraitGameLibraryColumnCount = GameLibraryColumnCount.currentPortrait
         landscapeGameLibraryColumnCount = GameLibraryColumnCount.currentLandscape
         gameLibraryListViewEnabled = UserDefaults.standard.object(forKey: Self.gameLibraryListViewEnabledKey) as? Bool ?? false

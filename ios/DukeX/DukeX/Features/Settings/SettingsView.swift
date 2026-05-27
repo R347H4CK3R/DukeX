@@ -54,6 +54,14 @@ struct SettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
+                Toggle(isOn: $store.depthClampEnabled) {
+                    Label("Depth Clamp", systemImage: "square.stack.3d.down.forward")
+                }
+
+                Text("Clamps guest shader depth on iOS instead of discarding fragments outside the guest clip range. Changes apply on the next launch.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
                 Toggle(isOn: $store.metalHUDEnabled) {
                     Label("Metal HUD", systemImage: "gauge.with.dots.needle.67percent")
                 }

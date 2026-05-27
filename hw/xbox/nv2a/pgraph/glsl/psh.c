@@ -33,6 +33,16 @@
 
 DEF_UNIFORM_INFO_ARR(PshUniform, PSH_UNIFORM_DECL_X)
 
+static bool pgraph_glsl_ios_depth_clamp_enabled(void)
+{
+#ifdef CONFIG_IOS
+    const char *env = getenv("XEMU_IOS_DEPTH_CLAMP");
+    return env && env[0] && strcmp(env, "0") != 0;
+#else
+    return false;
+#endif
+}
+
 // TODO: https://github.com/xemu-project/xemu/issues/2260
 //   Investigate how color keying is handled for components with no alpha or
 //   only alpha.
@@ -1078,10 +1088,15 @@ static MString* psh_convert(struct PixelShader *ps)
 
     /* Depth clipping */
     if (ps->state->depth_clipping) {
-        mstring_append(
-            clip, "if (zvalue < clipRange.z || clipRange.w < zvalue) {\n"
-                  "  discard;\n"
-                  "}\n");
+        if (pgraph_glsl_ios_depth_clamp_enabled()) {
+            mstring_append(
+                clip, "zvalue = clamp(zvalue, clipRange.z, clipRange.w);\n");
+        } else {
+            mstring_append(
+                clip, "if (zvalue < clipRange.z || clipRange.w < zvalue) {\n"
+                      "  discard;\n"
+                      "}\n");
+        }
     } else {
         mstring_append(
             clip, "zvalue = clamp(zvalue, clipRange.z, clipRange.w);\n");
