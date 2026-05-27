@@ -20,6 +20,7 @@
 #include "qemu/osdep.h"
 #include "qemu/fast-hash.h"
 #include "ui/xemu-settings.h"
+#include "hw/xbox/nv2a/pgraph/prim_rewrite.h"
 #include "renderer.h"
 #include <math.h>
 
@@ -72,324 +73,73 @@ void pgraph_vk_draw_begin(NV2AState *d)
     }
 }
 
-static bool pgraph_vk_cpu_expand_quads(PGRAPHState *pg)
+static PrimAssemblyState pgraph_vk_prim_assembly_state(PGRAPHState *pg)
 {
-    PGRAPHVkState *r = pg->vk_renderer_state;
-    int primitive_mode = pg->primitive_mode;
-    int polygon_mode = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
-                                NV_PGRAPH_SETUPRASTER_FRONTFACEMODE);
-
-    if (r->enabled_physical_device_features.geometryShader == VK_TRUE) {
-        return false;
-    }
-
-    if (polygon_mode != POLY_MODE_FILL) {
-        return false;
-    }
-
-    return primitive_mode == PRIM_TYPE_QUADS ||
-           primitive_mode == PRIM_TYPE_QUAD_STRIP;
+    return (PrimAssemblyState) {
+        .primitive_mode = (enum ShaderPrimitiveMode)pg->primitive_mode,
+        .polygon_mode = (enum ShaderPolygonMode)GET_MASK(
+            pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+            NV_PGRAPH_SETUPRASTER_FRONTFACEMODE),
+        .last_provoking =
+            GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+                     NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX) ==
+            NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX_LAST,
+        .flat_shading =
+            GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+                     NV_PGRAPH_CONTROL_3_SHADEMODE) ==
+            NV_PGRAPH_CONTROL_3_SHADEMODE_FLAT,
+    };
 }
 
-static bool pgraph_vk_cpu_expand_indices(PGRAPHState *pg)
+static VkPrimitiveTopology primitive_topology_vk(enum ShaderPrimitiveMode mode,
+                                                 enum ShaderPolygonMode polygon_mode)
 {
-    int primitive_mode = pg->primitive_mode;
-    int polygon_mode = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
-                                NV_PGRAPH_SETUPRASTER_FRONTFACEMODE);
-
-    if (pgraph_vk_cpu_expand_quads(pg)) {
-        return true;
-    }
-
-#ifdef CONFIG_IOS
-    switch (primitive_mode) {
+    switch (mode) {
+    case PRIM_TYPE_POINTS:
+        return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+    case PRIM_TYPE_LINES:
+        return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
     case PRIM_TYPE_LINE_LOOP:
+        return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP; /* FIXME */
     case PRIM_TYPE_LINE_STRIP:
+        return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+    case PRIM_TYPE_TRIANGLES:
+        return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     case PRIM_TYPE_TRIANGLE_STRIP:
+        return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
     case PRIM_TYPE_TRIANGLE_FAN:
-        return true;
-    case PRIM_TYPE_POLYGON:
-        return polygon_mode == POLY_MODE_LINE || polygon_mode == POLY_MODE_FILL;
-    default:
-        return false;
-    }
-#else
-    return false;
-#endif
-}
-
-static void append_index(GArray *indices, uint32_t index)
-{
-    g_array_append_val(indices, index);
-}
-
-static uint32_t expanded_index_count(PGRAPHState *pg, uint32_t count)
-{
-    int primitive_mode = pg->primitive_mode;
-    int polygon_mode = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
-                                NV_PGRAPH_SETUPRASTER_FRONTFACEMODE);
-
-    switch (primitive_mode) {
-    case PRIM_TYPE_LINE_LOOP:
-        return count >= 2 ? count * 2 : 0;
-    case PRIM_TYPE_LINE_STRIP:
-        return count >= 2 ? (count - 1) * 2 : 0;
-    case PRIM_TYPE_TRIANGLE_STRIP:
-    case PRIM_TYPE_TRIANGLE_FAN:
-        return count >= 3 ? (count - 2) * 3 : 0;
+        return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
     case PRIM_TYPE_QUADS:
-        return (count / 4) * 6;
+        return VK_PRIMITIVE_TOPOLOGY_LINE_LIST_WITH_ADJACENCY;
     case PRIM_TYPE_QUAD_STRIP:
-        return count >= 4 ? ((count - 2) / 2) * 6 : 0;
+        return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP_WITH_ADJACENCY;
     case PRIM_TYPE_POLYGON:
         if (polygon_mode == POLY_MODE_LINE) {
-            return count >= 2 ? (count - 1) * 2 : 0;
+            return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP; /* FIXME */
         } else if (polygon_mode == POLY_MODE_FILL) {
-            return count >= 3 ? (count - 2) * 3 : 0;
+            return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
         }
-        assert(!"Invalid polygon mode for primitive expansion");
+        return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+    default:
+        assert(!"Invalid primitive_mode");
         return 0;
-    default:
-        assert(!"Invalid primitive mode for expansion");
-        return 0;
-    }
-}
-
-static void append_expanded_indices(PGRAPHState *pg, GArray *indices,
-                                    const uint32_t *elements, uint32_t count)
-{
-    int primitive_mode = pg->primitive_mode;
-    int polygon_mode = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
-                                NV_PGRAPH_SETUPRASTER_FRONTFACEMODE);
-
-    switch (primitive_mode) {
-    case PRIM_TYPE_LINE_LOOP:
-        for (uint32_t i = 0; i + 1 < count; i++) {
-            append_index(indices, elements[i]);
-            append_index(indices, elements[i + 1]);
-        }
-        if (count >= 2) {
-            append_index(indices, elements[count - 1]);
-            append_index(indices, elements[0]);
-        }
-        break;
-    case PRIM_TYPE_LINE_STRIP:
-        for (uint32_t i = 0; i + 1 < count; i++) {
-            append_index(indices, elements[i]);
-            append_index(indices, elements[i + 1]);
-        }
-        break;
-    case PRIM_TYPE_TRIANGLE_STRIP:
-        for (uint32_t i = 0; i + 2 < count; i++) {
-            if (i & 1) {
-                append_index(indices, elements[i + 1]);
-                append_index(indices, elements[i + 0]);
-                append_index(indices, elements[i + 2]);
-            } else {
-                append_index(indices, elements[i + 0]);
-                append_index(indices, elements[i + 1]);
-                append_index(indices, elements[i + 2]);
-            }
-        }
-        break;
-    case PRIM_TYPE_TRIANGLE_FAN:
-        for (uint32_t i = 1; i + 1 < count; i++) {
-            append_index(indices, elements[0]);
-            append_index(indices, elements[i]);
-            append_index(indices, elements[i + 1]);
-        }
-        break;
-    case PRIM_TYPE_QUADS:
-        for (uint32_t i = 0; i + 3 < count; i += 4) {
-            append_index(indices, elements[i + 1]);
-            append_index(indices, elements[i + 2]);
-            append_index(indices, elements[i + 0]);
-            append_index(indices, elements[i + 2]);
-            append_index(indices, elements[i + 3]);
-            append_index(indices, elements[i + 0]);
-        }
-        break;
-    case PRIM_TYPE_QUAD_STRIP:
-        for (uint32_t i = 0; i + 3 < count; i += 2) {
-            append_index(indices, elements[i + 0]);
-            append_index(indices, elements[i + 1]);
-            append_index(indices, elements[i + 2]);
-            append_index(indices, elements[i + 2]);
-            append_index(indices, elements[i + 1]);
-            append_index(indices, elements[i + 3]);
-        }
-        break;
-    case PRIM_TYPE_POLYGON:
-        if (polygon_mode == POLY_MODE_LINE) {
-            for (uint32_t i = 0; i + 1 < count; i++) {
-                append_index(indices, elements[i]);
-                append_index(indices, elements[i + 1]);
-            }
-        } else if (polygon_mode == POLY_MODE_FILL) {
-            for (uint32_t i = 1; i + 1 < count; i++) {
-                append_index(indices, elements[0]);
-                append_index(indices, elements[i]);
-                append_index(indices, elements[i + 1]);
-            }
-        } else {
-            assert(!"Invalid polygon mode for primitive expansion");
-        }
-        break;
-    default:
-        assert(!"Invalid primitive mode for expansion");
-        break;
-    }
-}
-
-static void append_expanded_sequential_indices(PGRAPHState *pg, GArray *indices,
-                                               uint32_t start, uint32_t count)
-{
-    int primitive_mode = pg->primitive_mode;
-    int polygon_mode = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
-                                NV_PGRAPH_SETUPRASTER_FRONTFACEMODE);
-
-    switch (primitive_mode) {
-    case PRIM_TYPE_LINE_LOOP:
-        for (uint32_t i = 0; i + 1 < count; i++) {
-            append_index(indices, start + i);
-            append_index(indices, start + i + 1);
-        }
-        if (count >= 2) {
-            append_index(indices, start + count - 1);
-            append_index(indices, start);
-        }
-        break;
-    case PRIM_TYPE_LINE_STRIP:
-        for (uint32_t i = 0; i + 1 < count; i++) {
-            append_index(indices, start + i);
-            append_index(indices, start + i + 1);
-        }
-        break;
-    case PRIM_TYPE_TRIANGLE_STRIP:
-        for (uint32_t i = 0; i + 2 < count; i++) {
-            if (i & 1) {
-                append_index(indices, start + i + 1);
-                append_index(indices, start + i + 0);
-                append_index(indices, start + i + 2);
-            } else {
-                append_index(indices, start + i + 0);
-                append_index(indices, start + i + 1);
-                append_index(indices, start + i + 2);
-            }
-        }
-        break;
-    case PRIM_TYPE_TRIANGLE_FAN:
-        for (uint32_t i = 1; i + 1 < count; i++) {
-            append_index(indices, start);
-            append_index(indices, start + i);
-            append_index(indices, start + i + 1);
-        }
-        break;
-    case PRIM_TYPE_QUADS:
-        for (uint32_t i = 0; i + 3 < count; i += 4) {
-            append_index(indices, start + i + 1);
-            append_index(indices, start + i + 2);
-            append_index(indices, start + i + 0);
-            append_index(indices, start + i + 2);
-            append_index(indices, start + i + 3);
-            append_index(indices, start + i + 0);
-        }
-        break;
-    case PRIM_TYPE_QUAD_STRIP:
-        for (uint32_t i = 0; i + 3 < count; i += 2) {
-            append_index(indices, start + i + 0);
-            append_index(indices, start + i + 1);
-            append_index(indices, start + i + 2);
-            append_index(indices, start + i + 2);
-            append_index(indices, start + i + 1);
-            append_index(indices, start + i + 3);
-        }
-        break;
-    case PRIM_TYPE_POLYGON:
-        if (polygon_mode == POLY_MODE_LINE) {
-            for (uint32_t i = 0; i + 1 < count; i++) {
-                append_index(indices, start + i);
-                append_index(indices, start + i + 1);
-            }
-        } else if (polygon_mode == POLY_MODE_FILL) {
-            for (uint32_t i = 1; i + 1 < count; i++) {
-                append_index(indices, start);
-                append_index(indices, start + i);
-                append_index(indices, start + i + 1);
-            }
-        } else {
-            assert(!"Invalid polygon mode for primitive expansion");
-        }
-        break;
-    default:
-        assert(!"Invalid primitive mode for expansion");
-        break;
     }
 }
 
 static VkPrimitiveTopology get_primitive_topology(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
-    int polygon_mode = r->shader_binding->state.geom.polygon_front_mode;
-    int primitive_mode = r->shader_binding->state.geom.primitive_mode;
+    PrimAssemblyState assembly = pgraph_vk_prim_assembly_state(pg);
 
-    // FIXME: Replace with LUT
-    switch (primitive_mode) {
-    case PRIM_TYPE_POINTS:
-        return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
-    case PRIM_TYPE_LINES:
-        return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-    case PRIM_TYPE_LINE_LOOP:
-        if (pgraph_vk_cpu_expand_indices(pg)) {
-            return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-        }
-        // FIXME: line strips, except that the first and last vertices are also used as a line
-        return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
-    case PRIM_TYPE_LINE_STRIP:
-        if (pgraph_vk_cpu_expand_indices(pg)) {
-            return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-        }
-        return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
-    case PRIM_TYPE_TRIANGLES:
-        return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    case PRIM_TYPE_TRIANGLE_STRIP:
-        if (pgraph_vk_cpu_expand_indices(pg)) {
-            return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-        }
-        return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-    case PRIM_TYPE_TRIANGLE_FAN:
-        if (pgraph_vk_cpu_expand_indices(pg)) {
-            return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-        }
-        return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
-    case PRIM_TYPE_QUADS:
-        if (pgraph_vk_cpu_expand_quads(pg)) {
-            return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-        }
-        return VK_PRIMITIVE_TOPOLOGY_LINE_LIST_WITH_ADJACENCY;
-    case PRIM_TYPE_QUAD_STRIP:
-        if (pgraph_vk_cpu_expand_quads(pg)) {
-            return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-        }
-        return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP_WITH_ADJACENCY;
-    case PRIM_TYPE_POLYGON:
-        if (polygon_mode == POLY_MODE_LINE) {
-            if (pgraph_vk_cpu_expand_indices(pg)) {
-                return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-            }
-            return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP; // FIXME
-        } else if (polygon_mode == POLY_MODE_FILL) {
-            if (pgraph_vk_cpu_expand_indices(pg)) {
-                return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-            }
-            return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
-        }
-        assert(!"PRIM_TYPE_POLYGON with invalid polygon_mode");
-        return 0;
-    default:
-        assert(!"Invalid primitive_mode");
-        return 0;
+    if (pgraph_prim_rewrite_needed(assembly)) {
+        enum ShaderPrimitiveMode output_mode =
+            pgraph_prim_rewrite_get_output_mode(assembly.primitive_mode,
+                                                assembly.polygon_mode);
+        return primitive_topology_vk(output_mode, assembly.polygon_mode);
     }
+
+    return primitive_topology_vk(r->shader_binding->state.geom.primitive_mode,
+                                 r->shader_binding->state.geom.polygon_front_mode);
 }
 
 static void pipeline_cache_entry_init(Lru *lru, LruNode *node,
@@ -2572,6 +2322,7 @@ void pgraph_vk_flush_draw(NV2AState *d)
     }
 
     r->num_vertex_ram_buffer_syncs = 0;
+    PrimAssemblyState assembly = pgraph_vk_prim_assembly_state(pg);
 
     if (pg->draw_arrays_length) {
         NV2A_VK_DGROUP_BEGIN("Draw Arrays");
@@ -2581,55 +2332,51 @@ void pgraph_vk_flush_draw(NV2AState *d)
         assert(pg->inline_buffer_length == 0);
         assert(pg->inline_array_length == 0);
 
-        bool expand_indices = pgraph_vk_cpu_expand_indices(pg);
-        GArray *expanded_indices = NULL;
+        uint32_t min_element = INT_MAX;
+        uint32_t max_element = 0;
+        uint32_t input_count = 0;
+        for (int i = 0; i < pg->draw_arrays_length; i++) {
+            min_element = MIN(pg->draw_arrays_start[i], min_element);
+            max_element = MAX(max_element, pg->draw_arrays_start[i] + pg->draw_arrays_count[i]);
+            input_count += pg->draw_arrays_count[i];
+        }
 
         pgraph_vk_bind_vertex_attributes(d, pg->draw_arrays_min_start,
                                          pg->draw_arrays_max_count - 1, false,
                                          0, pg->draw_arrays_max_count - 1);
-        uint32_t min_element = INT_MAX;
-        uint32_t max_element = 0;
-        uint32_t expanded_index_capacity = 0;
-        for (int i = 0; i < pg->draw_arrays_length; i++) {
-            min_element = MIN(pg->draw_arrays_start[i], min_element);
-            max_element = MAX(max_element, pg->draw_arrays_start[i] + pg->draw_arrays_count[i]);
-            if (expand_indices) {
-                expanded_index_capacity +=
-                    expanded_index_count(pg, pg->draw_arrays_count[i]);
-            }
-        }
-        if (expand_indices) {
-            expanded_indices =
-                g_array_sized_new(false, false, sizeof(uint32_t),
-                                  expanded_index_capacity);
-            for (int i = 0; i < pg->draw_arrays_length; i++) {
-                append_expanded_sequential_indices(
-                    pg, expanded_indices, pg->draw_arrays_start[i],
-                    pg->draw_arrays_count[i]);
-            }
+
+        PrimRewriteBuf rewrite_buf;
+        pgraph_prim_rewrite_init(&rewrite_buf);
+        PrimRewrite rewrite = pgraph_prim_rewrite_ranges(
+            &rewrite_buf, assembly, pg->draw_arrays_start,
+            pg->draw_arrays_count, pg->draw_arrays_length);
+        pgraph_prim_rewrite_debug_log("draw_arrays", assembly, &rewrite,
+                                      input_count);
+
+        if (rewrite.num_indices) {
             ensure_buffer_space(pg, BUFFER_INDEX_STAGING,
-                                expanded_indices->len * sizeof(uint32_t));
+                                rewrite.num_indices * sizeof(uint32_t));
         }
+
         sync_vertex_ram_buffer(pg);
         VertexBufferRemap remap = remap_unaligned_attributes(pg, max_element);
 
         begin_pre_draw(pg);
         copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_element);
         VkDeviceSize index_buffer_offset = 0;
-        if (expanded_indices && expanded_indices->len) {
+        if (rewrite.num_indices) {
             index_buffer_offset = pgraph_vk_update_index_buffer(
-                pg, expanded_indices->data,
-                expanded_indices->len * sizeof(uint32_t));
+                pg, rewrite.indices, rewrite.num_indices * sizeof(uint32_t));
         }
         pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
                                      "Draw Arrays");
         begin_draw(pg);
         bind_vertex_buffer(pg, remap.attributes, 0);
-        if (expanded_indices) {
+        if (rewrite.num_indices) {
             vkCmdBindIndexBuffer(r->command_buffer,
                                  r->storage_buffers[BUFFER_INDEX].buffer,
                                  index_buffer_offset, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(r->command_buffer, expanded_indices->len, 1, 0, 0,
+            vkCmdDrawIndexed(r->command_buffer, rewrite.num_indices, 1, 0, 0,
                              0);
         } else {
             for (int i = 0; i < pg->draw_arrays_length; i++) {
@@ -2641,7 +2388,7 @@ void pgraph_vk_flush_draw(NV2AState *d)
         }
         end_draw(pg);
         pgraph_vk_end_debug_marker(r, r->command_buffer);
-        g_clear_pointer(&expanded_indices, g_array_unref);
+        pgraph_prim_rewrite_finalize(&rewrite_buf);
 
         NV2A_VK_DGROUP_END();
     } else if (pg->inline_elements_length) {
@@ -2651,20 +2398,20 @@ void pgraph_vk_flush_draw(NV2AState *d)
 
         nv2a_profile_inc_counter(NV2A_PROF_INLINE_ELEMENTS);
 
-        bool expand_indices = pgraph_vk_cpu_expand_indices(pg);
-        GArray *expanded_indices = NULL;
-        void *index_data = pg->inline_elements;
+        const uint32_t *index_data = pg->inline_elements;
         uint32_t index_count = pg->inline_elements_length;
 
-        if (expand_indices) {
-            expanded_indices =
-                g_array_sized_new(false, false, sizeof(uint32_t),
-                                  expanded_index_count(
-                                      pg, pg->inline_elements_length));
-            append_expanded_indices(pg, expanded_indices, pg->inline_elements,
-                                    pg->inline_elements_length);
-            index_data = expanded_indices->data;
-            index_count = expanded_indices->len;
+        PrimRewriteBuf rewrite_buf;
+        pgraph_prim_rewrite_init(&rewrite_buf);
+        PrimRewrite rewrite = pgraph_prim_rewrite_indexed(
+            &rewrite_buf, assembly, pg->inline_elements,
+            pg->inline_elements_length);
+        pgraph_prim_rewrite_debug_log("inline_elements", assembly, &rewrite,
+                                      pg->inline_elements_length);
+
+        if (rewrite.num_indices) {
+            index_data = rewrite.indices;
+            index_count = rewrite.num_indices;
         }
 
         size_t index_data_size = index_count * sizeof(pg->inline_elements[0]);
@@ -2673,13 +2420,20 @@ void pgraph_vk_flush_draw(NV2AState *d)
 
         uint32_t min_element = (uint32_t)-1;
         uint32_t max_element = 0;
-        for (int i = 0; i < pg->inline_elements_length; i++) {
-            max_element = MAX(pg->inline_elements[i], max_element);
-            min_element = MIN(pg->inline_elements[i], min_element);
+        for (int i = 0; i < index_count; i++) {
+            max_element = MAX(index_data[i], max_element);
+            min_element = MIN(index_data[i], min_element);
         }
+
+        if (!index_count) {
+            pgraph_prim_rewrite_finalize(&rewrite_buf);
+            NV2A_VK_DGROUP_END();
+            return;
+        }
+
         pgraph_vk_bind_vertex_attributes(
             d, min_element, max_element, false, 0,
-            pg->inline_elements[pg->inline_elements_length - 1]);
+            index_data[index_count - 1]);
         sync_vertex_ram_buffer(pg);
         VertexBufferRemap remap = remap_unaligned_attributes(pg, max_element + 1);
 
@@ -2688,7 +2442,7 @@ void pgraph_vk_flush_draw(NV2AState *d)
         VkDeviceSize buffer_offset = 0;
         if (index_count) {
             buffer_offset = pgraph_vk_update_index_buffer(
-                pg, index_data, index_data_size);
+                pg, (void *)index_data, index_data_size);
         }
         pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
                                      "Inline Elements");
@@ -2702,7 +2456,7 @@ void pgraph_vk_flush_draw(NV2AState *d)
         }
         end_draw(pg);
         pgraph_vk_end_debug_marker(r, r->command_buffer);
-        g_clear_pointer(&expanded_indices, g_array_unref);
+        pgraph_prim_rewrite_finalize(&rewrite_buf);
 
         NV2A_VK_DGROUP_END();
     } else if (pg->inline_buffer_length) {
@@ -2710,18 +2464,16 @@ void pgraph_vk_flush_draw(NV2AState *d)
         nv2a_profile_inc_counter(NV2A_PROF_INLINE_BUFFERS);
         assert(pg->inline_array_length == 0);
 
-        bool expand_indices = pgraph_vk_cpu_expand_indices(pg);
-        GArray *expanded_indices = NULL;
+        PrimRewriteBuf rewrite_buf;
+        pgraph_prim_rewrite_init(&rewrite_buf);
+        PrimRewrite rewrite = pgraph_prim_rewrite_sequential(
+            &rewrite_buf, assembly, 0, pg->inline_buffer_length);
+        pgraph_prim_rewrite_debug_log("inline_buffer", assembly, &rewrite,
+                                      pg->inline_buffer_length);
 
-        if (expand_indices) {
-            expanded_indices =
-                g_array_sized_new(false, false, sizeof(uint32_t),
-                                  expanded_index_count(
-                                      pg, pg->inline_buffer_length));
-            append_expanded_sequential_indices(
-                pg, expanded_indices, 0, pg->inline_buffer_length);
+        if (rewrite.num_indices) {
             ensure_buffer_space(pg, BUFFER_INDEX_STAGING,
-                                expanded_indices->len * sizeof(uint32_t));
+                                rewrite.num_indices * sizeof(uint32_t));
         }
 
         size_t vertex_data_size = pg->inline_buffer_length * sizeof(float) * 4;
@@ -2748,27 +2500,26 @@ void pgraph_vk_flush_draw(NV2AState *d)
         VkDeviceSize buffer_offset = pgraph_vk_update_vertex_inline_buffer(
             pg, data, sizes, r->num_active_vertex_attribute_descriptions);
         VkDeviceSize index_buffer_offset = 0;
-        if (expanded_indices && expanded_indices->len) {
+        if (rewrite.num_indices) {
             index_buffer_offset = pgraph_vk_update_index_buffer(
-                pg, expanded_indices->data,
-                expanded_indices->len * sizeof(uint32_t));
+                pg, rewrite.indices, rewrite.num_indices * sizeof(uint32_t));
         }
         pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
                                      "Inline Buffer");
         begin_draw(pg);
         bind_inline_vertex_buffer(pg, buffer_offset);
-        if (expanded_indices) {
+        if (rewrite.num_indices) {
             vkCmdBindIndexBuffer(r->command_buffer,
                                  r->storage_buffers[BUFFER_INDEX].buffer,
                                  index_buffer_offset, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(r->command_buffer, expanded_indices->len, 1, 0, 0,
+            vkCmdDrawIndexed(r->command_buffer, rewrite.num_indices, 1, 0, 0,
                              0);
         } else {
             vkCmdDraw(r->command_buffer, pg->inline_buffer_length, 1, 0, 0);
         }
         end_draw(pg);
         pgraph_vk_end_debug_marker(r, r->command_buffer);
-        g_clear_pointer(&expanded_indices, g_array_unref);
+        pgraph_prim_rewrite_finalize(&rewrite_buf);
 
         NV2A_VK_DGROUP_END();
     } else if (pg->inline_array_length) {
@@ -2797,17 +2548,17 @@ void pgraph_vk_flush_draw(NV2AState *d)
 
         unsigned int vertex_size = offset;
         unsigned int index_count = pg->inline_array_length * 4 / vertex_size;
-        bool expand_indices = pgraph_vk_cpu_expand_indices(pg);
-        GArray *expanded_indices = NULL;
 
-        if (expand_indices) {
-            expanded_indices =
-                g_array_sized_new(false, false, sizeof(uint32_t),
-                                  expanded_index_count(pg, index_count));
-            append_expanded_sequential_indices(
-                pg, expanded_indices, 0, index_count);
+        PrimRewriteBuf rewrite_buf;
+        pgraph_prim_rewrite_init(&rewrite_buf);
+        PrimRewrite rewrite = pgraph_prim_rewrite_sequential(
+            &rewrite_buf, assembly, 0, index_count);
+        pgraph_prim_rewrite_debug_log("inline_array", assembly, &rewrite,
+                                      index_count);
+
+        if (rewrite.num_indices) {
             ensure_buffer_space(pg, BUFFER_INDEX_STAGING,
-                                expanded_indices->len * sizeof(uint32_t));
+                                rewrite.num_indices * sizeof(uint32_t));
         }
 
         NV2A_DPRINTF("draw inline array %d, %d\n", vertex_size, index_count);
@@ -2819,27 +2570,26 @@ void pgraph_vk_flush_draw(NV2AState *d)
         VkDeviceSize buffer_offset = pgraph_vk_update_vertex_inline_buffer(
             pg, &inline_array_data, &inline_array_data_size, 1);
         VkDeviceSize index_buffer_offset = 0;
-        if (expanded_indices && expanded_indices->len) {
+        if (rewrite.num_indices) {
             index_buffer_offset = pgraph_vk_update_index_buffer(
-                pg, expanded_indices->data,
-                expanded_indices->len * sizeof(uint32_t));
+                pg, rewrite.indices, rewrite.num_indices * sizeof(uint32_t));
         }
         pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
                                      "Inline Array");
         begin_draw(pg);
         bind_inline_vertex_buffer(pg, buffer_offset);
-        if (expanded_indices) {
+        if (rewrite.num_indices) {
             vkCmdBindIndexBuffer(r->command_buffer,
                                  r->storage_buffers[BUFFER_INDEX].buffer,
                                  index_buffer_offset, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(r->command_buffer, expanded_indices->len, 1, 0, 0,
+            vkCmdDrawIndexed(r->command_buffer, rewrite.num_indices, 1, 0, 0,
                              0);
         } else {
             vkCmdDraw(r->command_buffer, index_count, 1, 0, 0);
         }
         end_draw(pg);
         pgraph_vk_end_debug_marker(r, r->command_buffer);
-        g_clear_pointer(&expanded_indices, g_array_unref);
+        pgraph_prim_rewrite_finalize(&rewrite_buf);
         NV2A_VK_DGROUP_END();
     } else {
         NV2A_VK_DPRINTF("EMPTY NV097_SET_BEGIN_END");
