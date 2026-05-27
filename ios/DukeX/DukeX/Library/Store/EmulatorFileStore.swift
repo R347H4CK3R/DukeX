@@ -61,6 +61,18 @@ final class EmulatorFileStore: ObservableObject {
             UserDefaults.standard.set(depthClampEnabled, forKey: Self.depthClampEnabledKey)
         }
     }
+    @Published var xboxCameraPeripheralEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(xboxCameraPeripheralEnabled,
+                                      forKey: Self.xboxCameraPeripheralEnabledKey)
+        }
+    }
+    @Published var xboxHeadsetMicPeripheralEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(xboxHeadsetMicPeripheralEnabled,
+                                      forKey: Self.xboxHeadsetMicPeripheralEnabledKey)
+        }
+    }
     @Published var portraitGameLibraryColumnCount: GameLibraryColumnCount {
         didSet {
             UserDefaults.standard.set(portraitGameLibraryColumnCount.rawValue,
@@ -122,6 +134,8 @@ final class EmulatorFileStore: ObservableObject {
     static let statsHUDEnabledKey = "DukeXStatsHUDEnabled"
     static let forceThirtyFPSLockEnabledKey = "DukeXForceThirtyFPSLockEnabled"
     static let depthClampEnabledKey = "DukeXDepthClampEnabled"
+    static let xboxCameraPeripheralEnabledKey = "DukeXXboxCameraPeripheralEnabled"
+    static let xboxHeadsetMicPeripheralEnabledKey = "DukeXXboxHeadsetMicPeripheralEnabled"
     static let gameLibraryListViewEnabledKey = "DukeXGameLibraryListViewEnabled"
     static let forceInsigniaNATKey = "ForceInsigniaNATEnabled"
     static let natDNSServerKey = "NATDNSServer"
@@ -187,6 +201,10 @@ final class EmulatorFileStore: ObservableObject {
         statsHUDEnabled = UserDefaults.standard.object(forKey: Self.statsHUDEnabledKey) as? Bool ?? true
         forceThirtyFPSLockEnabled = UserDefaults.standard.object(forKey: Self.forceThirtyFPSLockEnabledKey) as? Bool ?? false
         depthClampEnabled = UserDefaults.standard.object(forKey: Self.depthClampEnabledKey) as? Bool ?? false
+        xboxCameraPeripheralEnabled =
+            UserDefaults.standard.object(forKey: Self.xboxCameraPeripheralEnabledKey) as? Bool ?? false
+        xboxHeadsetMicPeripheralEnabled =
+            UserDefaults.standard.object(forKey: Self.xboxHeadsetMicPeripheralEnabledKey) as? Bool ?? false
         portraitGameLibraryColumnCount = GameLibraryColumnCount.currentPortrait
         landscapeGameLibraryColumnCount = GameLibraryColumnCount.currentLandscape
         gameLibraryListViewEnabled = UserDefaults.standard.object(forKey: Self.gameLibraryListViewEnabledKey) as? Bool ?? false
@@ -307,7 +325,9 @@ final class EmulatorFileStore: ObservableObject {
             universalJITEnabled: universalJITEnabled,
             networkSettings: networkSettings,
             tbCacheSize: tbCacheSize,
-            shaderCacheURL: shaderCacheURL(for: selectedGame)
+            shaderCacheURL: shaderCacheURL(for: selectedGame),
+            xboxCameraEnabled: false,
+            xboxHeadsetMicEnabled: xboxHeadsetMicPeripheralEnabled
         )
     }
 
@@ -325,7 +345,9 @@ final class EmulatorFileStore: ObservableObject {
             universalJITEnabled: universalJITEnabled,
             networkSettings: networkSettings,
             tbCacheSize: tbCacheSize,
-            shaderCacheURL: dashboardShaderCacheURL
+            shaderCacheURL: dashboardShaderCacheURL,
+            xboxCameraEnabled: false,
+            xboxHeadsetMicEnabled: xboxHeadsetMicPeripheralEnabled
         )
     }
 

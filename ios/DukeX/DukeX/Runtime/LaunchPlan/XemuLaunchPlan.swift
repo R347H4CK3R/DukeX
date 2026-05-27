@@ -10,6 +10,8 @@ struct XemuLaunchPlan: Identifiable {
     let universalJITEnabled: Bool
     let gameName: String
     let isDashboard: Bool
+    let xboxCameraEnabled: Bool
+    let xboxHeadsetMicEnabled: Bool
 
     var commandLine: String {
         arguments.map(Self.shellQuoted).joined(separator: " ")
@@ -26,7 +28,9 @@ struct XemuLaunchPlan: Identifiable {
         universalJITEnabled: Bool,
         networkSettings: NetworkSettings,
         tbCacheSize: TBCacheSize,
-        shaderCacheURL: URL
+        shaderCacheURL: URL,
+        xboxCameraEnabled: Bool,
+        xboxHeadsetMicEnabled: Bool
     ) throws -> XemuLaunchPlan {
         let configURL = documentsURL.appendingPathComponent("xemu-ios.toml")
         let gamesPath = game?.url.deletingLastPathComponent().path ?? gamesDirectoryURL.path
@@ -99,18 +103,34 @@ struct XemuLaunchPlan: Identifiable {
             jitMode == .wxReprotection ? "split-wx=on" : nil
         ] as [String?]).compactMap { $0 }
 
+        var arguments = [
+            "xemu-ios",
+            "-accel", "tcg,\(accelOptions.joined(separator: ","))",
+            "-config_path", (customConfigURL ?? configURL).path
+        ]
+
+        if xboxCameraEnabled {
+            arguments.append(contentsOf: [
+                "-device", "usb-xbox-camera,port=1.1"
+            ])
+        }
+
+        if xboxHeadsetMicEnabled {
+            arguments.append(contentsOf: [
+                "-device", "usb-xblc"
+            ])
+        }
+
         return XemuLaunchPlan(
             configURL: customConfigURL ?? configURL,
-            arguments: [
-                "xemu-ios",
-                "-accel", "tcg,\(accelOptions.joined(separator: ","))",
-                "-config_path", (customConfigURL ?? configURL).path
-            ],
+            arguments: arguments,
             jitMode: jitMode,
             requiresJITHandoff: requiresJITHandoff,
             universalJITEnabled: effectiveUniversalJITEnabled,
             gameName: launchName,
-            isDashboard: game == nil
+            isDashboard: game == nil,
+            xboxCameraEnabled: xboxCameraEnabled,
+            xboxHeadsetMicEnabled: xboxHeadsetMicEnabled
         )
     }
 

@@ -84,6 +84,26 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Peripherals") {
+                Toggle(isOn: $store.xboxHeadsetMicPeripheralEnabled) {
+                    Label("Xbox Live Communicator", systemImage: "mic.circle")
+                }
+
+                Text("Experimental. Attaches an Xbox Live Communicator on launch and routes the iPhone microphone through it.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Toggle(isOn: .constant(false)) {
+                    Label("Xbox Video Chat Camera", systemImage: "video.circle")
+                }
+                .disabled(true)
+
+                Text("Experimental. Attaches an Xbox Video Chat camera on launch and routes the iPhone face camera through it. Coming soon.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .disabled(true)
+            }
+
             Section("Library") {
                 LibraryColumnSettingsView(store: store)
             }

@@ -1,8 +1,31 @@
 import Darwin
+import AVFoundation
+import CoreImage
 import Foundation
+import ImageIO
 import Metal
 import QuartzCore
+import UniformTypeIdentifiers
 import UIKit
+
+private typealias XboxCameraFrameProvider = @convention(c) (
+    UnsafeMutablePointer<UInt8>?,
+    Int,
+    UnsafeMutablePointer<UInt32>?,
+    UnsafeMutablePointer<UInt32>?,
+    UnsafeMutablePointer<UInt64>?
+) -> Int
+private typealias XemuSetXboxCameraFrameProvider = @convention(c) (XboxCameraFrameProvider?) -> Void
+
+private let dukexXboxCameraFrameProvider: XboxCameraFrameProvider = { destination, capacity, width, height, sequence in
+    XboxCameraFrameSource.shared.copyJPEGFrame(
+        to: destination,
+        capacity: capacity,
+        width: width,
+        height: height,
+        sequence: sequence
+    )
+}
 
 @MainActor
 final class EmulatorCoreRuntime: ObservableObject {
@@ -45,6 +68,7 @@ final class EmulatorCoreRuntime: ObservableObject {
     private var primeCoroutines: XemuPrimeCoroutines?
     private var setExternalMetalLayer: XemuSetExternalMetalLayer?
     private var requestShutdown: XemuRequestShutdown?
+    private var setXboxCameraFrameProvider: XemuSetXboxCameraFrameProvider?
 
     init(bundle: Bundle = .main) {
         state = Self.resolveCoreURL(in: bundle).map(RunState.ready) ??
@@ -71,8 +95,11 @@ final class EmulatorCoreRuntime: ObservableObject {
             let arguments = plan.arguments
             let jitMode = plan.jitMode
             let universalJITEnabled = plan.universalJITEnabled
+            let xboxCameraEnabled = plan.xboxCameraEnabled
+            let xboxHeadsetMicEnabled = plan.xboxHeadsetMicEnabled
             let setExternalMetalLayer = loadSetExternalMetalLayer()
             let requestShutdown = loadRequestShutdown()
+            let setXboxCameraFrameProvider = loadSetXboxCameraFrameProvider()
 
             let logURL = Self.prepareRunLog(for: plan, arguments: arguments)
             state = .running(plan.gameName)
@@ -82,12 +109,24 @@ final class EmulatorCoreRuntime: ObservableObject {
             }
             GameControllerBootstrap.shared.logSnapshot(reason: "before core launch")
 
-            DispatchQueue.main.async {
+            Task { @MainActor in
+                await XboxPeripheralPermissionPrimer.shared.prepareIfNeeded(
+                    cameraEnabled: xboxCameraEnabled,
+                    headsetMicEnabled: xboxHeadsetMicEnabled
+                )
+                if xboxCameraEnabled {
+                    XboxCameraFrameSource.shared.start()
+                    setXboxCameraFrameProvider?(dukexXboxCameraFrameProvider)
+                } else {
+                    setXboxCameraFrameProvider?(nil)
+                }
                 let status = Self.invoke(
                     entryPoint,
                     arguments: arguments,
                     jitMode: jitMode,
                     universalJITEnabled: universalJITEnabled,
+                    xboxCameraEnabled: xboxCameraEnabled,
+                    xboxHeadsetMicEnabled: xboxHeadsetMicEnabled,
                     setExternalMetalLayer: setExternalMetalLayer,
                     requestShutdown: requestShutdown,
                     session: NativeMetalPresenterSession(
@@ -209,6 +248,26 @@ final class EmulatorCoreRuntime: ObservableObject {
         return requestShutdown
     }
 
+    private func loadSetXboxCameraFrameProvider() -> XemuSetXboxCameraFrameProvider? {
+        if let setXboxCameraFrameProvider {
+            return setXboxCameraFrameProvider
+        }
+
+        guard let handle else {
+            return nil
+        }
+
+        guard let symbol = dlsym(handle, "xemu_ios_set_xbox_camera_frame_provider") else {
+            NSLog("xemu_ios_set_xbox_camera_frame_provider is not available")
+            return nil
+        }
+
+        NSLog("Resolved xemu_ios_set_xbox_camera_frame_provider")
+        let setter = unsafeBitCast(symbol, to: XemuSetXboxCameraFrameProvider.self)
+        setXboxCameraFrameProvider = setter
+        return setter
+    }
+
     private static func prepareRunLog(
         for plan: XemuLaunchPlan,
         arguments: [String]
@@ -236,6 +295,8 @@ final class EmulatorCoreRuntime: ObservableObject {
             JIT Path: \(plan.jitMode.title)
             JIT Handoff: \(plan.requiresJITHandoff ? "required" : "not required")
             Universal.js JIT: \(plan.universalJITEnabled ? "enabled" : "disabled")
+            Xbox Video Chat Camera: \(plan.xboxCameraEnabled ? "enabled" : "disabled")
+            Xbox Live Communicator: \(plan.xboxHeadsetMicEnabled ? "enabled" : "disabled")
             Config: \(plan.configURL.path)
             Arguments: \(arguments.joined(separator: " "))
 
@@ -270,6 +331,8 @@ final class EmulatorCoreRuntime: ObservableObject {
         arguments: [String],
         jitMode: RuntimeJITMode,
         universalJITEnabled: Bool,
+        xboxCameraEnabled: Bool,
+        xboxHeadsetMicEnabled: Bool,
         setExternalMetalLayer: XemuSetExternalMetalLayer?,
         requestShutdown: XemuRequestShutdown?,
         session: NativeMetalPresenterSession
@@ -290,6 +353,9 @@ final class EmulatorCoreRuntime: ObservableObject {
         setEnvironment([
             ("XEMU_IOS_JIT_MODE", jitMode.environmentValue),
             ("XEMU_IOS_UNIVERSAL_JIT", universalJITEnabled ? "1" : "0"),
+            ("XEMU_IOS_XBOX_CAMERA", xboxCameraEnabled ? "1" : "0"),
+            ("XEMU_IOS_XBOX_HEADSET_MIC", xboxHeadsetMicEnabled ? "1" : "0"),
+            ("XEMU_IOS_CAMERA_DEBUG", xboxCameraEnabled ? "1" : "0"),
             ("XEMU_IOS_VK_SWAPCHAIN", useVulkanSwapchain ? "1" : "0"),
             ("XEMU_IOS_NATIVE_METAL_PRESENTER", useVulkanSwapchain ? "1" : "0"),
             ("XEMU_IOS_PRESENTER_PORTRAIT_SCALE", "1.0"),
@@ -355,6 +421,8 @@ final class EmulatorCoreRuntime: ObservableObject {
         ])
         NSLog("XEMU_IOS_JIT_MODE=%@", jitMode.environmentValue)
         NSLog("XEMU_IOS_UNIVERSAL_JIT=%@", universalJITEnabled ? "1" : "0")
+        NSLog("XEMU_IOS_XBOX_CAMERA=%@", xboxCameraEnabled ? "1" : "0")
+        NSLog("XEMU_IOS_XBOX_HEADSET_MIC=%@", xboxHeadsetMicEnabled ? "1" : "0")
         NSLog("XEMU_IOS_VK_SWAPCHAIN=%@", useVulkanSwapchain ? "1" : "0")
         NSLog(
             "XEMU_IOS_PRESENT_PACING=%@ force30=%@ mode=%@ displaySync=%@ nominalFPS=%@ presentFPS=%@",
@@ -436,5 +504,272 @@ private enum RuntimeError: LocalizedError {
         case .dynamicLoader(let message):
             return message
         }
+    }
+}
+
+@MainActor
+private final class XboxPeripheralPermissionPrimer {
+    static let shared = XboxPeripheralPermissionPrimer()
+
+    private var cameraPrepared = false
+    private var microphonePrepared = false
+
+    func prepareIfNeeded(cameraEnabled: Bool, headsetMicEnabled: Bool) async {
+        guard cameraEnabled || headsetMicEnabled else {
+            return
+        }
+
+        var cameraGranted = !cameraEnabled || cameraPrepared
+        var microphoneGranted = !headsetMicEnabled || microphonePrepared
+
+        if cameraEnabled && !cameraPrepared {
+            cameraGranted = await AVCaptureDevice.requestAccess(for: .video)
+            cameraPrepared = cameraGranted
+        }
+
+        if headsetMicEnabled && !microphonePrepared {
+            microphoneGranted = await AVCaptureDevice.requestAccess(for: .audio)
+            microphonePrepared = microphoneGranted
+        }
+
+        NSLog(
+            "Xbox peripheral permissions camera=%@ microphone=%@",
+            cameraGranted ? "granted" : "denied",
+            microphoneGranted ? "granted" : "denied"
+        )
+
+        guard cameraGranted else {
+            return
+        }
+
+        if let frontCamera = AVCaptureDevice.default(
+            .builtInWideAngleCamera,
+            for: .video,
+            position: .front
+        ) {
+            NSLog("Xbox camera host source prepared: %@", frontCamera.localizedName)
+        } else {
+            NSLog("Xbox camera host source unavailable: no front camera")
+        }
+    }
+}
+
+private final class XboxCameraFrameSource: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+    static let shared = XboxCameraFrameSource()
+
+    private let sessionQueue = DispatchQueue(label: "DukeX.XboxCamera.Session")
+    private let sampleQueue = DispatchQueue(label: "DukeX.XboxCamera.Sample")
+    private let ciContext = CIContext(options: [.cacheIntermediates: false])
+    private let lock = NSLock()
+
+    private var session: AVCaptureSession?
+    private var isRunning = false
+    private var latestJPEG = Data()
+    private var latestWidth: UInt32 = 320
+    private var latestHeight: UInt32 = 240
+    private var latestSequence: UInt64 = 0
+    private var lastFrameTime = 0.0
+
+    private override init() {
+        latestJPEG = Self.makePlaceholderJPEG()
+        super.init()
+    }
+
+    func start() {
+        sessionQueue.async { [weak self] in
+            guard let self, !self.isRunning else {
+                return
+            }
+
+            let session = AVCaptureSession()
+            session.beginConfiguration()
+            if session.canSetSessionPreset(.low) {
+                session.sessionPreset = .low
+            }
+
+            guard let camera = AVCaptureDevice.default(
+                .builtInWideAngleCamera,
+                for: .video,
+                position: .front
+            ) else {
+                NSLog("Xbox camera host source unavailable: no front camera")
+                session.commitConfiguration()
+                return
+            }
+
+            do {
+                let input = try AVCaptureDeviceInput(device: camera)
+                if session.canAddInput(input) {
+                    session.addInput(input)
+                } else {
+                    NSLog("Xbox camera host source unavailable: cannot add input")
+                    session.commitConfiguration()
+                    return
+                }
+            } catch {
+                NSLog("Xbox camera host source failed: %@", error.localizedDescription)
+                session.commitConfiguration()
+                return
+            }
+
+            let output = AVCaptureVideoDataOutput()
+            output.videoSettings = [
+                kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
+            ]
+            output.alwaysDiscardsLateVideoFrames = true
+            output.setSampleBufferDelegate(self, queue: self.sampleQueue)
+
+            if session.canAddOutput(output) {
+                session.addOutput(output)
+            } else {
+                NSLog("Xbox camera host source unavailable: cannot add output")
+                session.commitConfiguration()
+                return
+            }
+
+            if let connection = output.connection(with: .video) {
+                if connection.isVideoOrientationSupported {
+                    connection.videoOrientation = .portrait
+                }
+                if connection.isVideoMirroringSupported {
+                    connection.isVideoMirrored = true
+                }
+            }
+
+            session.commitConfiguration()
+            self.session = session
+            self.isRunning = true
+            session.startRunning()
+            NSLog("Xbox camera host source streaming: %@", camera.localizedName)
+        }
+    }
+
+    func copyJPEGFrame(
+        to destination: UnsafeMutablePointer<UInt8>?,
+        capacity: Int,
+        width: UnsafeMutablePointer<UInt32>?,
+        height: UnsafeMutablePointer<UInt32>?,
+        sequence: UnsafeMutablePointer<UInt64>?
+    ) -> Int {
+        guard let destination, capacity > 0 else {
+            return 0
+        }
+
+        lock.lock()
+        let jpeg = latestJPEG
+        let frameWidth = latestWidth
+        let frameHeight = latestHeight
+        let frameSequence = latestSequence
+        lock.unlock()
+
+        guard !jpeg.isEmpty, jpeg.count <= capacity else {
+            return 0
+        }
+
+        jpeg.withUnsafeBytes { buffer in
+            if let baseAddress = buffer.baseAddress {
+                memcpy(destination, baseAddress, jpeg.count)
+            }
+        }
+        width?.pointee = frameWidth
+        height?.pointee = frameHeight
+        sequence?.pointee = frameSequence
+        return jpeg.count
+    }
+
+    private static func makePlaceholderJPEG() -> Data {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 320, height: 240))
+        let image = renderer.image { context in
+            UIColor(white: 0.02, alpha: 1.0).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 320, height: 240))
+
+            UIColor(white: 0.18, alpha: 1.0).setFill()
+            context.fill(CGRect(x: 0, y: 108, width: 320, height: 24))
+        }
+
+        return image.jpegData(compressionQuality: 0.55) ?? Data()
+    }
+
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        let now = CACurrentMediaTime()
+        guard now - lastFrameTime >= 1.0 / 15.0 else {
+            return
+        }
+        lastFrameTime = now
+
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
+              let jpeg = makeJPEG(from: pixelBuffer) else {
+            return
+        }
+
+        lock.lock()
+        latestJPEG = jpeg
+        latestWidth = 320
+        latestHeight = 240
+        latestSequence &+= 1
+        lock.unlock()
+    }
+
+    private func makeJPEG(from pixelBuffer: CVPixelBuffer) -> Data? {
+        let sourceImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let sourceExtent = sourceImage.extent
+        guard sourceExtent.width > 0, sourceExtent.height > 0 else {
+            return nil
+        }
+
+        let targetSize = CGSize(width: 320, height: 240)
+        let targetAspect = targetSize.width / targetSize.height
+        var crop = sourceExtent
+        let sourceAspect = sourceExtent.width / sourceExtent.height
+
+        if sourceAspect > targetAspect {
+            let croppedWidth = sourceExtent.height * targetAspect
+            crop.origin.x += (sourceExtent.width - croppedWidth) * 0.5
+            crop.size.width = croppedWidth
+        } else if sourceAspect < targetAspect {
+            let croppedHeight = sourceExtent.width / targetAspect
+            crop.origin.y += (sourceExtent.height - croppedHeight) * 0.5
+            crop.size.height = croppedHeight
+        }
+
+        let normalized = sourceImage
+            .cropped(to: crop)
+            .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+        let scaled = normalized.transformed(
+            by: CGAffineTransform(
+                scaleX: targetSize.width / crop.width,
+                y: targetSize.height / crop.height
+            )
+        )
+        let outputRect = CGRect(origin: .zero, size: targetSize)
+
+        guard let cgImage = ciContext.createCGImage(scaled, from: outputRect) else {
+            return nil
+        }
+
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+
+        let options = [
+            kCGImageDestinationLossyCompressionQuality: 0.55
+        ] as CFDictionary
+        CGImageDestinationAddImage(destination, cgImage, options)
+
+        guard CGImageDestinationFinalize(destination) else {
+            return nil
+        }
+
+        return data as Data
     }
 }

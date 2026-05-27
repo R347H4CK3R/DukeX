@@ -39,6 +39,10 @@
 	<true/>
 	<key>GCSupportsGameMode</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>DukeX can use the front camera to test Xbox Video Chat camera peripheral emulation.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>DukeX can use the microphone to test Xbox Live Communicator support.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIFileSharingEnabled</key>
