@@ -532,7 +532,9 @@ enum InsigniaAuthService {
         var request = URLRequest(url: baseURL.appendingPathComponent("auth/login"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(LoginRequest(email: email, password: password))
+        request.httpBody = try JSONEncoder().encode(
+            LoginRequest(email: email, password: password, specialAccess: "dukex")
+        )
 
         let response: LoginResponse = try await decodedResponse(for: request)
         guard response.success == true,
@@ -632,6 +634,13 @@ enum InsigniaAuthService {
     struct LoginRequest: Encodable {
         let email: String
         let password: String
+        let specialAccess: String
+
+        enum CodingKeys: String, CodingKey {
+            case email
+            case password
+            case specialAccess = "special_access"
+        }
     }
 
     struct LoginResponse: Decodable {
@@ -639,6 +648,7 @@ enum InsigniaAuthService {
         let username: String?
         let email: String?
         let sessionKey: String?
+        let specialAccess: String?
         let error: String?
     }
 

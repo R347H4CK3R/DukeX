@@ -188,13 +188,9 @@ struct ProfileView: View {
 
     private var poweredBySection: some View {
         Section {
-            Text("DukeX's profile section is powered by xb.live and Insignia services. An Insignia account and xb.live profile setup may be required to fully utilize DukeX's profile features.")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.center)
-            .lineLimit(3)
-            .minimumScaleFactor(0.88)
-            .allowsTightening(true)
+            JustifiedProfileFootnote(
+                text: "DukeX’s profile features are powered by xb.live and Insignia services. An Insignia account and xb.live profile setup may be required to access the full functionality of the Profiles section."
+            )
             .frame(maxWidth: .infinity)
             .padding(.vertical, 4)
         }
@@ -206,5 +202,49 @@ struct ProfileView: View {
             return "\(Int(hours.rounded())) hr"
         }
         return String(format: "%.1f hr", hours)
+    }
+}
+
+private struct JustifiedProfileFootnote: UIViewRepresentable {
+    let text: String
+
+    func makeUIView(context: Context) -> UILabel {
+        let label = UILabel()
+        label.numberOfLines = 3
+        label.adjustsFontForContentSizeCategory = true
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.88
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        applyText(to: label)
+        return label
+    }
+
+    func updateUIView(_ uiView: UILabel, context: Context) {
+        applyText(to: uiView)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UILabel, context: Context) -> CGSize? {
+        let width = proposal.width ?? UIScreen.main.bounds.width
+        uiView.preferredMaxLayoutWidth = width
+        let size = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        let maxHeight = UIFont.preferredFont(forTextStyle: .footnote).lineHeight * 3.0 + 2.0
+        return CGSize(width: width, height: min(size.height, maxHeight))
+    }
+
+    private func applyText(to label: UILabel) {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .justified
+        paragraphStyle.lineBreakMode = .byTruncatingTail
+
+        label.attributedText = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: UIFont.preferredFont(forTextStyle: .footnote),
+                .foregroundColor: UIColor.secondaryLabel,
+                .paragraphStyle: paragraphStyle
+            ]
+        )
     }
 }
