@@ -43,6 +43,16 @@ static bool pgraph_glsl_ios_depth_clamp_enabled(void)
 #endif
 }
 
+static bool pgraph_glsl_ios_disable_shader_depth_enabled(void)
+{
+#ifdef CONFIG_IOS
+    const char *env = getenv("XEMU_IOS_DISABLE_SHADER_DEPTH");
+    return env && env[0] && strcmp(env, "0") != 0;
+#else
+    return false;
+#endif
+}
+
 // TODO: https://github.com/xemu-project/xemu/issues/2260
 //   Investigate how color keying is handled for components with no alpha or
 //   only alpha.
@@ -1526,23 +1536,25 @@ static MString* psh_convert(struct PixelShader *ps)
      * due to rounding.)
      */
 
-    switch (ps->state->depth_format) {
-    case DEPTH_FORMAT_D16:
-        // 16-bit unsigned int
-        mstring_append(
-            ps->code,
-            "gl_FragDepth = floor(zvalue) / 65535.0;\n");
-        break;
-    case DEPTH_FORMAT_D24:
-        // 24-bit unsigned int
-        mstring_append(
-            ps->code,
-            "gl_FragDepth = uintBitsToFloat(floatBitsToUint(floor(zvalue) / 16777216.0) + 1u);\n");
-        break;
-    default:
-        // TODO: handle floating-point depth buffers properly
-        mstring_append(ps->code, "gl_FragDepth = zvalue / clipRange.y;\n");
-        break;
+    if (!pgraph_glsl_ios_disable_shader_depth_enabled()) {
+        switch (ps->state->depth_format) {
+        case DEPTH_FORMAT_D16:
+            // 16-bit unsigned int
+            mstring_append(
+                ps->code,
+                "gl_FragDepth = floor(zvalue) / 65535.0;\n");
+            break;
+        case DEPTH_FORMAT_D24:
+            // 24-bit unsigned int
+            mstring_append(
+                ps->code,
+                "gl_FragDepth = uintBitsToFloat(floatBitsToUint(floor(zvalue) / 16777216.0) + 1u);\n");
+            break;
+        default:
+            // TODO: handle floating-point depth buffers properly
+            mstring_append(ps->code, "gl_FragDepth = zvalue / clipRange.y;\n");
+            break;
+        }
     }
 
     MString *final = mstring_new();

@@ -376,6 +376,7 @@ final class EmulatorCoreRuntime: ObservableObject {
             ("XEMU_IOS_HOST_DEPTH_INTERPOLATION", "0"),
             ("XEMU_IOS_HOST_DEPTH_INTERPOLATION_MODE", "perspective"),
             ("XEMU_IOS_DEPTH_CLAMP", depthClampEnabled ? "1" : "0"),
+            ("XEMU_IOS_DISABLE_SHADER_DEPTH", "1"),
             ("XEMU_IOS_STRICT_SURFACE_TEXTURE_FORMATS", "0"),
             ("XEMU_IOS_FALLBACK_GENERATION_FILTER", "1"),
             ("XEMU_IOS_SKIP_GL_FINISH", "1"),
