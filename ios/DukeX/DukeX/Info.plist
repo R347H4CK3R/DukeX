@@ -43,6 +43,8 @@
 	<string>DukeX can use the front camera to test Xbox Video Chat camera peripheral emulation.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>DukeX can use the microphone to test Xbox Live Communicator support.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>DukeX can use device tilt to subtly move the Xbox Nostalgia Theme background.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIFileSharingEnabled</key>

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct GamesLibraryView: View {
+    @Environment(\.dukeXTheme) private var theme
     @EnvironmentObject private var store: EmulatorFileStore
     @AppStorage(GameLibrarySortMode.defaultsKey) private var sortModeRawValue = GameLibrarySortMode.title.rawValue
     @State private var favoriteGameKeys = GameLibraryFavorites.load()
@@ -40,11 +41,11 @@ struct GamesLibraryView: View {
                         }
                         .frame(maxWidth: .infinity, minHeight: GameLibraryGridMetrics.compactControlHeight)
                         .padding(.horizontal, 12)
-                        .background(Color(uiColor: .secondarySystemGroupedBackground),
+                        .background(theme.surfaceColor,
                                     in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+                                .strokeBorder(theme.borderColor, lineWidth: 1)
                         }
                     }
                     .buttonStyle(.plain)
@@ -108,9 +109,11 @@ struct GamesLibraryView: View {
                 .padding(.top, 18)
                 .padding(.bottom, 28)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
+            .background(Color.clear)
         }
-        .background(Color(uiColor: .systemGroupedBackground))
+        .background {
+            DukeXThemedBackgroundView()
+        }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button(action: importGames) {

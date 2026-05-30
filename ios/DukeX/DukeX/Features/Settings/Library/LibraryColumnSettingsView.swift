@@ -4,6 +4,14 @@ struct LibraryColumnSettingsView: View {
     @ObservedObject var store: EmulatorFileStore
 
     var body: some View {
+        Toggle(isOn: $store.xboxNostalgiaThemeEnabled) {
+            Label("Xbox Nostalgia Theme", systemImage: "xbox.logo")
+        }
+
+        Text("Uses an original Xbox-inspired animated background and green accent across the app.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+
         Toggle(isOn: $store.gameLibraryListViewEnabled) {
             Label("List View", systemImage: "list.bullet.rectangle")
         }

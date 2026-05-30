@@ -2,6 +2,8 @@ import SwiftUI
 import UIKit
 
 struct GameListRow: View {
+    @Environment(\.dukeXTheme) private var theme
+
     let game: LibraryFile
     let metadata: GameListMetadata?
     let recentlyPlayedTime: TimeInterval
@@ -142,10 +144,10 @@ struct GameListRow: View {
 
     private var rowBackground: some View {
         RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(Color(uiColor: .secondarySystemGroupedBackground))
+            .fill(theme.surfaceColor)
             .overlay {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+                    .strokeBorder(theme.borderColor, lineWidth: 1)
         }
     }
 

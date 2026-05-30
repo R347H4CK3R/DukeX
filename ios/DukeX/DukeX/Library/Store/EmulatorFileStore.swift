@@ -90,6 +90,11 @@ final class EmulatorFileStore: ObservableObject {
             UserDefaults.standard.set(gameLibraryListViewEnabled, forKey: Self.gameLibraryListViewEnabledKey)
         }
     }
+    @Published var xboxNostalgiaThemeEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(xboxNostalgiaThemeEnabled, forKey: DukeXTheme.xboxNostalgiaDefaultsKey)
+        }
+    }
     @Published var tbCacheSize: TBCacheSize {
         didSet {
             UserDefaults.standard.set(tbCacheSize.rawValue, forKey: TBCacheSize.defaultsKey)
@@ -208,6 +213,8 @@ final class EmulatorFileStore: ObservableObject {
         portraitGameLibraryColumnCount = GameLibraryColumnCount.currentPortrait
         landscapeGameLibraryColumnCount = GameLibraryColumnCount.currentLandscape
         gameLibraryListViewEnabled = UserDefaults.standard.object(forKey: Self.gameLibraryListViewEnabledKey) as? Bool ?? false
+        xboxNostalgiaThemeEnabled =
+            UserDefaults.standard.object(forKey: DukeXTheme.xboxNostalgiaDefaultsKey) as? Bool ?? false
         tbCacheSize = TBCacheSize.current
         forceInsigniaNATEnabled = UserDefaults.standard.object(forKey: Self.forceInsigniaNATKey) as? Bool ?? true
         natDNSServer = UserDefaults.standard.string(forKey: Self.natDNSServerKey) ?? NetworkSettings.insigniaDNSServer

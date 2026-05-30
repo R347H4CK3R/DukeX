@@ -41,6 +41,8 @@
 		C1000000000000000000000E /* StatsHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000001E /* StatsHUDView.swift */; };
 		C1000000000000000000000F /* NativeMetalPresenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000001F /* NativeMetalPresenterView.swift */; };
 		C10000000000000000000010 /* LayerConfigurators.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000020 /* LayerConfigurators.swift */; };
+		D20000000000000000000001 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000011 /* AppTheme.swift */; };
+		D20000000000000000000002 /* NostalgicDotBackgroundView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000012 /* NostalgicDotBackgroundView.swift */; };
 		E10000000000000000000001 /* LiveStatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000011 /* LiveStatusBadge.swift */; };
 		E10000000000000000000002 /* InsigniaLiveStatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000012 /* InsigniaLiveStatusStore.swift */; };
 		F10000000000000000000001 /* GameLibrarySortMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000011 /* GameLibrarySortMode.swift */; };
@@ -91,6 +93,8 @@
 		C1000000000000000000001E /* StatsHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsHUDView.swift; sourceTree = "<group>"; };
 		C1000000000000000000001F /* NativeMetalPresenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMetalPresenterView.swift; sourceTree = "<group>"; };
 		C10000000000000000000020 /* LayerConfigurators.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerConfigurators.swift; sourceTree = "<group>"; };
+		D20000000000000000000011 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
+		D20000000000000000000012 /* NostalgicDotBackgroundView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostalgicDotBackgroundView.swift; sourceTree = "<group>"; };
 		E10000000000000000000011 /* LiveStatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveStatusBadge.swift; sourceTree = "<group>"; };
 		E10000000000000000000012 /* InsigniaLiveStatusStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsigniaLiveStatusStore.swift; sourceTree = "<group>"; };
 		F10000000000000000000011 /* GameLibrarySortMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameLibrarySortMode.swift; sourceTree = "<group>"; };
@@ -149,6 +153,8 @@
 			children = (
 				A10000000000000000000011 /* DukeXApp.swift */,
 				A10000000000000000000012 /* ContentView.swift */,
+				D20000000000000000000011 /* AppTheme.swift */,
+				D20000000000000000000012 /* NostalgicDotBackgroundView.swift */,
 				C10000000000000000000011 /* AppNotifications.swift */,
 				C10000000000000000000012 /* GameControllerBootstrap.swift */,
 				C10000000000000000000013 /* MetalDiagnostics.swift */,
@@ -497,6 +503,8 @@
 			files = (
 				A10000000000000000000001 /* DukeXApp.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
+				D20000000000000000000001 /* AppTheme.swift in Sources */,
+				D20000000000000000000002 /* NostalgicDotBackgroundView.swift in Sources */,
 				C10000000000000000000001 /* AppNotifications.swift in Sources */,
 				C10000000000000000000002 /* GameControllerBootstrap.swift in Sources */,
 				C10000000000000000000003 /* MetalDiagnostics.swift in Sources */,

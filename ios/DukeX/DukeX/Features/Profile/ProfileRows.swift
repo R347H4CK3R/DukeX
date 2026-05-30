@@ -373,6 +373,7 @@ struct ProfileFriendDetailView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
             }
+            .dukeXThemedListRowBackground()
 
             Section("Profile") {
                 if let score = profile?.achievementScore {
@@ -388,6 +389,7 @@ struct ProfileFriendDetailView: View {
                     ProfileInfoRow(title: "Last Played", value: lastPlayed, systemImage: "clock")
                 }
             }
+            .dukeXThemedListRowBackground()
 
             if let imageURL = profile?.lastPlayedImageURL {
                 Section("Last Game") {
@@ -405,10 +407,12 @@ struct ProfileFriendDetailView: View {
                     .frame(height: 130)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
+                .dukeXThemedListRowBackground()
             }
         }
         .navigationTitle(friend.gamertag)
         .navigationBarTitleDisplayMode(.inline)
+        .dukeXThemedListBackground(dimming: 0.18)
     }
 
     private var statusLine: String {
@@ -461,9 +465,11 @@ struct ProfileMessageDetailView: View {
                 }
                 .padding(.vertical, 6)
             }
+            .dukeXThemedListRowBackground()
         }
         .navigationTitle("Message")
         .navigationBarTitleDisplayMode(.inline)
+        .dukeXThemedListBackground(dimming: 0.18)
     }
 
     private var iconName: String {
@@ -493,6 +499,7 @@ struct ProfileAchievementsView: View {
                                value: snapshot?.summaryText ?? profileCount.map(String.init) ?? "Not Synced",
                                systemImage: "medal")
             }
+            .dukeXThemedListRowBackground()
 
             Section("Games") {
                 if achievementGroups.isEmpty {
@@ -507,9 +514,11 @@ struct ProfileAchievementsView: View {
                     }
                 }
             }
+            .dukeXThemedListRowBackground()
         }
         .navigationTitle("Achievements")
         .navigationBarTitleDisplayMode(.inline)
+        .dukeXThemedListBackground(dimming: 0.18)
     }
 
     private var achievementGroups: [ProfileAchievementGameGroup] {
@@ -653,17 +662,20 @@ private struct ProfileAchievementGameView: View {
                 }
                 .frame(minHeight: 58)
             }
+            .dukeXThemedListRowBackground()
 
             if group.unlockedAchievements.isEmpty {
                 Section("Unlocked") {
                     ProfileEmptyRow(title: "No unlocked achievements", systemImage: "lock")
                 }
+                .dukeXThemedListRowBackground()
             } else {
                 Section("Unlocked") {
                     ForEach(group.unlockedAchievements) { achievement in
                         ProfileAchievementRow(achievement: achievement)
                     }
                 }
+                .dukeXThemedListRowBackground()
             }
 
             if !group.lockedAchievements.isEmpty {
@@ -672,10 +684,12 @@ private struct ProfileAchievementGameView: View {
                         ProfileAchievementRow(achievement: achievement, isLocked: true)
                     }
                 }
+                .dukeXThemedListRowBackground()
             }
         }
         .navigationTitle(group.title)
         .navigationBarTitleDisplayMode(.inline)
+        .dukeXThemedListBackground(dimming: 0.18)
     }
 }
 

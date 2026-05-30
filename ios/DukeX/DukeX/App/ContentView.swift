@@ -31,211 +31,234 @@ struct ContentView: View {
     @State private var selectedTab: MainTab = .games
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            NavigationStack {
-                GamesLibraryView(
-                    runtimeState: runtime.state,
-                    liveStatusStore: liveStatusStore,
-                    metadataStore: gameMetadataStore,
-                    launchDashboard: launchDashboard,
-                    launchGame: launchGame,
-                    importGames: { importTarget = .games },
-                    addCover: beginCoverSelection,
-                    copyLaunchLink: copyLaunchLink,
-                    importConfig: beginConfigImport,
-                    clearShaderCache: clearShaderCache,
-                    editGameData: { gameMetadataTarget = $0 },
-                    requestRemoveGame: { removalConfirmationTarget = $0 }
-                )
-                .navigationTitle("DukeX")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    appToolbar(showsRefreshButton: true)
-                }
-            }
-            .tabItem {
-                Label("Games", systemImage: "gamecontroller")
-            }
-            .tag(MainTab.games)
+        let theme = DukeXTheme(xboxNostalgiaEnabled: store.xboxNostalgiaThemeEnabled)
+        let tabBarBackgroundVisibility: Visibility = theme.xboxNostalgiaEnabled ? .hidden : .automatic
 
-            NavigationStack {
-                ProfileView(
-                    profileStore: profileStore,
-                    signIn: { isProfileLoginPresented = true },
-                    changeProfileImage: beginProfileImageSelection
-                )
-                .navigationTitle("DukeX")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    profileToolbar
-                }
+        ZStack {
+            if theme.xboxNostalgiaEnabled {
+                NostalgicDotBackgroundView()
+            } else {
+                theme.screenBackground
+                    .ignoresSafeArea()
             }
-            .tabItem {
-                Label("Profile", systemImage: "person.crop.circle")
-            }
-            .tag(MainTab.profile)
 
-            NavigationStack {
-                SettingsView(
-                    store: store,
-                    runtimeState: runtime.state,
-                    autoJITStatus: autoJIT.status,
-                    importSystemFiles: { importTarget = .systemFiles }
-                )
+            TabView(selection: $selectedTab) {
+                NavigationStack {
+                    GamesLibraryView(
+                        runtimeState: runtime.state,
+                        liveStatusStore: liveStatusStore,
+                        metadataStore: gameMetadataStore,
+                        launchDashboard: launchDashboard,
+                        launchGame: launchGame,
+                        importGames: { importTarget = .games },
+                        addCover: beginCoverSelection,
+                        copyLaunchLink: copyLaunchLink,
+                        importConfig: beginConfigImport,
+                        clearShaderCache: clearShaderCache,
+                        editGameData: { gameMetadataTarget = $0 },
+                        requestRemoveGame: { removalConfirmationTarget = $0 }
+                    )
                     .navigationTitle("DukeX")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
-                        appToolbar(showsRefreshButton: false)
+                        appToolbar(showsRefreshButton: true)
                     }
-            }
-            .tabItem {
-                Label("Settings", systemImage: "gearshape")
-            }
-            .tag(MainTab.settings)
-        }
-        .sheet(isPresented: $isProfileLoginPresented) {
-            ProfileLoginView(profileStore: profileStore)
-        }
-        .sheet(item: $gameMetadataTarget) { game in
-            GameMetadataEditorView(
-                game: game,
-                metadata: gameMetadataStore.metadata(for: game),
-                save: { metadata in
-                    gameMetadataStore.setMetadata(metadata, for: game)
                 }
-            )
-        }
-        .sheet(item: $importTarget) { target in
-            DocumentImportPicker(
-                target: target,
-                onPick: { urls in
-                    importTarget = nil
-                    store.importFiles(urls, to: target)
-                },
-                onCancel: {
-                    importTarget = nil
+                .tabItem {
+                    Label("Games", systemImage: "gamecontroller")
                 }
-            )
-        }
-        .fileImporter(
-            isPresented: Binding(
-                get: { configImportTarget != nil },
-                set: { if !$0 { configImportTarget = nil } }
-            ),
-            allowedContentTypes: [.item],
-            allowsMultipleSelection: false
-        ) { result in
-            let target = configImportTarget
-            configImportTarget = nil
+                .tag(MainTab.games)
 
-            guard let target else {
-                return
+                NavigationStack {
+                    ProfileView(
+                        profileStore: profileStore,
+                        signIn: { isProfileLoginPresented = true },
+                        changeProfileImage: beginProfileImageSelection
+                    )
+                    .navigationTitle("DukeX")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        profileToolbar
+                    }
+                }
+                .tabItem {
+                    Label("Profile", systemImage: "person.crop.circle")
+                }
+                .tag(MainTab.profile)
+
+                NavigationStack {
+                    SettingsView(
+                        store: store,
+                        runtimeState: runtime.state,
+                        autoJITStatus: autoJIT.status,
+                        importSystemFiles: { importTarget = .systemFiles }
+                    )
+                        .navigationTitle("DukeX")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            appToolbar(showsRefreshButton: false)
+                        }
+                }
+                .tabItem {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .tag(MainTab.settings)
             }
+            .background(Color.clear)
+            .toolbarBackground(tabBarBackgroundVisibility, for: .tabBar)
+            .sheet(isPresented: $isProfileLoginPresented) {
+                ProfileLoginView(profileStore: profileStore)
+            }
+            .sheet(item: $gameMetadataTarget) { game in
+                GameMetadataEditorView(
+                    game: game,
+                    metadata: gameMetadataStore.metadata(for: game),
+                    save: { metadata in
+                        gameMetadataStore.setMetadata(metadata, for: game)
+                    }
+                )
+            }
+            .sheet(item: $importTarget) { target in
+                DocumentImportPicker(
+                    target: target,
+                    onPick: { urls in
+                        importTarget = nil
+                        store.importFiles(urls, to: target)
+                    },
+                    onCancel: {
+                        importTarget = nil
+                    }
+                )
+            }
+            .fileImporter(
+                isPresented: Binding(
+                    get: { configImportTarget != nil },
+                    set: { if !$0 { configImportTarget = nil } }
+                ),
+                allowedContentTypes: [.item],
+                allowsMultipleSelection: false
+            ) { result in
+                let target = configImportTarget
+                configImportTarget = nil
 
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else {
+                guard let target else {
                     return
                 }
-                do {
-                    try store.importCustomConfig(url, for: target)
-                } catch {
+
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else {
+                        return
+                    }
+                    do {
+                        try store.importCustomConfig(url, for: target)
+                    } catch {
+                        store.message = UserMessage(title: "Config Not Imported", detail: error.localizedDescription)
+                    }
+                case .failure(let error):
                     store.message = UserMessage(title: "Config Not Imported", detail: error.localizedDescription)
                 }
-            case .failure(let error):
-                store.message = UserMessage(title: "Config Not Imported", detail: error.localizedDescription)
             }
-        }
-        .photosPicker(
-            isPresented: $isCoverPickerPresented,
-            selection: $selectedCoverItem,
-            matching: .images
-        )
-        .onChange(of: selectedCoverItem) { _, item in
-            handleSelectedCover(item)
-        }
-        .photosPicker(
-            isPresented: $isProfileImagePickerPresented,
-            selection: $selectedProfileImageItem,
-            matching: .images
-        )
-        .onChange(of: selectedProfileImageItem) { _, item in
-            handleSelectedProfileImage(item)
-        }
-        .alert(item: $store.message) { message in
-            Alert(
-                title: Text(message.title),
-                message: Text(message.detail),
-                dismissButton: .default(Text("OK"))
+            .photosPicker(
+                isPresented: $isCoverPickerPresented,
+                selection: $selectedCoverItem,
+                matching: .images
             )
-        }
-        .confirmationDialog(
-            "Remove Game",
-            isPresented: Binding(
-                get: { removalConfirmationTarget != nil },
-                set: { if !$0 { removalConfirmationTarget = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            if let game = removalConfirmationTarget {
-                Button("Remove \(game.displayName)", role: .destructive) {
-                    removeGame(game)
+            .onChange(of: selectedCoverItem) { _, item in
+                handleSelectedCover(item)
+            }
+            .photosPicker(
+                isPresented: $isProfileImagePickerPresented,
+                selection: $selectedProfileImageItem,
+                matching: .images
+            )
+            .onChange(of: selectedProfileImageItem) { _, item in
+                handleSelectedProfileImage(item)
+            }
+            .alert(item: $store.message) { message in
+                Alert(
+                    title: Text(message.title),
+                    message: Text(message.detail),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
+            .confirmationDialog(
+                "Remove Game",
+                isPresented: Binding(
+                    get: { removalConfirmationTarget != nil },
+                    set: { if !$0 { removalConfirmationTarget = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                if let game = removalConfirmationTarget {
+                    Button("Remove \(game.displayName)", role: .destructive) {
+                        removeGame(game)
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    removalConfirmationTarget = nil
+                }
+            } message: {
+                if let game = removalConfirmationTarget {
+                    Text("Are you sure you would like to remove \(game.displayName) and all of its data?")
                 }
             }
-            Button("Cancel", role: .cancel) {
-                removalConfirmationTarget = nil
+            .sheet(item: $store.launchPlan) { plan in
+                LaunchPlanView(plan: plan)
             }
-        } message: {
-            if let game = removalConfirmationTarget {
-                Text("Are you sure you would like to remove \(game.displayName) and all of its data?")
-            }
-        }
-        .sheet(item: $store.launchPlan) { plan in
-            LaunchPlanView(plan: plan)
-        }
-        .onAppear {
-            runtime.refresh()
-            liveStatusStore.refresh()
-            if !environmentRequestsAutoLaunch {
-                resumePendingAutoJITLaunchIfNeeded()
-            }
-        }
-        .task {
-            await store.prepareAndRefresh()
-            runtime.refresh()
-            if environmentRequestsAutoLaunch && !autoLaunchAttempted {
-                autoJIT.clearPendingForFreshAutomaticLaunch()
-            }
-            if resumePendingAutoJITLaunchIfNeeded() {
-                return
-            }
-            autoLaunchIfRequested()
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            switch newPhase {
-            case .active:
-                autoJIT.markAppReturnedFromStikDebugIfPending()
-                resumePendingAutoJITLaunchIfNeeded()
-            case .inactive, .background:
-                autoJIT.markAppLeftForStikDebugIfPending()
-            @unknown default:
-                break
-            }
-        }
-        .onChange(of: selectedTab) { _, newTab in
-            if newTab == .games {
+            .onAppear {
+                runtime.refresh()
                 liveStatusStore.refresh()
-            } else if newTab == .profile {
-                profileStore.refresh()
-            } else if newTab == .settings {
-                refreshLibraryForSettings()
+                if !environmentRequestsAutoLaunch {
+                    resumePendingAutoJITLaunchIfNeeded()
+                }
+            }
+            .task {
+                await store.prepareAndRefresh()
+                runtime.refresh()
+                if environmentRequestsAutoLaunch && !autoLaunchAttempted {
+                    autoJIT.clearPendingForFreshAutomaticLaunch()
+                }
+                if resumePendingAutoJITLaunchIfNeeded() {
+                    return
+                }
+                autoLaunchIfRequested()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                switch newPhase {
+                case .active:
+                    autoJIT.markAppReturnedFromStikDebugIfPending()
+                    resumePendingAutoJITLaunchIfNeeded()
+                case .inactive, .background:
+                    autoJIT.markAppLeftForStikDebugIfPending()
+                @unknown default:
+                    break
+                }
+            }
+            .onChange(of: selectedTab) { _, newTab in
+                if newTab == .games {
+                    liveStatusStore.refresh()
+                } else if newTab == .profile {
+                    profileStore.refresh()
+                } else if newTab == .settings {
+                    refreshLibraryForSettings()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .dukeXReturnToGamesRequested)) { _ in
+                selectedTab = .games
+            }
+            .onOpenURL { url in
+                handleLaunchLink(url)
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .dukeXReturnToGamesRequested)) { _ in
-            selectedTab = .games
+        .environment(\.dukeXTheme, theme)
+        .tint(theme.accentColor)
+        .accentColor(theme.accentColor)
+        .onAppear {
+            DukeXTheme.applyUIKitAppearance(xboxNostalgiaEnabled: store.xboxNostalgiaThemeEnabled)
         }
-        .onOpenURL { url in
-            handleLaunchLink(url)
+        .onChange(of: store.xboxNostalgiaThemeEnabled) { _, isEnabled in
+            DukeXTheme.applyUIKitAppearance(xboxNostalgiaEnabled: isEnabled)
         }
     }
 

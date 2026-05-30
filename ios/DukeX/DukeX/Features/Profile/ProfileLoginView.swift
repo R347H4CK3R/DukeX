@@ -38,6 +38,7 @@ struct ProfileLoginView: View {
                 } footer: {
                     Text("DukeX stores only the session token returned by the unofficial Insignia auth service. Your password is sent only for sign-in and is not saved.")
                 }
+                .dukeXThemedListRowBackground()
 
                 Section {
                     Button {
@@ -66,6 +67,7 @@ struct ProfileLoginView: View {
                         .textInputAutocapitalization(.words)
                         .autocorrectionDisabled()
                 }
+                .dukeXThemedListRowBackground()
 
                 Section {
                     Label {
@@ -76,9 +78,11 @@ struct ProfileLoginView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 }
+                .dukeXThemedListRowBackground()
             }
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
+            .dukeXThemedListBackground()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {

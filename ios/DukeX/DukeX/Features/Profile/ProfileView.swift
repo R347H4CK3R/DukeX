@@ -17,6 +17,7 @@ struct ProfileView: View {
             poweredBySection
         }
         .listStyle(.insetGrouped)
+        .dukeXThemedListBackground()
     }
 
     @ViewBuilder
@@ -32,6 +33,7 @@ struct ProfileView: View {
                 clearProfileImage: profileStore.clearProfileImage
             )
         }
+        .dukeXThemedListRowBackground()
 
         if session.isAuthenticated {
             authenticatedSections(session: session, snapshot: snapshot)
@@ -69,6 +71,7 @@ struct ProfileView: View {
                            value: profileStore.lastRefreshedText,
                            systemImage: "clock")
         }
+        .dukeXThemedListRowBackground()
 
         Section("Friends") {
             let friends = snapshot?.friends ?? []
@@ -84,6 +87,7 @@ struct ProfileView: View {
                 }
             }
         }
+        .dukeXThemedListRowBackground()
 
         Section("Messages") {
             let messages = profileStore.unviewedMessages(from: snapshot?.messages ?? [])
@@ -102,6 +106,7 @@ struct ProfileView: View {
                 }
             }
         }
+        .dukeXThemedListRowBackground()
 
         activeGamesSection
 
@@ -115,6 +120,7 @@ struct ProfileView: View {
                 }
             }
         }
+        .dukeXThemedListRowBackground()
     }
 
     private var gamertagOnlySections: some View {
@@ -124,6 +130,7 @@ struct ProfileView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+            .dukeXThemedListRowBackground()
 
             Section("Insignia Status") {
                 ProfileInfoRow(title: "Users Online",
@@ -136,6 +143,7 @@ struct ProfileView: View {
                                value: profileStore.gamesSupportedText,
                                systemImage: "gamecontroller")
             }
+            .dukeXThemedListRowBackground()
 
             activeGamesSection
         }
@@ -171,6 +179,7 @@ struct ProfileView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 34)
         }
+        .dukeXThemedListRowBackground()
     }
 
     private var activeGamesSection: some View {
@@ -184,6 +193,7 @@ struct ProfileView: View {
                 }
             }
         }
+        .dukeXThemedListRowBackground()
     }
 
     private var poweredBySection: some View {
@@ -194,6 +204,7 @@ struct ProfileView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 4)
         }
+        .dukeXThemedListRowBackground()
     }
 
     private func playTimeText(_ minutes: Double) -> String {

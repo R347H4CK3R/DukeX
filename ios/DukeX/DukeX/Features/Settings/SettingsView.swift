@@ -36,6 +36,7 @@ struct SettingsView: View {
                 CoreStatusRow(state: runtimeState)
                 AutoJITStatusRow(status: autoJITStatus)
             }
+            .dukeXThemedListRowBackground()
 
             Section("Display") {
                 Toggle(isOn: $store.statsHUDEnabled) {
@@ -83,6 +84,7 @@ struct SettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+            .dukeXThemedListRowBackground()
 
             Section("Peripherals") {
                 Toggle(isOn: $store.xboxHeadsetMicPeripheralEnabled) {
@@ -103,10 +105,12 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .disabled(true)
             }
+            .dukeXThemedListRowBackground()
 
             Section("Library") {
                 LibraryColumnSettingsView(store: store)
             }
+            .dukeXThemedListRowBackground()
 
             Section("Advanced") {
                 Picker(selection: $store.tbCacheSize) {
@@ -122,6 +126,7 @@ struct SettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+            .dukeXThemedListRowBackground()
 
             Section("Network") {
                 Toggle(isOn: $store.forceInsigniaNATEnabled) {
@@ -166,6 +171,7 @@ struct SettingsView: View {
                 .disabled(store.forceInsigniaNATEnabled)
                 .opacity(store.forceInsigniaNATEnabled ? 0.45 : 1)
             }
+            .dukeXThemedListRowBackground()
 
             Section("System Files") {
                 AssetRow(title: "Flash BIOS", file: store.bios, missingSystemImage: "memorychip")
@@ -177,6 +183,7 @@ struct SettingsView: View {
                     Label("Import System Files", systemImage: "tray.and.arrow.down")
                 }
             }
+            .dukeXThemedListRowBackground()
 
             Section("Folders") {
                 FolderRow(title: "BIOS",
@@ -189,6 +196,7 @@ struct SettingsView: View {
                           url: store.coversDirectoryURL,
                           storageUsed: store.folderStorageUsage.covers.displayText)
             }
+            .dukeXThemedListRowBackground()
 
             Section {
                 VStack(spacing: 4) {
@@ -204,6 +212,8 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
             }
+            .dukeXThemedListRowBackground()
         }
+        .dukeXThemedListBackground()
     }
 }
