@@ -106,9 +106,17 @@ struct LibraryColumnSettingsView: View {
             Label("List View", systemImage: "list.bullet.rectangle")
         }
 
+        Text("List view presents the game library as rows. Game details and summaries can be added by long-pressing a game in List View and choosing \"Add Game Data\".")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+
         VStack(alignment: .leading, spacing: 8) {
             Label("Portrait View", systemImage: "rectangle.portrait")
                 .font(.subheadline.weight(.semibold))
+
+            Text("Grid view defaults to two columns of games in portrait orientation.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
 
             Picker("Portrait View Columns", selection: $store.portraitGameLibraryColumnCount) {
                 ForEach(GameLibraryColumnCount.portraitOptions) { count in
@@ -124,6 +132,10 @@ struct LibraryColumnSettingsView: View {
             Label("Landscape View", systemImage: "rectangle")
                 .font(.subheadline.weight(.semibold))
 
+            Text("Grid view defaults to three columns of games in landscape orientation.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
             Picker("Landscape View Columns", selection: $store.landscapeGameLibraryColumnCount) {
                 ForEach(GameLibraryColumnCount.landscapeOptions) { count in
                     Text(count.title).tag(count)
@@ -134,8 +146,5 @@ struct LibraryColumnSettingsView: View {
         .disabled(store.gameLibraryListViewEnabled)
         .opacity(store.gameLibraryListViewEnabled ? 0.45 : 1)
 
-        Text("Grid view defaults to 2 portrait columns and 3 landscape columns.")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
     }
 }
