@@ -32,6 +32,12 @@ final class NativeMetalPresenterView: UIView {
         updateDrawableSize()
     }
 
+    func refreshDrawableSize() {
+        setNeedsLayout()
+        layoutIfNeeded()
+        updateDrawableSize()
+    }
+
     func configureMetalLayer() {
         let layer = metalLayer
         layer.device = MTLCreateSystemDefaultDevice()
@@ -53,6 +59,14 @@ final class NativeMetalPresenterView: UIView {
 
         let width = max(1.0, bounds.width * scale)
         let height = max(1.0, bounds.height * scale)
-        metalLayer.drawableSize = CGSize(width: width, height: height)
+        let size = CGSize(width: width, height: height)
+        guard metalLayer.drawableSize != size else {
+            return
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        metalLayer.drawableSize = size
+        CATransaction.commit()
     }
 }

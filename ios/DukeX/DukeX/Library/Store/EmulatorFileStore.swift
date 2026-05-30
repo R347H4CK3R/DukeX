@@ -46,11 +46,6 @@ final class EmulatorFileStore: ObservableObject {
             MetalDiagnostics.configurePerformanceHUD()
         }
     }
-    @Published var statsHUDEnabled: Bool {
-        didSet {
-            UserDefaults.standard.set(statsHUDEnabled, forKey: Self.statsHUDEnabledKey)
-        }
-    }
     @Published var forceThirtyFPSLockEnabled: Bool {
         didSet {
             UserDefaults.standard.set(forceThirtyFPSLockEnabled, forKey: Self.forceThirtyFPSLockEnabledKey)
@@ -136,7 +131,6 @@ final class EmulatorFileStore: ObservableObject {
     static let selectedGameIDKey = "SelectedGameID"
     static let selectedGameNameKey = "SelectedGameName"
     static let metalHUDEnabledKey = "DukeXMetalHUDEnabled"
-    static let statsHUDEnabledKey = "DukeXStatsHUDEnabled"
     static let forceThirtyFPSLockEnabledKey = "DukeXForceThirtyFPSLockEnabled"
     static let depthClampEnabledKey = "DukeXDepthClampEnabled"
     static let xboxCameraPeripheralEnabledKey = "DukeXXboxCameraPeripheralEnabled"
@@ -203,9 +197,8 @@ final class EmulatorFileStore: ObservableObject {
         autoLaunchDashboardOnOpenEnabled = UserDefaults.standard.object(forKey: Self.autoLaunchDashboardOnOpenKey) as? Bool ?? false
         presentPacingMode = PresentPacingMode.current
         metalHUDEnabled = UserDefaults.standard.object(forKey: Self.metalHUDEnabledKey) as? Bool ?? false
-        statsHUDEnabled = UserDefaults.standard.object(forKey: Self.statsHUDEnabledKey) as? Bool ?? true
         forceThirtyFPSLockEnabled = UserDefaults.standard.object(forKey: Self.forceThirtyFPSLockEnabledKey) as? Bool ?? false
-        depthClampEnabled = UserDefaults.standard.object(forKey: Self.depthClampEnabledKey) as? Bool ?? false
+        depthClampEnabled = UserDefaults.standard.object(forKey: Self.depthClampEnabledKey) as? Bool ?? true
         xboxCameraPeripheralEnabled =
             UserDefaults.standard.object(forKey: Self.xboxCameraPeripheralEnabledKey) as? Bool ?? false
         xboxHeadsetMicPeripheralEnabled =

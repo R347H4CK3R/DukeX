@@ -96,6 +96,8 @@ void *xemu_ios_get_metal_layer(void);
 void xemu_ios_set_external_metal_layer(void *metal_layer);
 void xemu_ios_request_shutdown(void);
 void xemu_ios_destroy_metal_view(void);
+typedef void (*XemuIOSGameplayTouchCallback)(void);
+void xemu_ios_set_gameplay_touch_callback(XemuIOSGameplayTouchCallback callback);
 
 bool xemu_ios_vulkan_presenter_enabled(void)
 {
@@ -111,12 +113,27 @@ bool xemu_ios_vulkan_presenter_enabled(void)
 
 static SDL_MetalView ios_metal_view;
 static void *ios_external_metal_layer;
+static XemuIOSGameplayTouchCallback ios_gameplay_touch_callback;
 
 void xemu_ios_set_external_metal_layer(void *metal_layer)
 {
     ios_external_metal_layer = metal_layer;
     IOS_LOG("external CAMetalLayer %s %p",
             metal_layer ? "set" : "cleared", metal_layer);
+}
+
+__attribute__((visibility("default")))
+void xemu_ios_set_gameplay_touch_callback(XemuIOSGameplayTouchCallback callback)
+{
+    ios_gameplay_touch_callback = callback;
+    IOS_LOG("gameplay touch callback %s", callback ? "set" : "cleared");
+}
+
+static void xemu_ios_notify_gameplay_touch(void)
+{
+    if (xemu_ios_vulkan_presenter_enabled() && ios_gameplay_touch_callback) {
+        ios_gameplay_touch_callback();
+    }
 }
 
 __attribute__((visibility("default")))
@@ -1445,8 +1462,17 @@ static void poll_events(struct xemu_console *scon)
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
         case SDL_EVENT_MOUSE_BUTTON_UP:
+#ifdef CONFIG_IOS
+            xemu_ios_notify_gameplay_touch();
+#endif
             if (mouse) break;
             handle_mousebutton(ev);
+            break;
+        case SDL_EVENT_FINGER_DOWN:
+        case SDL_EVENT_FINGER_UP:
+#ifdef CONFIG_IOS
+            xemu_ios_notify_gameplay_touch();
+#endif
             break;
         case SDL_EVENT_MOUSE_WHEEL:
             if (mouse) break;

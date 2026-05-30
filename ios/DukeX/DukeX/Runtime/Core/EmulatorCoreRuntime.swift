@@ -100,6 +100,7 @@ final class EmulatorCoreRuntime: ObservableObject {
             let setExternalMetalLayer = loadSetExternalMetalLayer()
             let requestShutdown = loadRequestShutdown()
             let setXboxCameraFrameProvider = loadSetXboxCameraFrameProvider()
+            let restartIntent = CoreRestartIntent()
 
             let logURL = Self.prepareRunLog(for: plan, arguments: arguments)
             state = .running(plan.gameName)
@@ -129,6 +130,7 @@ final class EmulatorCoreRuntime: ObservableObject {
                     xboxHeadsetMicEnabled: xboxHeadsetMicEnabled,
                     setExternalMetalLayer: setExternalMetalLayer,
                     requestShutdown: requestShutdown,
+                    restartIntent: restartIntent,
                     session: NativeMetalPresenterSession(
                         title: plan.gameName,
                         isDashboard: plan.isDashboard
@@ -138,6 +140,16 @@ final class EmulatorCoreRuntime: ObservableObject {
                 Task { @MainActor [weak self] in
                     NSLog("Xemu core exited with status %d", status)
                     self?.state = .exited(status)
+                    guard restartIntent.isRequested else {
+                        return
+                    }
+
+                    NSLog("Restarting Xemu core for %@", plan.gameName)
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    guard let self, self.state.canLaunch else {
+                        return
+                    }
+                    self.launch(plan: plan)
                 }
             }
         } catch {
@@ -335,6 +347,7 @@ final class EmulatorCoreRuntime: ObservableObject {
         xboxHeadsetMicEnabled: Bool,
         setExternalMetalLayer: XemuSetExternalMetalLayer?,
         requestShutdown: XemuRequestShutdown?,
+        restartIntent: CoreRestartIntent,
         session: NativeMetalPresenterSession
     ) -> Int32 {
         MetalDiagnostics.configurePerformanceHUD()
@@ -344,7 +357,7 @@ final class EmulatorCoreRuntime: ObservableObject {
         let forceThirtyFPSLock =
             UserDefaults.standard.object(forKey: EmulatorFileStore.forceThirtyFPSLockEnabledKey) as? Bool ?? false
         let depthClampEnabled =
-            UserDefaults.standard.object(forKey: EmulatorFileStore.depthClampEnabledKey) as? Bool ?? false
+            UserDefaults.standard.object(forKey: EmulatorFileStore.depthClampEnabledKey) as? Bool ?? true
         let effectivePresentFPS = forceThirtyFPSLock ? "30" : presentPacingMode.presentFPS
         let effectivePresentMode = forceThirtyFPSLock ? "fifo" : presentPacingMode.vulkanPresentMode
         let effectiveDisplaySync = forceThirtyFPSLock ? true : presentPacingMode.displaySyncEnabled
@@ -444,6 +457,10 @@ final class EmulatorCoreRuntime: ObservableObject {
                 onExitRequested: {
                     NotificationCenter.default.post(name: .dukeXReturnToGamesRequested, object: nil)
                     requestShutdown?()
+                },
+                onRestartRequested: {
+                    restartIntent.request()
+                    requestShutdown?()
                 }
             ) {
                 setExternalMetalLayer?(layerPointer)
@@ -505,6 +522,25 @@ private enum RuntimeError: LocalizedError {
         case .dynamicLoader(let message):
             return message
         }
+    }
+}
+
+private final class CoreRestartIntent {
+    private let lock = NSLock()
+    private var requested = false
+
+    var isRequested: Bool {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        return requested
+    }
+
+    func request() {
+        lock.lock()
+        requested = true
+        lock.unlock()
     }
 }
 

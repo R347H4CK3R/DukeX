@@ -39,11 +39,11 @@ struct SettingsView: View {
             .dukeXThemedListRowBackground()
 
             Section("Display") {
-                Toggle(isOn: $store.statsHUDEnabled) {
-                    Label("Stats HUD", systemImage: "waveform.path.ecg.rectangle")
+                Toggle(isOn: $store.metalHUDEnabled) {
+                    Label("Metal HUD", systemImage: "gauge.with.dots.needle.67percent")
                 }
 
-                Text("Shows FPS, CPU, memory, and thermal state while a game is running.")
+                Text("Off by default. Changes apply the next time the emulator view starts.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
@@ -60,14 +60,6 @@ struct SettingsView: View {
                 }
 
                 Text("Clamps guest shader depth on iOS instead of discarding fragments outside the guest clip range. Changes apply on the next launch.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                Toggle(isOn: $store.metalHUDEnabled) {
-                    Label("Metal HUD", systemImage: "gauge.with.dots.needle.67percent")
-                }
-
-                Text("Off by default. Changes apply the next time the emulator view starts.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
@@ -122,7 +114,7 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
 
-                Text("Controls the JIT translated block cache. 128 MB is the current default; changes apply on the next launch.")
+                Text("Controls the JIT translated block cache. 64 MB is the current default; changes apply on the next launch.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

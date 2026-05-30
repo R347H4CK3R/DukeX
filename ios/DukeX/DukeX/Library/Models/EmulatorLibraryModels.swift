@@ -328,8 +328,8 @@ enum PresentPacingMode: String, CaseIterable, Identifiable {
     static let defaultsKey = "PresentPacingMode"
 
     static var current: PresentPacingMode {
-        let rawValue = UserDefaults.standard.string(forKey: defaultsKey) ?? PresentPacingMode.speed.rawValue
-        return PresentPacingMode(rawValue: rawValue) ?? .speed
+        let rawValue = UserDefaults.standard.string(forKey: defaultsKey) ?? PresentPacingMode.accurate.rawValue
+        return PresentPacingMode(rawValue: rawValue) ?? .accurate
     }
 
     var title: String {
@@ -403,7 +403,7 @@ enum TBCacheSize: Int, CaseIterable, Identifiable {
 
     static var current: TBCacheSize {
         let storedValue = UserDefaults.standard.integer(forKey: defaultsKey)
-        return TBCacheSize(rawValue: storedValue) ?? .mb128
+        return TBCacheSize(rawValue: storedValue) ?? .mb64
     }
 
     var title: String {

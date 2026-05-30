@@ -3,16 +3,24 @@ import UIKit
 final class GameplayExitOverlayView: UIView {
     private let session: NativeMetalPresenterSession
     private let onExitRequested: () -> Void
+    private let onRestartRequested: () -> Void
     private let panelView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
     private let titleLabel = UILabel()
     private let messageLabel = UILabel()
+    private let restartButton = UIButton(type: .system)
     private let exitButton = UIButton(type: .system)
     private let cancelButton = UIButton(type: .system)
-    private var exitHasBeenRequested = false
+    private var actionHasBeenRequested = false
+    private var suppressShowUntil: CFTimeInterval = 0
 
-    init(session: NativeMetalPresenterSession, onExitRequested: @escaping () -> Void) {
+    init(
+        session: NativeMetalPresenterSession,
+        onExitRequested: @escaping () -> Void,
+        onRestartRequested: @escaping () -> Void
+    ) {
         self.session = session
         self.onExitRequested = onExitRequested
+        self.onRestartRequested = onRestartRequested
         super.init(frame: .zero)
         configure()
     }
@@ -26,7 +34,9 @@ final class GameplayExitOverlayView: UIView {
     }
 
     @objc func show() {
-        guard !isVisible else {
+        guard !isVisible,
+              !actionHasBeenRequested,
+              CACurrentMediaTime() >= suppressShowUntil else {
             return
         }
 
@@ -39,10 +49,11 @@ final class GameplayExitOverlayView: UIView {
     }
 
     @objc func hide() {
-        guard isVisible, !exitHasBeenRequested else {
+        guard isVisible, !actionHasBeenRequested else {
             return
         }
 
+        suppressShowUntil = CACurrentMediaTime() + 0.35
         UIView.animate(withDuration: 0.16, delay: 0, options: [.curveEaseIn]) {
             self.alpha = 0
         } completion: { _ in
@@ -54,6 +65,55 @@ final class GameplayExitOverlayView: UIView {
 
     private var isVisible: Bool {
         !isHidden && alpha > 0
+    }
+
+    var isMenuVisible: Bool {
+        isVisible
+    }
+
+    func refreshLayoutForGeometryChange() {
+        superview?.setNeedsLayout()
+        superview?.layoutIfNeeded()
+        setNeedsLayout()
+        layoutIfNeeded()
+        panelView.setNeedsLayout()
+        panelView.layoutIfNeeded()
+    }
+
+    @discardableResult
+    func handleRawTouchEnded(from event: UIEvent) -> Bool {
+        guard isVisible,
+              let touches = event.allTouches else {
+            return false
+        }
+
+        refreshLayoutForGeometryChange()
+        let restartFrame = restartButton.convert(restartButton.bounds, to: self).insetBy(dx: -12, dy: -10)
+        let exitFrame = exitButton.convert(exitButton.bounds, to: self).insetBy(dx: -12, dy: -10)
+        let cancelFrame = cancelButton.convert(cancelButton.bounds, to: self).insetBy(dx: -12, dy: -10)
+        let panelFrame = panelView.convert(panelView.bounds, to: self)
+
+        for touch in touches where touch.phase == .ended {
+            let point = touch.location(in: self)
+            if restartFrame.contains(point) {
+                confirmRestart()
+                return true
+            }
+            if exitFrame.contains(point) {
+                confirmExit()
+                return true
+            }
+            if cancelFrame.contains(point) {
+                hide()
+                return true
+            }
+            if !panelFrame.contains(point) {
+                hide()
+                return true
+            }
+        }
+
+        return false
     }
 
     private func configure() {
@@ -73,7 +133,7 @@ final class GameplayExitOverlayView: UIView {
         panelView.layer.masksToBounds = true
         addSubview(panelView)
 
-        let stack = UIStackView(arrangedSubviews: [titleLabel, messageLabel, exitButton, cancelButton])
+        let stack = UIStackView(arrangedSubviews: [titleLabel, messageLabel, restartButton, exitButton, cancelButton])
         stack.axis = .vertical
         stack.alignment = .fill
         stack.spacing = 12
@@ -93,6 +153,12 @@ final class GameplayExitOverlayView: UIView {
         messageLabel.font = .preferredFont(forTextStyle: .subheadline)
         messageLabel.numberOfLines = 0
         messageLabel.textAlignment = .center
+
+        restartButton.configuration = primaryButtonConfiguration(
+            title: session.isDashboard ? "Restart Dashboard" : "Restart Game",
+            color: .systemGreen
+        )
+        restartButton.addTarget(self, action: #selector(confirmRestart), for: .touchUpInside)
 
         exitButton.configuration = primaryButtonConfiguration(
             title: session.isDashboard ? "Exit Dashboard" : "Exit Game",
@@ -118,6 +184,7 @@ final class GameplayExitOverlayView: UIView {
             stack.trailingAnchor.constraint(equalTo: panelView.contentView.trailingAnchor, constant: -18),
             stack.topAnchor.constraint(equalTo: panelView.contentView.topAnchor, constant: 18),
             stack.bottomAnchor.constraint(equalTo: panelView.contentView.bottomAnchor, constant: -18),
+            restartButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
             exitButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
             cancelButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
         ])
@@ -126,11 +193,12 @@ final class GameplayExitOverlayView: UIView {
     }
 
     @objc private func confirmExit() {
-        guard !exitHasBeenRequested else {
+        guard !actionHasBeenRequested else {
             return
         }
 
-        exitHasBeenRequested = true
+        actionHasBeenRequested = true
+        restartButton.isEnabled = false
         exitButton.isEnabled = false
         cancelButton.isEnabled = false
         titleLabel.text = "Exiting..."
@@ -139,6 +207,23 @@ final class GameplayExitOverlayView: UIView {
             "Stopping \(session.displayTitle) and returning to Games."
         exitButton.configuration = primaryButtonConfiguration(title: "Exiting", color: .systemGray)
         onExitRequested()
+    }
+
+    @objc private func confirmRestart() {
+        guard !actionHasBeenRequested else {
+            return
+        }
+
+        actionHasBeenRequested = true
+        restartButton.isEnabled = false
+        exitButton.isEnabled = false
+        cancelButton.isEnabled = false
+        titleLabel.text = "Restarting..."
+        messageLabel.text = session.isDashboard ?
+            "Stopping and relaunching the dashboard." :
+            "Stopping and relaunching \(session.displayTitle)."
+        restartButton.configuration = primaryButtonConfiguration(title: "Restarting", color: .systemGray)
+        onRestartRequested()
     }
 
     private func primaryButtonConfiguration(title: String, color: UIColor) -> UIButton.Configuration {
