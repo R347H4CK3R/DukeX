@@ -172,6 +172,50 @@ struct AutoJITStatusRow: View {
     }
 }
 
+struct CommunityLinkRow: View {
+    @Environment(\.openURL) private var openURL
+
+    let title: String
+    let detail: String
+    let imageName: String
+    let glyphSize: CGFloat
+    let url: URL
+
+    var body: some View {
+        Button {
+            openURL(url)
+        } label: {
+            HStack(spacing: 12) {
+                Image(imageName)
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: glyphSize, height: glyphSize)
+                    .frame(width: 40, height: 40)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .foregroundStyle(.primary)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "arrow.up.right.square")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(minHeight: 58)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct FolderRow: View {
     let title: String
     let url: URL

@@ -2,6 +2,7 @@ import CoreMotion
 import SwiftUI
 
 struct NostalgicDotBackgroundView: View {
+    @Environment(\.dukeXTheme) private var theme
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var tiltObserver = BackgroundTiltObserver()
 
@@ -39,14 +40,14 @@ struct NostalgicDotBackgroundView: View {
 
     private var baseLayer: some View {
         LinearGradient(
-            colors: DukeXTheme.xboxBackgroundColors(for: colorScheme),
+            colors: theme.animatedBackgroundColors(for: colorScheme),
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
     }
 
     private var radialGlow: some View {
-        let glowColors = DukeXTheme.xboxGlowColors(for: colorScheme)
+        let glowColors = theme.animatedGlowColors(for: colorScheme)
 
         return ZStack {
             RadialGradient(
@@ -88,8 +89,8 @@ struct NostalgicDotBackgroundView: View {
         let offset = step / 2
         let rows = Int(ceil(size.height / step)) + 2
         let columns = Int(ceil(size.width / step)) + 2
-        let dotColor = DukeXTheme.xboxDotColor(for: colorScheme)
-        let accentColor = DukeXTheme.xboxAccentDotColor(for: colorScheme)
+        let dotColor = theme.animatedDotColor(for: colorScheme)
+        let accentColor = theme.animatedAccentDotColor(for: colorScheme)
 
         for row in 0..<rows {
             let y = CGFloat(row) * step - step
@@ -121,7 +122,7 @@ struct NostalgicDotBackgroundView: View {
         let offset = step / 2
         let rows = Int(ceil(size.height / step)) + 2
         let columns = Int(ceil(size.width / step)) + 2
-        let dotColor = DukeXTheme.xboxSecondaryDotColor(for: colorScheme)
+        let dotColor = theme.animatedSecondaryDotColor(for: colorScheme)
 
         for row in 0..<rows {
             let y = CGFloat(row) * step - step

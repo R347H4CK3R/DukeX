@@ -5,6 +5,10 @@ struct SettingsView: View {
     let runtimeState: EmulatorCoreRuntime.RunState
     let autoJITStatus: String?
     let importSystemFiles: () -> Void
+    @State private var lilyDedicationTapCount = 0
+    @State private var lastLilyDedicationTapDate: Date?
+    @State private var lilyDedicationJiggleAngle = 0.0
+    @State private var lilyDedicationJiggleOffset: CGFloat = 0
 
     var body: some View {
         List {
@@ -99,6 +103,11 @@ struct SettingsView: View {
             }
             .dukeXThemedListRowBackground()
 
+            Section("Themes") {
+                ThemeSettingsView(store: store)
+            }
+            .dukeXThemedListRowBackground()
+
             Section("Library") {
                 LibraryColumnSettingsView(store: store)
             }
@@ -177,16 +186,22 @@ struct SettingsView: View {
             }
             .dukeXThemedListRowBackground()
 
-            Section("Folders") {
-                FolderRow(title: "BIOS",
-                          url: store.biosDirectoryURL,
-                          storageUsed: store.folderStorageUsage.bios.displayText)
-                FolderRow(title: "ROMs",
-                          url: store.romsDirectoryURL,
-                          storageUsed: store.folderStorageUsage.roms.displayText)
-                FolderRow(title: "Covers",
-                          url: store.coversDirectoryURL,
-                          storageUsed: store.folderStorageUsage.covers.displayText)
+            Section("Communities") {
+                CommunityLinkRow(
+                    title: "Manic EMU & DukeX Official Discord",
+                    detail: "Join the official Manic EMU and DukeX community for support, troubleshooting, updates, and emulator discussion.",
+                    imageName: "ManicDukeXCommunityIcon",
+                    glyphSize: 40,
+                    url: URL(string: "https://discord.gg/manicemu")!
+                )
+
+                CommunityLinkRow(
+                    title: "XBL: OG Xbox Live Discord",
+                    detail: "Find players, events, and help for the xb.live services used by DukeX online play.",
+                    imageName: "XBLCommunityIcon",
+                    glyphSize: 36,
+                    url: URL(string: "https://discord.gg/xbl")!
+                )
             }
             .dukeXThemedListRowBackground()
 
@@ -203,9 +218,57 @@ struct SettingsView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
+                .offset(x: lilyDedicationJiggleOffset)
+                .rotationEffect(.degrees(lilyDedicationJiggleAngle))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    handleLilyDedicationTap()
+                }
             }
             .dukeXThemedListRowBackground()
         }
         .dukeXThemedListBackground()
+    }
+
+    private func handleLilyDedicationTap() {
+        triggerLilyDedicationJiggle()
+
+        guard !store.alwaysRememberedThemeUnlocked else {
+            return
+        }
+
+        let now = Date()
+        if let lastLilyDedicationTapDate,
+           now.timeIntervalSince(lastLilyDedicationTapDate) <= 2.0 {
+            lilyDedicationTapCount += 1
+        } else {
+            lilyDedicationTapCount = 1
+        }
+        self.lastLilyDedicationTapDate = now
+
+        if lilyDedicationTapCount >= 3 {
+            store.unlockAlwaysRememberedTheme()
+            lilyDedicationTapCount = 0
+            lastLilyDedicationTapDate = nil
+        }
+    }
+
+    private func triggerLilyDedicationJiggle() {
+        Task { @MainActor in
+            let steps: [(angle: Double, offset: CGFloat, duration: UInt64)] = [
+                (-0.8, -1.4, 55_000_000),
+                (0.8, 1.4, 70_000_000),
+                (-0.4, -0.7, 55_000_000),
+                (0.0, 0.0, 80_000_000)
+            ]
+
+            for step in steps {
+                withAnimation(.easeInOut(duration: Double(step.duration) / 1_000_000_000)) {
+                    lilyDedicationJiggleAngle = step.angle
+                    lilyDedicationJiggleOffset = step.offset
+                }
+                try? await Task.sleep(nanoseconds: step.duration)
+            }
+        }
     }
 }

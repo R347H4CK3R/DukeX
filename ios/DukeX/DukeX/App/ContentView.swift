@@ -37,11 +37,11 @@ struct ContentView: View {
     private let tabRefreshTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        let theme = DukeXTheme(xboxNostalgiaEnabled: store.xboxNostalgiaThemeEnabled)
-        let tabBarBackgroundVisibility: Visibility = theme.xboxNostalgiaEnabled ? .hidden : .automatic
+        let theme = DukeXTheme(mode: store.themeMode)
+        let tabBarBackgroundVisibility: Visibility = theme.usesAnimatedBackground ? .hidden : .automatic
 
         ZStack {
-            if theme.xboxNostalgiaEnabled {
+            if theme.usesAnimatedBackground {
                 NostalgicDotBackgroundView()
             } else {
                 theme.screenBackground
@@ -62,7 +62,8 @@ struct ContentView: View {
                         importConfig: beginConfigImport,
                         clearShaderCache: clearShaderCache,
                         editGameData: { gameMetadataTarget = $0 },
-                        requestRemoveGame: { removalConfirmationTarget = $0 }
+                        requestRemoveGame: { removalConfirmationTarget = $0 },
+                        launchManicEmu: store.themeMode == .manicFeelings ? openManicEmu : nil
                     )
                     .navigationTitle("DukeX")
                     .navigationBarTitleDisplayMode(.inline)
@@ -272,10 +273,10 @@ struct ContentView: View {
         .tint(theme.accentColor)
         .accentColor(theme.accentColor)
         .onAppear {
-            DukeXTheme.applyUIKitAppearance(xboxNostalgiaEnabled: store.xboxNostalgiaThemeEnabled)
+            DukeXTheme.applyUIKitAppearance(themeMode: store.themeMode)
         }
-        .onChange(of: store.xboxNostalgiaThemeEnabled) { _, isEnabled in
-            DukeXTheme.applyUIKitAppearance(xboxNostalgiaEnabled: isEnabled)
+        .onChange(of: store.themeMode) { _, themeMode in
+            DukeXTheme.applyUIKitAppearance(themeMode: themeMode)
         }
     }
 
@@ -410,6 +411,20 @@ struct ContentView: View {
             title: "Launch Link Copied",
             detail: url.absoluteString
         )
+    }
+
+    private func openManicEmu() {
+        guard let launchURL = URL(string: "manicemu://launch"),
+              let fallbackURL = URL(string: "https://github.com/Manic-EMU/ManicEMU/releases") else {
+            return
+        }
+
+        let application = UIApplication.shared
+        if application.canOpenURL(launchURL) {
+            application.open(launchURL)
+        } else {
+            application.open(fallbackURL)
+        }
     }
 
     private func handleLaunchLink(_ url: URL) {

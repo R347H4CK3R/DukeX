@@ -19,6 +19,7 @@ struct GamesLibraryView: View {
     let clearShaderCache: (LibraryFile) -> Void
     let editGameData: (LibraryFile) -> Void
     let requestRemoveGame: (LibraryFile) -> Void
+    let launchManicEmu: (() -> Void)?
 
     var body: some View {
         GeometryReader { geometry in
@@ -123,6 +124,19 @@ struct GamesLibraryView: View {
                     Image(systemName: "plus.circle")
                 }
                 .accessibilityLabel("Import Game")
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                if let launchManicEmu {
+                    Button(action: launchManicEmu) {
+                        Image("ManicFeelingsThemeIcon")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 24, height: 24)
+                    }
+                    .accessibilityLabel("Open Manic EMU")
+                }
             }
         }
     }

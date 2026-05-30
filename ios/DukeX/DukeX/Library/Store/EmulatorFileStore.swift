@@ -85,9 +85,15 @@ final class EmulatorFileStore: ObservableObject {
             UserDefaults.standard.set(gameLibraryListViewEnabled, forKey: Self.gameLibraryListViewEnabledKey)
         }
     }
-    @Published var xboxNostalgiaThemeEnabled: Bool {
+    @Published private(set) var alwaysRememberedThemeUnlocked: Bool {
         didSet {
-            UserDefaults.standard.set(xboxNostalgiaThemeEnabled, forKey: DukeXTheme.xboxNostalgiaDefaultsKey)
+            UserDefaults.standard.set(alwaysRememberedThemeUnlocked, forKey: Self.alwaysRememberedThemeUnlockedKey)
+        }
+    }
+    @Published var themeMode: DukeXThemeMode {
+        didSet {
+            UserDefaults.standard.set(themeMode.rawValue, forKey: DukeXTheme.selectedThemeDefaultsKey)
+            UserDefaults.standard.set(themeMode == .xboxNostalgia, forKey: DukeXTheme.xboxNostalgiaDefaultsKey)
         }
     }
     @Published var tbCacheSize: TBCacheSize {
@@ -136,6 +142,7 @@ final class EmulatorFileStore: ObservableObject {
     static let xboxCameraPeripheralEnabledKey = "DukeXXboxCameraPeripheralEnabled"
     static let xboxHeadsetMicPeripheralEnabledKey = "DukeXXboxHeadsetMicPeripheralEnabled"
     static let gameLibraryListViewEnabledKey = "DukeXGameLibraryListViewEnabled"
+    static let alwaysRememberedThemeUnlockedKey = "DukeXAlwaysRememberedThemeUnlocked"
     static let forceInsigniaNATKey = "ForceInsigniaNATEnabled"
     static let natDNSServerKey = "NATDNSServer"
     static let natHostPortKey = "NATHostPort"
@@ -181,6 +188,26 @@ final class EmulatorFileStore: ObservableObject {
         )
     }
 
+    func setTheme(_ mode: DukeXThemeMode, enabled: Bool) {
+        guard mode != .alwaysRemembered || alwaysRememberedThemeUnlocked else {
+            return
+        }
+
+        if enabled {
+            themeMode = mode
+        } else if themeMode == mode {
+            themeMode = .standard
+        }
+    }
+
+    func unlockAlwaysRememberedTheme() {
+        guard !alwaysRememberedThemeUnlocked else {
+            return
+        }
+
+        alwaysRememberedThemeUnlocked = true
+    }
+
     init(fileManager: FileManager = .default) {
         documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
         biosDirectoryURL = documentsURL.appendingPathComponent("BIOS", isDirectory: true)
@@ -206,8 +233,9 @@ final class EmulatorFileStore: ObservableObject {
         portraitGameLibraryColumnCount = GameLibraryColumnCount.currentPortrait
         landscapeGameLibraryColumnCount = GameLibraryColumnCount.currentLandscape
         gameLibraryListViewEnabled = UserDefaults.standard.object(forKey: Self.gameLibraryListViewEnabledKey) as? Bool ?? false
-        xboxNostalgiaThemeEnabled =
-            UserDefaults.standard.object(forKey: DukeXTheme.xboxNostalgiaDefaultsKey) as? Bool ?? false
+        alwaysRememberedThemeUnlocked =
+            UserDefaults.standard.object(forKey: Self.alwaysRememberedThemeUnlockedKey) as? Bool ?? false
+        themeMode = Self.currentThemeMode()
         tbCacheSize = TBCacheSize.current
         forceInsigniaNATEnabled = UserDefaults.standard.object(forKey: Self.forceInsigniaNATKey) as? Bool ?? true
         natDNSServer = UserDefaults.standard.string(forKey: Self.natDNSServerKey) ?? NetworkSettings.insigniaDNSServer
@@ -217,6 +245,26 @@ final class EmulatorFileStore: ObservableObject {
         selectedGameID = UserDefaults.standard.string(forKey: Self.selectedGameIDKey) ?? ""
         setenv("XEMU_IOS_UNIVERSAL_JIT", UniversalJITSupport.environmentValue(for: universalJITEnabled), 1)
         setenv("XEMU_IOS_JIT_MODE", UniversalJITSupport.currentMode.environmentValue, 1)
+    }
+
+    private static func currentThemeMode() -> DukeXThemeMode {
+        let alwaysRememberedUnlocked =
+            UserDefaults.standard.object(forKey: Self.alwaysRememberedThemeUnlockedKey) as? Bool ?? false
+
+        if let rawValue = UserDefaults.standard.string(forKey: DukeXTheme.selectedThemeDefaultsKey),
+           let mode = DukeXThemeMode(rawValue: rawValue) {
+            if mode == .alwaysRemembered && !alwaysRememberedUnlocked {
+                return .standard
+            }
+
+            return mode
+        }
+
+        if UserDefaults.standard.object(forKey: DukeXTheme.xboxNostalgiaDefaultsKey) as? Bool == true {
+            return .xboxNostalgia
+        }
+
+        return .standard
     }
 
     func prepareAndRefresh() async {

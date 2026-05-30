@@ -35,6 +35,10 @@
 	<true/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.games</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>manicemu</string>
+	</array>
 	<key>LSSupportsGameMode</key>
 	<true/>
 	<key>GCSupportsGameMode</key>
@@ -44,7 +48,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>DukeX can use the microphone to test Xbox Live Communicator support.</string>
 	<key>NSMotionUsageDescription</key>
-	<string>DukeX can use device tilt to subtly move the Xbox Nostalgia Theme background.</string>
+	<string>DukeX can use device tilt to subtly move animated theme backgrounds.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIFileSharingEnabled</key>
