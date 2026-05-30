@@ -24,11 +24,17 @@ struct ContentView: View {
     @State private var isCoverPickerPresented = false
     @State private var selectedProfileImageItem: PhotosPickerItem?
     @State private var isProfileImagePickerPresented = false
+    @State private var friendProfileImageTarget: InsigniaFriend?
+    @State private var selectedFriendProfileImageItem: PhotosPickerItem?
+    @State private var isFriendProfileImagePickerPresented = false
     @State private var configImportTarget: LibraryFile?
     @State private var gameMetadataTarget: LibraryFile?
     @State private var removalConfirmationTarget: LibraryFile?
     @State private var isProfileLoginPresented = false
     @State private var selectedTab: MainTab = .games
+    @State private var isGamesAutoRefreshRunning = false
+
+    private let tabRefreshTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     var body: some View {
         let theme = DukeXTheme(xboxNostalgiaEnabled: store.xboxNostalgiaThemeEnabled)
@@ -61,7 +67,7 @@ struct ContentView: View {
                     .navigationTitle("DukeX")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
-                        appToolbar(showsRefreshButton: true)
+                        appToolbar
                     }
                 }
                 .tabItem {
@@ -73,12 +79,14 @@ struct ContentView: View {
                     ProfileView(
                         profileStore: profileStore,
                         signIn: { isProfileLoginPresented = true },
-                        changeProfileImage: beginProfileImageSelection
+                        signOut: profileStore.signOut,
+                        changeProfileImage: beginProfileImageSelection,
+                        changeFriendProfileImage: beginFriendProfileImageSelection
                     )
                     .navigationTitle("DukeX")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
-                        profileToolbar
+                        appToolbar
                     }
                 }
                 .tabItem {
@@ -96,7 +104,7 @@ struct ContentView: View {
                         .navigationTitle("DukeX")
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
-                            appToolbar(showsRefreshButton: false)
+                            appToolbar
                         }
                 }
                 .tabItem {
@@ -175,6 +183,14 @@ struct ContentView: View {
             .onChange(of: selectedProfileImageItem) { _, item in
                 handleSelectedProfileImage(item)
             }
+            .photosPicker(
+                isPresented: $isFriendProfileImagePickerPresented,
+                selection: $selectedFriendProfileImageItem,
+                matching: .images
+            )
+            .onChange(of: selectedFriendProfileImageItem) { _, item in
+                handleSelectedFriendProfileImage(item)
+            }
             .alert(item: $store.message) { message in
                 Alert(
                     title: Text(message.title),
@@ -207,15 +223,13 @@ struct ContentView: View {
                 LaunchPlanView(plan: plan)
             }
             .onAppear {
-                runtime.refresh()
-                liveStatusStore.refresh()
                 if !environmentRequestsAutoLaunch {
                     resumePendingAutoJITLaunchIfNeeded()
                 }
             }
             .task {
-                await store.prepareAndRefresh()
-                runtime.refresh()
+                profileStore.refresh()
+                await refreshGamesNow()
                 if environmentRequestsAutoLaunch && !autoLaunchAttempted {
                     autoJIT.clearPendingForFreshAutomaticLaunch()
                 }
@@ -236,13 +250,16 @@ struct ContentView: View {
                 }
             }
             .onChange(of: selectedTab) { _, newTab in
-                if newTab == .games {
-                    liveStatusStore.refresh()
-                } else if newTab == .profile {
-                    profileStore.refresh()
-                } else if newTab == .settings {
+                refreshGamesAndProfile()
+                if newTab == .settings {
                     refreshLibraryForSettings()
                 }
+            }
+            .onReceive(tabRefreshTimer) { _ in
+                guard scenePhase == .active else {
+                    return
+                }
+                refreshOpenTab()
             }
             .onReceive(NotificationCenter.default.publisher(for: .dukeXReturnToGamesRequested)) { _ in
                 selectedTab = .games
@@ -277,39 +294,7 @@ struct ContentView: View {
     }
 
     @ToolbarContentBuilder
-    private var profileToolbar: some ToolbarContent {
-        appToolbar(showsRefreshButton: false)
-
-        ToolbarItem(placement: .topBarLeading) {
-            Button {
-                if profileStore.isSignedIn {
-                    profileStore.signOut()
-                } else {
-                    isProfileLoginPresented = true
-                }
-            } label: {
-                Image(systemName: profileStore.isSignedIn ? "rectangle.portrait.and.arrow.right" : "person.crop.circle.badge.plus")
-            }
-            .accessibilityLabel(profileStore.isSignedIn ? "Sign Out" : "Sign In")
-        }
-
-        ToolbarItem(placement: .topBarTrailing) {
-            Button {
-                profileStore.refresh()
-            } label: {
-                if profileStore.isRefreshing {
-                    ProgressView()
-                } else {
-                    Image(systemName: "arrow.clockwise")
-                }
-            }
-            .disabled(!profileStore.isSignedIn || profileStore.isRefreshing)
-            .accessibilityLabel("Refresh Profile")
-        }
-    }
-
-    @ToolbarContentBuilder
-    private func appToolbar(showsRefreshButton: Bool) -> some ToolbarContent {
+    private var appToolbar: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             Image("DukeXLogo")
                 .resizable()
@@ -317,21 +302,42 @@ struct ContentView: View {
                 .frame(width: 118, height: 25)
                 .accessibilityLabel("DukeX")
         }
+    }
 
-        if showsRefreshButton {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    Task {
-                        await store.prepareAndRefresh()
-                        runtime.refresh()
-                        liveStatusStore.refresh()
-                    }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .accessibilityLabel("Refresh")
-            }
+    private func refreshGamesAndProfile() {
+        refreshGamesTab()
+        profileStore.refresh()
+    }
+
+    private func refreshOpenTab() {
+        switch selectedTab {
+        case .games:
+            refreshGamesTab()
+        case .profile:
+            profileStore.refresh()
+        case .settings:
+            break
         }
+    }
+
+    private func refreshGamesTab() {
+        Task { @MainActor in
+            await refreshGamesNow()
+        }
+    }
+
+    @MainActor
+    private func refreshGamesNow() async {
+        guard !isGamesAutoRefreshRunning else {
+            return
+        }
+
+        isGamesAutoRefreshRunning = true
+        defer { isGamesAutoRefreshRunning = false }
+
+        await store.prepareAndRefresh()
+        runtime.refresh()
+        liveStatusStore.refresh()
     }
 
     private func launchGame() {
@@ -378,6 +384,12 @@ struct ContentView: View {
     private func beginProfileImageSelection() {
         selectedProfileImageItem = nil
         isProfileImagePickerPresented = true
+    }
+
+    private func beginFriendProfileImageSelection(for friend: InsigniaFriend) {
+        friendProfileImageTarget = friend
+        selectedFriendProfileImageItem = nil
+        isFriendProfileImagePickerPresented = true
     }
 
     private func beginConfigImport(for game: LibraryFile) {
@@ -479,6 +491,28 @@ struct ContentView: View {
                 try profileStore.assignProfileImage(data)
             } catch {
                 store.message = UserMessage(title: "Profile Picture Not Added", detail: error.localizedDescription)
+            }
+        }
+    }
+
+    private func handleSelectedFriendProfileImage(_ item: PhotosPickerItem?) {
+        guard let item, let friend = friendProfileImageTarget else {
+            return
+        }
+
+        Task { @MainActor in
+            defer {
+                selectedFriendProfileImageItem = nil
+                friendProfileImageTarget = nil
+            }
+
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else {
+                    throw CoverSelectionError.emptySelection
+                }
+                try profileStore.assignFriendProfileImage(data, to: friend)
+            } catch {
+                store.message = UserMessage(title: "Friend Picture Not Added", detail: error.localizedDescription)
             }
         }
     }

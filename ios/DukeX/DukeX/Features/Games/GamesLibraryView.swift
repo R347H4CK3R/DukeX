@@ -24,6 +24,7 @@ struct GamesLibraryView: View {
         GeometryReader { geometry in
             ScrollView {
                 VStack(spacing: 16) {
+                    let displayedGames = sortedGames
                     GameSortPicker(selection: sortModeBinding)
 
                     Button(action: launchDashboard) {
@@ -54,9 +55,11 @@ struct GamesLibraryView: View {
 
                     if store.games.isEmpty {
                         GamesEmptyState(importGames: importGames)
+                    } else if displayedGames.isEmpty {
+                        GameLibraryFilterEmptyState(title: emptyFilterTitle, systemImage: emptyFilterSystemImage)
                     } else if store.gameLibraryListViewEnabled {
                         LazyVStack(spacing: 12) {
-                            ForEach(sortedGames) { game in
+                            ForEach(displayedGames) { game in
                                 GameListRow(
                                     game: game,
                                     metadata: metadataStore.metadata(for: game),
@@ -84,7 +87,7 @@ struct GamesLibraryView: View {
                         LazyVGrid(columns: GameLibraryGridMetrics.columns(for: activeColumnCount),
                                   alignment: .center,
                                   spacing: GameLibraryGridMetrics.spacing(for: activeColumnCount) + 6) {
-                            ForEach(sortedGames) { game in
+                            ForEach(displayedGames) { game in
                                 GameCoverTile(
                                     game: game,
                                     canLaunch: store.systemFilesReady && runtimeState.canLaunch,
@@ -140,14 +143,9 @@ struct GamesLibraryView: View {
 
         switch sortMode {
         case .favorites:
-            return games.sorted { lhs, rhs in
-                let lhsFavorite = isFavorite(lhs)
-                let rhsFavorite = isFavorite(rhs)
-                if lhsFavorite != rhsFavorite {
-                    return lhsFavorite
-                }
-                return titleSort(lhs, rhs)
-            }
+            return games
+                .filter(isFavorite)
+                .sorted(by: titleSort)
         case .title:
             return games.sorted(by: titleSort)
         case .live:
@@ -174,6 +172,32 @@ struct GamesLibraryView: View {
                 }
                 return titleSort(lhs, rhs)
             }
+        }
+    }
+
+    private var emptyFilterTitle: String {
+        switch sortMode {
+        case .favorites:
+            return "No Favorite Games"
+        case .live:
+            return "No Live Games"
+        case .recent:
+            return "No Recent Games"
+        case .title:
+            return "No Games"
+        }
+    }
+
+    private var emptyFilterSystemImage: String {
+        switch sortMode {
+        case .favorites:
+            return "star"
+        case .live:
+            return "antenna.radiowaves.left.and.right"
+        case .recent:
+            return "clock"
+        case .title:
+            return "opticaldisc"
         }
     }
 
@@ -216,5 +240,24 @@ struct GamesLibraryView: View {
         return isLandscape
             ? store.landscapeGameLibraryColumnCount.columnCount
             : store.portraitGameLibraryColumnCount.columnCount
+    }
+}
+
+private struct GameLibraryFilterEmptyState: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 34))
+                .foregroundStyle(.secondary)
+
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 42)
     }
 }

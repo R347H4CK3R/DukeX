@@ -46,6 +46,7 @@ struct InsigniaAuthenticatedSnapshot: Codable, Equatable {
     let games: [InsigniaProfileGame]
     let messages: [InsigniaMessage]
     let xbProfile: XBLiveProfileSnapshot?
+    let playtimeGames: [XBLiveGamePlayed]
     let achievements: XBLiveAchievementsSnapshot?
     let friendProfiles: [String: XBLiveFriendProfile]
     let events: [XBLiveEvent]
@@ -58,6 +59,7 @@ struct InsigniaAuthenticatedSnapshot: Codable, Equatable {
         case games
         case messages
         case xbProfile
+        case playtimeGames
         case achievements
         case friendProfiles
         case events
@@ -71,6 +73,7 @@ struct InsigniaAuthenticatedSnapshot: Codable, Equatable {
         games: [InsigniaProfileGame],
         messages: [InsigniaMessage],
         xbProfile: XBLiveProfileSnapshot?,
+        playtimeGames: [XBLiveGamePlayed],
         achievements: XBLiveAchievementsSnapshot?,
         friendProfiles: [String: XBLiveFriendProfile],
         events: [XBLiveEvent],
@@ -82,6 +85,7 @@ struct InsigniaAuthenticatedSnapshot: Codable, Equatable {
         self.games = games
         self.messages = messages
         self.xbProfile = xbProfile
+        self.playtimeGames = playtimeGames
         self.achievements = achievements
         self.friendProfiles = friendProfiles
         self.events = events
@@ -96,6 +100,7 @@ struct InsigniaAuthenticatedSnapshot: Codable, Equatable {
         games = try container.decodeIfPresent([InsigniaProfileGame].self, forKey: .games) ?? []
         messages = try container.decodeIfPresent([InsigniaMessage].self, forKey: .messages) ?? []
         xbProfile = try container.decodeIfPresent(XBLiveProfileSnapshot.self, forKey: .xbProfile)
+        playtimeGames = try container.decodeIfPresent([XBLiveGamePlayed].self, forKey: .playtimeGames) ?? []
         achievements = try container.decodeIfPresent(XBLiveAchievementsSnapshot.self, forKey: .achievements)
         friendProfiles = try container.decodeIfPresent([String: XBLiveFriendProfile].self, forKey: .friendProfiles) ?? [:]
         events = try container.decodeIfPresent([XBLiveEvent].self, forKey: .events) ?? []
@@ -125,7 +130,7 @@ struct InsigniaFriend: Codable, Identifiable, Equatable {
     let lastSeen: String?
 
     var id: String { key }
-    var key: String { gamertag.lowercased() }
+    var key: String { gamertag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
 }
 
 struct InsigniaProfileGame: Codable, Identifiable, Equatable {
@@ -199,6 +204,111 @@ struct XBLiveFriendProfile: Codable, Equatable {
 
     var avatarURL: URL? { avatarURLString.flatMap(URL.init(string:)) }
     var lastPlayedImageURL: URL? { lastPlayedImageURLString.flatMap(URL.init(string:)) }
+}
+
+struct XBLiveGamePlayed: Codable, Identifiable, Equatable {
+    let gameName: String
+    let titleId: String?
+    let imageUrl: String?
+    let lastPlayedAt: Double?
+    let totalMinutes: Double?
+
+    var id: String {
+        (titleId ?? gameName).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    var imageURL: URL? { imageUrl.flatMap(URL.init(string:)) }
+
+    init(
+        gameName: String,
+        titleId: String?,
+        imageUrl: String?,
+        lastPlayedAt: Double?,
+        totalMinutes: Double?
+    ) {
+        self.gameName = gameName
+        self.titleId = titleId
+        self.imageUrl = imageUrl
+        self.lastPlayedAt = lastPlayedAt
+        self.totalMinutes = totalMinutes
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: ProfileFlexibleCodingKey.self)
+        let minutes = container.flexibleDouble(for: [
+            "totalMinutes",
+            "total_minutes",
+            "minutes",
+            "minutesPlayed",
+            "minutes_played",
+            "playtimeMinutes",
+            "playtime_minutes",
+            "playTimeMinutes",
+            "play_time_minutes"
+        ])
+        let seconds = container.flexibleDouble(for: [
+            "totalSeconds",
+            "total_seconds",
+            "seconds",
+            "secondsPlayed",
+            "seconds_played",
+            "playtimeSeconds",
+            "playtime_seconds",
+            "playTimeSeconds",
+            "play_time_seconds"
+        ])
+        let hours = container.flexibleDouble(for: [
+            "totalHours",
+            "total_hours",
+            "hours",
+            "hoursPlayed",
+            "hours_played",
+            "playtimeHours",
+            "playtime_hours",
+            "playTimeHours",
+            "play_time_hours"
+        ])
+
+        gameName = container.flexibleString(for: [
+            "gameName",
+            "game_name",
+            "name",
+            "title",
+            "titleName",
+            "title_name"
+        ]) ?? "Unknown Game"
+        titleId = container.flexibleString(for: [
+            "titleId",
+            "title_id",
+            "gameTitleId",
+            "game_title_id"
+        ])?.uppercased()
+        imageUrl = container.flexibleString(for: [
+            "imageUrl",
+            "image_url",
+            "image",
+            "iconUrl",
+            "icon_url",
+            "icon"
+        ])
+        lastPlayedAt = container.flexibleDouble(for: [
+            "lastPlayedAt",
+            "last_played_at",
+            "lastPlayedTimestamp",
+            "last_played_timestamp",
+            "lastSeenAt",
+            "last_seen_at"
+        ])
+        totalMinutes = minutes ?? seconds.map { $0 / 60.0 } ?? hours.map { $0 * 60.0 }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case gameName
+        case titleId
+        case imageUrl
+        case lastPlayedAt
+        case totalMinutes
+    }
 }
 
 struct XBLiveAchievementsSnapshot: Codable, Equatable {
@@ -327,19 +437,223 @@ struct XBLiveEvent: Codable, Identifiable, Equatable {
     let title: String
     let gameName: String?
     let gameImage: String?
+    let description: String?
     let eventDate: String?
     let startTime: String?
+    let endTime: String?
+    let dlcRequired: Bool?
+    let moddedContentRequired: Bool?
+    let communityHost: String?
+    let eventTag: String?
+    let xlinkKai: Bool?
+    let isLeaderboard: Bool?
+    let bannerURLString: String?
+    let source: String?
+    let createdBy: String?
+    let discordEventID: String?
+    let discordGuildID: String?
+    let eventTimezone: String?
+    let eventEndDate: String?
+    let startDateUTC: String?
+    let startDateTimeUTC: String?
+    let endDateUTC: String?
+    let endDateTimeUTC: String?
+    let additionalRules: String?
+    let winningParameters: String?
 
     enum CodingKeys: String, CodingKey {
         case id
         case title
         case gameName = "game_name"
         case gameImage = "game_image"
+        case description
         case eventDate = "event_date"
         case startTime = "start_time"
+        case endTime = "end_time"
+        case dlcRequired = "dlc_required"
+        case moddedContentRequired = "modded_content_required"
+        case communityHost = "community_host"
+        case eventTag = "event_tag"
+        case xlinkKai = "xlink_kai"
+        case isLeaderboard = "is_leaderboard"
+        case bannerURLString = "banner_url"
+        case source
+        case createdBy = "created_by"
+        case discordEventID = "discord_event_id"
+        case discordGuildID = "discord_guild_id"
+        case eventTimezone = "event_timezone"
+        case eventEndDate = "event_end_date"
+        case startDateUTC = "start_date_utc"
+        case startDateTimeUTC = "start_datetime_utc"
+        case endDateUTC = "end_date_utc"
+        case endDateTimeUTC = "end_datetime_utc"
+        case additionalRules = "additional_rules"
+        case winningParameters = "winning_parameters"
     }
 
     var gameImageURL: URL? { gameImage.flatMap(URL.init(string:)) }
+    var bannerURL: URL? { bannerURLString.flatMap(URL.init(string:)) }
+
+    var startDate: Date? {
+        if let date = Self.parsedUTCDate(date: startDateUTC, time: startDateTimeUTC) {
+            return date
+        }
+        return Self.parsedLocalDate(date: eventDate, time: startTime, timeZoneID: eventTimezone)
+    }
+
+    var endDate: Date? {
+        let date = Self.parsedUTCDate(date: endDateUTC, time: endDateTimeUTC) ??
+            Self.parsedLocalDate(date: eventEndDate ?? eventDate, time: endTime, timeZoneID: eventTimezone)
+
+        guard let startDate, let date else {
+            return date
+        }
+
+        if date < startDate {
+            return Calendar(identifier: .gregorian).date(byAdding: .day, value: 1, to: date)
+        }
+        return date
+    }
+
+    var scheduleText: String {
+        guard let startDate else {
+            return [eventDate, startTime]
+                .compactMap { Self.trimmed($0) }
+                .joined(separator: " ")
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        let startText = formatter.string(from: startDate)
+
+        guard let endDate else {
+            return startText
+        }
+
+        if Calendar.current.isDate(startDate, inSameDayAs: endDate) {
+            let timeFormatter = DateFormatter()
+            timeFormatter.locale = .current
+            timeFormatter.timeStyle = .short
+            return "\(startText) - \(timeFormatter.string(from: endDate))"
+        }
+
+        return "\(startText) - \(formatter.string(from: endDate))"
+    }
+
+    static func currentEvents(from events: [XBLiveEvent], referenceDate: Date = Date()) -> [XBLiveEvent] {
+        events
+            .filter { $0.startsWithinNext24Hours(referenceDate: referenceDate) }
+            .sorted(by: startDateSort)
+    }
+
+    private func startsWithinNext24Hours(referenceDate: Date) -> Bool {
+        guard let startDate else {
+            return false
+        }
+
+        let windowEnd = referenceDate.addingTimeInterval(24 * 60 * 60)
+        if startDate >= referenceDate && startDate <= windowEnd {
+            return true
+        }
+
+        if let endDate {
+            return startDate <= referenceDate && endDate >= referenceDate
+        }
+
+        return false
+    }
+
+    private static func startDateSort(_ lhs: XBLiveEvent, _ rhs: XBLiveEvent) -> Bool {
+        switch (lhs.startDate, rhs.startDate) {
+        case let (lhsDate?, rhsDate?):
+            if lhsDate != rhsDate {
+                return lhsDate < rhsDate
+            }
+            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        case (nil, nil):
+            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+        }
+    }
+
+    private static func parsedUTCDate(date: String?, time: String?) -> Date? {
+        let utc = TimeZone(secondsFromGMT: 0)
+        if let time = trimmed(time),
+           (time.contains("-") || time.contains("T")),
+           let date = parsedDateTime(time, timeZone: utc) {
+            return date
+        }
+        return parsedDate(date: date, time: time, timeZone: utc)
+    }
+
+    private static func parsedLocalDate(date: String?, time: String?, timeZoneID: String?) -> Date? {
+        let timeZone = trimmed(timeZoneID).flatMap(TimeZone.init(identifier:)) ?? .current
+        return parsedDate(date: date, time: time, timeZone: timeZone)
+    }
+
+    private static func parsedDate(date: String?, time: String?, timeZone: TimeZone?) -> Date? {
+        guard let date = trimmed(date) else {
+            return nil
+        }
+
+        if date.contains("T"),
+           let parsedDate = parsedDateTime(date, timeZone: timeZone) {
+            return parsedDate
+        }
+
+        let time = trimmed(time) ?? "00:00"
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+
+        for format in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd h:mm a", "yyyy-MM-dd h:mm:ss a"] {
+            formatter.dateFormat = format
+            if let parsedDate = formatter.date(from: "\(date) \(time)") {
+                return parsedDate
+            }
+        }
+
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: date)
+    }
+
+    private static func parsedDateTime(_ value: String, timeZone: TimeZone?) -> Date? {
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = isoFormatter.date(from: value) {
+            return date
+        }
+
+        isoFormatter.formatOptions = [.withInternetDateTime]
+        if let date = isoFormatter.date(from: value) {
+            return date
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        for format in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"] {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: value) {
+                return date
+            }
+        }
+
+        return nil
+    }
+
+    private static func trimmed(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
 }
 
 struct InsigniaDashboardView: UIViewControllerRepresentable {
@@ -787,13 +1101,6 @@ enum XBLiveService {
         let games: [XBLiveGamePlayed]
     }
 
-    struct XBLiveGamePlayed: Codable, Equatable {
-        let gameName: String
-        let titleId: String?
-        let imageUrl: String?
-        let lastPlayedAt: Double?
-    }
-
     enum ServiceError: LocalizedError {
         case unavailable
 
@@ -809,6 +1116,7 @@ final class InsigniaProfileStore: ObservableObject {
     @Published private(set) var publicSnapshot: InsigniaPublicSnapshot?
     @Published private(set) var authenticatedSnapshot: InsigniaAuthenticatedSnapshot?
     @Published private(set) var profileImage: UIImage?
+    @Published private(set) var friendProfileImages: [String: UIImage] = [:]
     @Published private(set) var lastRefreshed: Date?
     @Published private(set) var isRefreshing = false
     @Published private var viewedMessageKeys: Set<String> = []
@@ -822,7 +1130,6 @@ final class InsigniaProfileStore: ObservableObject {
     private static let authenticatedSnapshotKey = "InsigniaAuthenticatedSnapshot"
     private static let viewedMessagesKeyPrefix = "InsigniaProfileViewedMessages"
     private static let profileImageFileName = "profile-picture.jpg"
-    private static let friendProfileLimit = 16
 
     var isSignedIn: Bool {
         session != nil
@@ -844,14 +1151,6 @@ final class InsigniaProfileStore: ObservableObject {
         publicSnapshot?.activeGames ?? []
     }
 
-    var lastRefreshedText: String {
-        guard let lastRefreshed else {
-            return "Never"
-        }
-
-        return lastRefreshed.formatted(date: .omitted, time: .shortened)
-    }
-
     init() {
         let defaults = UserDefaults.standard
         if let gamertag = defaults.string(forKey: Self.gamertagKey), !gamertag.isEmpty {
@@ -870,6 +1169,7 @@ final class InsigniaProfileStore: ObservableObject {
         authenticatedSnapshot = Self.loadAuthenticatedSnapshot()
         viewedMessageKeys = Self.loadViewedMessageKeys(for: session)
         loadProfileImage()
+        loadFriendProfileImages()
     }
 
     func signIn(email: String, password: String) async throws {
@@ -961,6 +1261,18 @@ final class InsigniaProfileStore: ObservableObject {
         profileImage = UIImage(data: imageData)
     }
 
+    func assignFriendProfileImage(_ data: Data, to friend: InsigniaFriend) throws {
+        let image = UIImage(data: data)
+        let imageData = image?.jpegData(compressionQuality: 0.9) ?? data
+        try FileManager.default.createDirectory(
+            at: friendProfileImagesDirectoryURL,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        try imageData.write(to: friendProfileImageURL(for: friend.key), options: .atomic)
+        friendProfileImages[friend.key] = UIImage(data: imageData)
+    }
+
     func clearProfileImage() {
         try? FileManager.default.removeItem(at: profileImageURL)
         profileImage = nil
@@ -977,7 +1289,7 @@ final class InsigniaProfileStore: ObservableObject {
 
             do {
                 if session?.isAuthenticated == true {
-                    try await loadAuthenticatedData(refreshRemote: false)
+                    try await loadAuthenticatedData(refreshRemote: false, refreshFriendProfiles: false)
                 } else {
                     let snapshot = try await InsigniaPublicService.fetchPublicSnapshot()
                     publicSnapshot = snapshot
@@ -1005,7 +1317,10 @@ final class InsigniaProfileStore: ObservableObject {
         Self.saveViewedMessageKeys(viewedMessageKeys, for: session)
     }
 
-    private func loadAuthenticatedData(refreshRemote: Bool) async throws {
+    private func loadAuthenticatedData(
+        refreshRemote: Bool,
+        refreshFriendProfiles: Bool = true
+    ) async throws {
         guard let session,
               let sessionKey = try? ProfileSessionKeychain.loadSessionKey() else {
             throw ProfileSignInError.missingSession
@@ -1016,13 +1331,29 @@ final class InsigniaProfileStore: ObservableObject {
         let gamesResponse = try? await InsigniaAuthService.fetchGames(sessionKey: sessionKey, refresh: refreshRemote)
         let messagesResponse = try? await InsigniaAuthService.fetchMessages(sessionKey: sessionKey, refresh: refreshRemote)
         let xbProfile = try? await XBLiveService.fetchProfile(username: session.gamertag)
+        let playtimeGames = (try? await XBLiveService.fetchGamesPlayed(username: session.gamertag)) ??
+            authenticatedSnapshot?.playtimeGames ??
+            []
         let achievements = try? await XBLiveService.fetchAchievements(username: session.gamertag)
         let livePublicSnapshot = try? await InsigniaPublicService.fetchPublicSnapshot()
         let supportedGames = (try? await InsigniaPublicService.fetchSupportedGames()) ?? []
         let events = (try? await XBLiveService.fetchEvents()) ?? []
 
-        let friends = friendsResponse?.friends ?? []
-        let friendProfiles = await fetchFriendProfiles(for: friends)
+        let cachedFriends = authenticatedSnapshot?.friends ?? []
+        let fetchedFriends = friendsResponse?.friends
+        let shouldUseFetchedFriends = fetchedFriends?.isEmpty == false || cachedFriends.isEmpty
+        let friends = shouldUseFetchedFriends ? fetchedFriends ?? [] : cachedFriends
+        let existingFriendProfiles = authenticatedSnapshot?.friendProfiles ?? [:]
+        let friendProfiles: [String: XBLiveFriendProfile]
+        if refreshFriendProfiles {
+            friendProfiles = await fetchFriendProfiles(
+                for: friends,
+                existingProfiles: existingFriendProfiles
+            )
+        } else {
+            let currentFriendKeys = Set(friends.map(\.key))
+            friendProfiles = existingFriendProfiles.filter { currentFriendKeys.contains($0.key) }
+        }
 
         if let livePublicSnapshot {
             publicSnapshot = livePublicSnapshot
@@ -1035,9 +1366,10 @@ final class InsigniaProfileStore: ObservableObject {
             games: gamesResponse?.games ?? profile?.gamesPlayed ?? [],
             messages: messagesResponse?.messages ?? [],
             xbProfile: xbProfile,
+            playtimeGames: playtimeGames,
             achievements: achievements,
             friendProfiles: friendProfiles,
-            events: Array(events.prefix(5)),
+            events: XBLiveEvent.currentEvents(from: events),
             supportedGames: supportedGames,
             loadedAt: Date()
         )
@@ -1047,10 +1379,14 @@ final class InsigniaProfileStore: ObservableObject {
         markRefreshed()
     }
 
-    private func fetchFriendProfiles(for friends: [InsigniaFriend]) async -> [String: XBLiveFriendProfile] {
-        var profiles: [String: XBLiveFriendProfile] = [:]
+    private func fetchFriendProfiles(
+        for friends: [InsigniaFriend],
+        existingProfiles: [String: XBLiveFriendProfile]
+    ) async -> [String: XBLiveFriendProfile] {
+        let currentFriendKeys = Set(friends.map(\.key))
+        var profiles = existingProfiles.filter { currentFriendKeys.contains($0.key) }
 
-        for friend in friends.prefix(Self.friendProfileLimit) {
+        for friend in friends {
             guard let xbProfile = try? await XBLiveService.fetchProfile(username: friend.gamertag) else {
                 continue
             }
@@ -1150,12 +1486,48 @@ final class InsigniaProfileStore: ObservableObject {
         profileDirectoryURL.appendingPathComponent(Self.profileImageFileName)
     }
 
+    private var friendProfileImagesDirectoryURL: URL {
+        profileDirectoryURL.appendingPathComponent("Friends", isDirectory: true)
+    }
+
+    private func friendProfileImageURL(for key: String) -> URL {
+        friendProfileImagesDirectoryURL.appendingPathComponent(Self.friendProfileImageFileName(for: key))
+    }
+
     private func loadProfileImage() {
         guard let data = try? Data(contentsOf: profileImageURL) else {
             profileImage = nil
             return
         }
         profileImage = UIImage(data: data)
+    }
+
+    private func loadFriendProfileImages() {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: friendProfileImagesDirectoryURL,
+            includingPropertiesForKeys: nil
+        ) else {
+            friendProfileImages = [:]
+            return
+        }
+
+        var images: [String: UIImage] = [:]
+        for url in urls where url.pathExtension.lowercased() == "jpg" {
+            let encodedKey = url.deletingPathExtension().lastPathComponent
+            let key = encodedKey.removingPercentEncoding ?? encodedKey
+            guard let data = try? Data(contentsOf: url),
+                  let image = UIImage(data: data) else {
+                continue
+            }
+            images[key] = image
+        }
+        friendProfileImages = images
+    }
+
+    private static func friendProfileImageFileName(for key: String) -> String {
+        let allowedCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let encodedKey = key.addingPercentEncoding(withAllowedCharacters: allowedCharacters) ?? key
+        return "\(encodedKey).jpg"
     }
 }
 
@@ -1239,6 +1611,21 @@ private enum ProfileSignInError: LocalizedError {
     }
 }
 
+private struct ProfileFlexibleCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int?
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+        intValue = nil
+    }
+
+    init?(intValue: Int) {
+        stringValue = "\(intValue)"
+        self.intValue = intValue
+    }
+}
+
 private extension KeyedDecodingContainer {
     func flexibleString(forKey key: Key) -> String? {
         if let value = try? decodeIfPresent(String.self, forKey: key) {
@@ -1249,6 +1636,56 @@ private extension KeyedDecodingContainer {
         }
         if let value = try? decodeIfPresent(Int64.self, forKey: key) {
             return String(value)
+        }
+        return nil
+    }
+}
+
+private extension KeyedDecodingContainer where Key == ProfileFlexibleCodingKey {
+    func flexibleString(for keys: [String]) -> String? {
+        for key in keys {
+            guard let codingKey = ProfileFlexibleCodingKey(stringValue: key),
+                  contains(codingKey) else {
+                continue
+            }
+
+            if let value = try? decodeIfPresent(String.self, forKey: codingKey),
+               !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return value
+            }
+            if let value = try? decodeIfPresent(Int.self, forKey: codingKey) {
+                return String(value)
+            }
+            if let value = try? decodeIfPresent(Int64.self, forKey: codingKey) {
+                return String(value)
+            }
+            if let value = try? decodeIfPresent(Double.self, forKey: codingKey) {
+                return String(format: "%.0f", value)
+            }
+        }
+        return nil
+    }
+
+    func flexibleDouble(for keys: [String]) -> Double? {
+        for key in keys {
+            guard let codingKey = ProfileFlexibleCodingKey(stringValue: key),
+                  contains(codingKey) else {
+                continue
+            }
+
+            if let value = try? decodeIfPresent(Double.self, forKey: codingKey) {
+                return value
+            }
+            if let value = try? decodeIfPresent(Int.self, forKey: codingKey) {
+                return Double(value)
+            }
+            if let value = try? decodeIfPresent(Int64.self, forKey: codingKey) {
+                return Double(value)
+            }
+            if let value = try? decodeIfPresent(String.self, forKey: codingKey),
+               let doubleValue = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return doubleValue
+            }
         }
         return nil
     }

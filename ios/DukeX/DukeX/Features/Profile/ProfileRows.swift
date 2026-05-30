@@ -1,6 +1,43 @@
 import SwiftUI
 import UIKit
 
+enum ProfileFriendSortMode: String, CaseIterable, Identifiable {
+    case favorites
+    case alphabetical
+    case recentActivity
+
+    static let defaultsKey = "DukeXProfileFriendSortMode"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .favorites:
+            return "Favorites"
+        case .alphabetical:
+            return "A-Z"
+        case .recentActivity:
+            return "Recent"
+        }
+    }
+}
+
+enum ProfileFriendFavorites {
+    private static let defaultsKey = "DukeXProfileFriendFavorites"
+
+    static func load() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: defaultsKey) ?? [])
+    }
+
+    static func save(_ keys: Set<String>) {
+        UserDefaults.standard.set(Array(keys).sorted(), forKey: defaultsKey)
+    }
+
+    static func key(for friend: InsigniaFriend) -> String {
+        friend.key
+    }
+}
+
 struct ProfileHeaderRow: View {
     private let avatarSize: CGFloat = 48
 
@@ -79,7 +116,7 @@ struct ProfileHeaderRow: View {
 
     private var statusText: String {
         guard let snapshot else {
-            return "Last refresh: Not Synced"
+            return "Not Synced"
         }
 
         if let currentGame = snapshot.xbProfile?.currentGame ?? snapshot.profile?.game,
@@ -156,10 +193,12 @@ struct ProfileInfoRow: View {
 struct ProfileFriendRow: View {
     let friend: InsigniaFriend
     let profile: XBLiveFriendProfile?
+    let customProfileImage: UIImage?
+    var isFavorite = false
 
     var body: some View {
         HStack(spacing: 12) {
-            RemoteCircleImage(url: profile?.avatarURL, fallbackInitial: initial)
+            ProfileCircleImage(image: customProfileImage, url: profile?.avatarURL, fallbackInitial: initial)
                 .frame(width: 42, height: 42)
 
             VStack(alignment: .leading, spacing: 3) {
@@ -167,6 +206,11 @@ struct ProfileFriendRow: View {
                     Text(friend.gamertag)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
+                    if isFavorite {
+                        Image(systemName: "star.fill")
+                            .foregroundStyle(.yellow)
+                            .imageScale(.small)
+                    }
                     Circle()
                         .fill(friend.isOnline ? Color.green : Color.secondary.opacity(0.55))
                         .frame(width: 7, height: 7)
@@ -199,17 +243,205 @@ struct ProfileFriendRow: View {
     }
 
     private var statusLine: String {
-        if let game = friend.game, friend.isOnline {
-            return friend.duration.map { "Playing \(game) for \($0)" } ?? "Playing \(game)"
-        }
-        if let lastGame = profile?.lastPlayedGame {
-            return "Last played \(lastGame)"
-        }
-        return friend.lastSeen ?? friend.status
+        ProfileFriendOnlineText.statusLine(friend: friend, profile: profile)
     }
 
     private var initial: String {
         String(friend.gamertag.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1)).uppercased()
+    }
+}
+
+struct ProfileFriendsView: View {
+    let friends: [InsigniaFriend]
+    let friendProfiles: [String: XBLiveFriendProfile]
+    let friendProfileImages: [String: UIImage]
+    @Binding var sortMode: ProfileFriendSortMode
+    let favoriteFriendKeys: Set<String>
+    let toggleFavorite: (InsigniaFriend) -> Void
+    let changeFriendProfileImage: (InsigniaFriend) -> Void
+
+    var body: some View {
+        List {
+            ProfileFriendSortPicker(selection: $sortMode)
+                .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 8, trailing: 20))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
+            Section("Friends") {
+                if sortedFriends.isEmpty {
+                    ProfileEmptyRow(title: emptyFriendsTitle, systemImage: emptyFriendsSystemImage)
+                } else {
+                    ForEach(sortedFriends) { friend in
+                        NavigationLink {
+                            ProfileFriendDetailView(
+                                friend: friend,
+                                profile: friendProfiles[friend.key],
+                                customProfileImage: friendProfileImages[friend.key],
+                                changeProfileImage: { changeFriendProfileImage(friend) }
+                            )
+                        } label: {
+                            ProfileFriendRow(
+                                friend: friend,
+                                profile: friendProfiles[friend.key],
+                                customProfileImage: friendProfileImages[friend.key],
+                                isFavorite: isFavorite(friend)
+                            )
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button {
+                                changeFriendProfileImage(friend)
+                            } label: {
+                                Label("Set Picture", systemImage: "photo")
+                            }
+                            .tint(Color.accentColor)
+
+                            Button {
+                                toggleFavorite(friend)
+                            } label: {
+                                Label(isFavorite(friend) ? "Unfavorite" : "Favorite",
+                                      systemImage: isFavorite(friend) ? "star.slash" : "star")
+                            }
+                            .tint(.yellow)
+                        }
+                        .contextMenu {
+                            Button {
+                                changeFriendProfileImage(friend)
+                            } label: {
+                                Label("Set Picture", systemImage: "photo")
+                            }
+
+                            Button {
+                                toggleFavorite(friend)
+                            } label: {
+                                Label(isFavorite(friend) ? "Unfavorite" : "Favorite",
+                                      systemImage: isFavorite(friend) ? "star.slash" : "star")
+                            }
+                        }
+                    }
+                }
+            }
+            .dukeXThemedListRowBackground()
+        }
+        .navigationTitle("Friends")
+        .navigationBarTitleDisplayMode(.inline)
+        .dukeXThemedListBackground(dimming: 0.18)
+    }
+
+    private var sortedFriends: [InsigniaFriend] {
+        switch sortMode {
+        case .favorites:
+            return friends
+                .filter(isFavorite)
+                .sorted(by: friendNameSort)
+        case .alphabetical:
+            return friends.sorted(by: friendNameSort)
+        case .recentActivity:
+            return friends.sorted { lhs, rhs in
+                let lhsActivity = activitySortValue(for: lhs)
+                let rhsActivity = activitySortValue(for: rhs)
+                if lhsActivity != rhsActivity {
+                    return lhsActivity > rhsActivity
+                }
+                return friendNameSort(lhs, rhs)
+            }
+        }
+    }
+
+    private var emptyFriendsTitle: String {
+        switch sortMode {
+        case .favorites:
+            return "No favorite friends"
+        case .alphabetical, .recentActivity:
+            return "No friends synced"
+        }
+    }
+
+    private var emptyFriendsSystemImage: String {
+        switch sortMode {
+        case .favorites:
+            return "star"
+        case .alphabetical, .recentActivity:
+            return "person.2"
+        }
+    }
+
+    private func isFavorite(_ friend: InsigniaFriend) -> Bool {
+        favoriteFriendKeys.contains(ProfileFriendFavorites.key(for: friend))
+    }
+
+    private func friendNameSort(_ lhs: InsigniaFriend, _ rhs: InsigniaFriend) -> Bool {
+        lhs.gamertag.localizedStandardCompare(rhs.gamertag) == .orderedAscending
+    }
+
+    private func activitySortValue(for friend: InsigniaFriend) -> Double {
+        let profile = friendProfiles[friend.key]
+        if friend.isOnline || profile?.isOnline == true || profile?.currentGame?.nilIfEmpty != nil {
+            return .greatestFiniteMagnitude
+        }
+        return profile?.lastPlayedAt ?? 0
+    }
+}
+
+private struct ProfileFriendSortPicker: View {
+    @Binding var selection: ProfileFriendSortMode
+
+    var body: some View {
+        Picker("Sort Friends", selection: $selection) {
+            ForEach(ProfileFriendSortMode.allCases) { mode in
+                Text(mode.title).tag(mode)
+            }
+        }
+        .frame(height: 36)
+        .pickerStyle(.segmented)
+        .accessibilityLabel("Sort Friends")
+    }
+}
+
+private enum ProfileFriendOnlineText {
+    static func statusLine(friend: InsigniaFriend, profile: XBLiveFriendProfile?) -> String {
+        if friend.isOnline || profile?.isOnline == true || profile?.currentGame?.nilIfEmpty != nil {
+            return "Last Online: Now"
+        }
+
+        if let lastPlayedAt = profile?.lastPlayedAt,
+           let relativeText = relativeLastOnlineText(from: lastPlayedAt) {
+            return "Last Online: \(relativeText)"
+        }
+
+        if let lastSeen = friend.lastSeen?.nilIfEmpty {
+            return "Last Online: \(lastSeen)"
+        }
+
+        return "Last Online: Unknown"
+    }
+
+    private static func relativeLastOnlineText(from timestamp: Double) -> String? {
+        guard timestamp > 0 else {
+            return nil
+        }
+
+        var epochSeconds = timestamp
+        if epochSeconds > 9_999_999_999 {
+            epochSeconds /= 1_000
+        }
+
+        let elapsedSeconds = max(0, Date().timeIntervalSince1970 - epochSeconds)
+        let minutes = max(1, Int(elapsedSeconds / 60))
+        if minutes < 60 {
+            return "\(minutes) \(unit("minute", count: minutes)) ago"
+        }
+
+        let hours = max(1, Int(elapsedSeconds / 3_600))
+        if hours < 24 {
+            return "\(hours) \(unit("hour", count: hours)) ago"
+        }
+
+        let days = max(1, Int(elapsedSeconds / 86_400))
+        return "\(days) \(unit("day", count: days)) ago"
+    }
+
+    private static func unit(_ singular: String, count: Int) -> String {
+        count == 1 ? singular : "\(singular)s"
     }
 }
 
@@ -338,6 +570,186 @@ struct ProfileMessageRow: View {
     }
 }
 
+struct ProfileMessagesView: View {
+    @ObservedObject var profileStore: InsigniaProfileStore
+    let messages: [InsigniaMessage]
+
+    var body: some View {
+        List {
+            Section("Messages") {
+                let pendingMessages = profileStore.unviewedMessages(from: messages)
+                if pendingMessages.isEmpty {
+                    ProfileEmptyRow(title: "No pending messages", systemImage: "envelope")
+                } else {
+                    ForEach(pendingMessages) { message in
+                        NavigationLink {
+                            ProfileMessageDetailView(message: message)
+                                .onAppear {
+                                    profileStore.markMessageViewed(message)
+                                }
+                        } label: {
+                            ProfileMessageRow(message: message)
+                        }
+                    }
+                }
+            }
+            .dukeXThemedListRowBackground()
+        }
+        .navigationTitle("Messages")
+        .navigationBarTitleDisplayMode(.inline)
+        .dukeXThemedListBackground(dimming: 0.18)
+    }
+}
+
+struct ProfilePlaytimeView: View {
+    let totalMinutes: Double?
+    let games: [XBLiveGamePlayed]
+
+    var body: some View {
+        List {
+            Section("Total") {
+                if let totalMinutes {
+                    ProfileInfoRow(title: "Total Playtime",
+                                   value: Self.playTimeText(totalMinutes),
+                                   systemImage: "timer")
+                } else {
+                    ProfileEmptyRow(title: "No total playtime synced", systemImage: "timer")
+                }
+            }
+            .dukeXThemedListRowBackground()
+
+            Section("By Game") {
+                if sortedGames.isEmpty {
+                    ProfileEmptyRow(title: "No per-game playtime synced", systemImage: "gamecontroller")
+                } else {
+                    ForEach(sortedGames) { game in
+                        ProfilePlaytimeGameRow(game: game)
+                    }
+                }
+            }
+            .dukeXThemedListRowBackground()
+        }
+        .navigationTitle("Playtime")
+        .navigationBarTitleDisplayMode(.inline)
+        .dukeXThemedListBackground(dimming: 0.18)
+    }
+
+    private var sortedGames: [XBLiveGamePlayed] {
+        games.sorted { lhs, rhs in
+            let lhsMinutes = lhs.totalMinutes ?? -1
+            let rhsMinutes = rhs.totalMinutes ?? -1
+            if lhsMinutes != rhsMinutes {
+                return lhsMinutes > rhsMinutes
+            }
+
+            let lhsLastPlayedAt = Self.normalizedTimestamp(lhs.lastPlayedAt) ?? -1
+            let rhsLastPlayedAt = Self.normalizedTimestamp(rhs.lastPlayedAt) ?? -1
+            if lhsLastPlayedAt != rhsLastPlayedAt {
+                return lhsLastPlayedAt > rhsLastPlayedAt
+            }
+
+            return lhs.gameName.localizedCaseInsensitiveCompare(rhs.gameName) == .orderedAscending
+        }
+    }
+
+    private static func playTimeText(_ minutes: Double) -> String {
+        let hours = minutes / 60.0
+        if hours >= 10 {
+            return "\(Int(hours.rounded())) hr"
+        }
+        return String(format: "%.1f hr", hours)
+    }
+
+    private static func normalizedTimestamp(_ timestamp: Double?) -> Double? {
+        guard let timestamp, timestamp > 0 else {
+            return nil
+        }
+        return timestamp > 9_999_999_999 ? timestamp / 1_000.0 : timestamp
+    }
+}
+
+struct ProfilePlaytimeGameRow: View {
+    let game: XBLiveGamePlayed
+
+    var body: some View {
+        HStack(spacing: 12) {
+            AsyncImage(url: game.imageURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                default:
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.secondary.opacity(0.18))
+                        Image(systemName: "gamecontroller")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(width: 42, height: 42)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(game.gameName)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text(detailText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            if let totalMinutes = game.totalMinutes {
+                Text(Self.playTimeText(totalMinutes))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+        }
+        .frame(minHeight: 50)
+    }
+
+    private var detailText: String {
+        if let date = Self.lastPlayedDate(from: game.lastPlayedAt) {
+            return "Last Played: \(Self.lastPlayedFormatter.string(from: date))"
+        }
+        if game.totalMinutes != nil {
+            return "Tracked by xb.live"
+        }
+        return "Playtime unavailable"
+    }
+
+    private static func playTimeText(_ minutes: Double) -> String {
+        let hours = minutes / 60.0
+        if hours >= 10 {
+            return "\(Int(hours.rounded())) hr"
+        }
+        return String(format: "%.1f hr", hours)
+    }
+
+    private static func lastPlayedDate(from timestamp: Double?) -> Date? {
+        guard let timestamp, timestamp > 0 else {
+            return nil
+        }
+
+        let seconds = timestamp > 9_999_999_999 ? timestamp / 1_000.0 : timestamp
+        return Date(timeIntervalSince1970: seconds)
+    }
+
+    private static let lastPlayedFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }()
+}
+
 struct ProfileAchievementsSummaryRow: View {
     let countText: String
 
@@ -353,13 +765,20 @@ struct ProfileAchievementsSummaryRow: View {
 struct ProfileFriendDetailView: View {
     let friend: InsigniaFriend
     let profile: XBLiveFriendProfile?
+    let customProfileImage: UIImage?
+    let changeProfileImage: () -> Void
 
     var body: some View {
         List {
             Section {
                 VStack(spacing: 10) {
-                    RemoteCircleImage(url: profile?.avatarURL, fallbackInitial: initial)
+                    ProfileCircleImage(image: customProfileImage, url: profile?.avatarURL, fallbackInitial: initial)
                         .frame(width: 74, height: 74)
+                        .contextMenu {
+                            Button(action: changeProfileImage) {
+                                Label("Set Picture", systemImage: "photo")
+                            }
+                        }
 
                     VStack(spacing: 4) {
                         Text(friend.gamertag)
@@ -390,43 +809,22 @@ struct ProfileFriendDetailView: View {
                 }
             }
             .dukeXThemedListRowBackground()
-
-            if let imageURL = profile?.lastPlayedImageURL {
-                Section("Last Game") {
-                    AsyncImage(url: imageURL) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        default:
-                            Color.secondary.opacity(0.18)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 130)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-                .dukeXThemedListRowBackground()
-            }
         }
         .navigationTitle(friend.gamertag)
         .navigationBarTitleDisplayMode(.inline)
         .dukeXThemedListBackground(dimming: 0.18)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(action: changeProfileImage) {
+                    Image(systemName: "photo")
+                }
+                .accessibilityLabel("Set Profile Picture")
+            }
+        }
     }
 
     private var statusLine: String {
-        if let currentGame = profile?.currentGame ?? friend.game,
-           friend.isOnline || profile?.isOnline == true {
-            return friend.duration.map { "Playing \(currentGame) for \($0)" } ?? "Playing \(currentGame)"
-        }
-        if profile?.isOnline == true || friend.isOnline {
-            return "Online"
-        }
-        if let lastGame = profile?.lastPlayedGame {
-            return "Last played \(lastGame)"
-        }
-        return friend.lastSeen ?? friend.status
+        ProfileFriendOnlineText.statusLine(friend: friend, profile: profile)
     }
 
     private var initial: String {
@@ -593,15 +991,80 @@ private struct ProfileAchievementGameGroup: Identifiable {
     let achievements: [XBLiveAchievement]
 
     var unlockedAchievements: [XBLiveAchievement] {
-        achievements.filter { $0.isUnlocked != false }
+        achievements
+            .filter { $0.isUnlocked != false }
+            .sorted(by: Self.unlockedAchievementSort)
     }
 
     var lockedAchievements: [XBLiveAchievement] {
-        achievements.filter { $0.isUnlocked == false }
+        achievements
+            .filter { $0.isUnlocked == false }
+            .sorted(by: Self.titleSort)
     }
 
     var score: Int {
         unlockedAchievements.compactMap(\.score).reduce(0, +)
+    }
+
+    private static func unlockedAchievementSort(_ lhs: XBLiveAchievement, _ rhs: XBLiveAchievement) -> Bool {
+        let lhsDate = unlockDate(for: lhs)
+        let rhsDate = unlockDate(for: rhs)
+
+        switch (lhsDate, rhsDate) {
+        case let (lhsDate?, rhsDate?):
+            if lhsDate != rhsDate {
+                return lhsDate > rhsDate
+            }
+            return titleSort(lhs, rhs)
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        case (nil, nil):
+            return titleSort(lhs, rhs)
+        }
+    }
+
+    private static func titleSort(_ lhs: XBLiveAchievement, _ rhs: XBLiveAchievement) -> Bool {
+        lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+    }
+
+    private static func unlockDate(for achievement: XBLiveAchievement) -> Date? {
+        guard let unlockedAt = achievement.unlockedAt?.nilIfEmpty else {
+            return nil
+        }
+        return parsedDate(from: unlockedAt)
+    }
+
+    private static func parsedDate(from value: String) -> Date? {
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let timestamp = Double(trimmedValue) {
+            let seconds = timestamp > 9_999_999_999 ? timestamp / 1_000 : timestamp
+            return Date(timeIntervalSince1970: seconds)
+        }
+
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = isoFormatter.date(from: trimmedValue) {
+            return date
+        }
+
+        isoFormatter.formatOptions = [.withInternetDateTime]
+        if let date = isoFormatter.date(from: trimmedValue) {
+            return date
+        }
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        for format in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd"] {
+            dateFormatter.dateFormat = format
+            if let date = dateFormatter.date(from: trimmedValue) {
+                return date
+            }
+        }
+
+        return nil
     }
 }
 
@@ -811,14 +1274,192 @@ struct ProfileEventRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
+
+            Spacer(minLength: 8)
         }
         .frame(minHeight: 50)
     }
 
     private var subtitle: String {
-        [event.gameName, event.eventDate, event.startTime]
+        [event.gameName, event.scheduleText]
             .compactMap { $0?.nilIfEmpty }
             .joined(separator: " - ")
+    }
+}
+
+struct ProfileEventDetailView: View {
+    let event: XBLiveEvent
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 12) {
+                    AsyncImage(url: event.bannerURL ?? event.gameImageURL) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        default:
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.secondary.opacity(0.18))
+                                Image(systemName: "calendar")
+                                    .font(.title2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(event.title)
+                            .font(.headline)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text(event.scheduleText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.vertical, 6)
+            }
+            .dukeXThemedListRowBackground()
+
+            if let description = event.description?.nilIfEmpty {
+                Section("Description") {
+                    Text(description)
+                        .font(.body)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .dukeXThemedListRowBackground()
+            }
+
+            Section("Requirements") {
+                if requirements.isEmpty {
+                    ProfileEmptyRow(title: "No special requirements listed", systemImage: "checkmark.circle")
+                } else {
+                    ForEach(requirements) { requirement in
+                        Label(requirement.title, systemImage: requirement.systemImage)
+                            .foregroundStyle(.primary)
+                            .frame(minHeight: 36)
+                    }
+                }
+            }
+            .dukeXThemedListRowBackground()
+
+            Section("Details") {
+                if let gameName = event.gameName?.nilIfEmpty {
+                    ProfileInfoRow(title: "Game", value: gameName, systemImage: "gamecontroller")
+                }
+                ProfileInfoRow(title: "Starts", value: event.scheduleText, systemImage: "clock")
+                if let host = event.communityHost?.nilIfEmpty ?? event.createdBy?.nilIfEmpty {
+                    ProfileInfoRow(title: "Host", value: host, systemImage: "person")
+                }
+                if let tag = event.eventTag?.nilIfEmpty {
+                    ProfileInfoRow(title: "Tag", value: tag, systemImage: "tag")
+                }
+                if let source = event.source?.nilIfEmpty {
+                    ProfileInfoRow(title: "Source", value: source.capitalized, systemImage: "network")
+                }
+            }
+            .dukeXThemedListRowBackground()
+
+            if let additionalRules = event.additionalRules?.nilIfEmpty ?? event.winningParameters?.nilIfEmpty {
+                Section("Rules") {
+                    Text(additionalRules)
+                        .font(.body)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .dukeXThemedListRowBackground()
+            }
+        }
+        .navigationTitle("Event")
+        .navigationBarTitleDisplayMode(.inline)
+        .dukeXThemedListBackground(dimming: 0.18)
+    }
+
+    private var requirements: [ProfileEventRequirement] {
+        event.profileRequirements
+    }
+}
+
+private struct ProfileEventRequirement: Identifiable {
+    let title: String
+    let systemImage: String
+
+    var id: String { title }
+}
+
+private extension XBLiveEvent {
+    var profileRequirements: [ProfileEventRequirement] {
+        var requirements: [ProfileEventRequirement] = []
+
+        if dlcRequired == true || textRequires("dlc") {
+            requirements.append(ProfileEventRequirement(title: "DLC required", systemImage: "square.and.arrow.down"))
+        }
+
+        if textRequires("tu") || textRequires("title update") {
+            requirements.append(ProfileEventRequirement(title: "Title update required", systemImage: "arrow.triangle.2.circlepath"))
+        }
+
+        if moddedContentRequired == true || textRequires("modded content") {
+            requirements.append(ProfileEventRequirement(title: "Modded content required", systemImage: "hammer"))
+        }
+
+        if requiresDiscordVoice {
+            requirements.append(ProfileEventRequirement(title: "Discord voice chat", systemImage: "mic"))
+        }
+
+        if xlinkKai == true || textRequires("xlink kai") || textRequires("xlink-kai") {
+            requirements.append(ProfileEventRequirement(title: "XLink Kai", systemImage: "link"))
+        }
+
+        if isLeaderboard == true {
+            requirements.append(ProfileEventRequirement(title: "Leaderboard event", systemImage: "list.number"))
+        }
+
+        return requirements
+    }
+
+    private var requiresDiscordVoice: Bool {
+        let text = searchableRequirementText
+        if text.range(of: #"voice\s*:\s*(no|none|n/a|false)"#, options: .regularExpression) != nil {
+            return false
+        }
+        return text.contains("discord voice") ||
+            text.contains("voice: discord") ||
+            text.contains("voice chat: discord") ||
+            text.contains("using discord voice")
+    }
+
+    private func textRequires(_ keyword: String) -> Bool {
+        let escapedKeyword = NSRegularExpression.escapedPattern(for: keyword.lowercased())
+        let text = searchableRequirementText
+        let negativePattern = #"\b\#(escapedKeyword)\b[^\n\r.;]*(no|none|n/a|false)"#
+        if text.range(of: negativePattern, options: .regularExpression) != nil {
+            return false
+        }
+
+        let forwardPattern = #"\b\#(escapedKeyword)\b[^\n\r.;]*(required|yes)"#
+        let reversePattern = #"(required|yes)[^\n\r.;]*\b\#(escapedKeyword)\b"#
+        return text.range(of: forwardPattern, options: .regularExpression) != nil ||
+            text.range(of: reversePattern, options: .regularExpression) != nil
+    }
+
+    private var searchableRequirementText: String {
+        [
+            description,
+            eventTag,
+            additionalRules,
+            winningParameters
+        ]
+        .compactMap { $0?.nilIfEmpty }
+        .joined(separator: "\n")
+        .lowercased()
     }
 }
 
@@ -830,6 +1471,23 @@ struct ProfileEmptyRow: View {
         Label(title, systemImage: systemImage)
             .foregroundStyle(.secondary)
             .frame(minHeight: 44)
+    }
+}
+
+private struct ProfileCircleImage: View {
+    let image: UIImage?
+    let url: URL?
+    let fallbackInitial: String
+
+    var body: some View {
+        if let image {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .clipShape(Circle())
+        } else {
+            RemoteCircleImage(url: url, fallbackInitial: fallbackInitial)
+        }
     }
 }
 

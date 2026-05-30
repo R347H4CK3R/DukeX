@@ -3,8 +3,13 @@ import UIKit
 
 struct ProfileView: View {
     @ObservedObject var profileStore: InsigniaProfileStore
+    @AppStorage(ProfileFriendSortMode.defaultsKey) private var friendSortModeRawValue = ProfileFriendSortMode.favorites.rawValue
+    @State private var favoriteFriendKeys = ProfileFriendFavorites.load()
+
     let signIn: () -> Void
+    let signOut: () -> Void
     let changeProfileImage: () -> Void
+    let changeFriendProfileImage: (InsigniaFriend) -> Void
 
     var body: some View {
         List {
@@ -48,6 +53,9 @@ struct ProfileView: View {
         snapshot: InsigniaAuthenticatedSnapshot?
     ) -> some View {
         Section("Account") {
+            let friends = snapshot?.friends ?? []
+            let messages = profileStore.unviewedMessages(from: snapshot?.messages ?? [])
+
             NavigationLink {
                 ProfileAchievementsView(
                     snapshot: snapshot?.achievements,
@@ -63,47 +71,45 @@ struct ProfileView: View {
                 )
             }
 
-            if let minutes = snapshot?.xbProfile?.totalMinutes {
-                ProfileInfoRow(title: "Play Time", value: playTimeText(minutes), systemImage: "timer")
+            NavigationLink {
+                ProfileFriendsView(
+                    friends: friends,
+                    friendProfiles: snapshot?.friendProfiles ?? [:],
+                    friendProfileImages: profileStore.friendProfileImages,
+                    sortMode: friendSortModeBinding,
+                    favoriteFriendKeys: favoriteFriendKeys,
+                    toggleFavorite: toggleFavorite,
+                    changeFriendProfileImage: changeFriendProfileImage
+                )
+            } label: {
+                ProfileInfoRow(title: "Friends",
+                               value: countText(friends.count),
+                               systemImage: "person.2")
             }
 
-            ProfileInfoRow(title: "Last Refresh",
-                           value: profileStore.lastRefreshedText,
-                           systemImage: "clock")
-        }
-        .dukeXThemedListRowBackground()
-
-        Section("Friends") {
-            let friends = snapshot?.friends ?? []
-            if friends.isEmpty {
-                ProfileEmptyRow(title: "No friends synced", systemImage: "person.2")
-            } else {
-                ForEach(friends) { friend in
-                    NavigationLink {
-                        ProfileFriendDetailView(friend: friend, profile: snapshot?.friendProfiles[friend.key])
-                    } label: {
-                        ProfileFriendRow(friend: friend, profile: snapshot?.friendProfiles[friend.key])
-                    }
-                }
+            NavigationLink {
+                ProfileMessagesView(
+                    profileStore: profileStore,
+                    messages: snapshot?.messages ?? []
+                )
+            } label: {
+                ProfileInfoRow(title: "Messages",
+                               value: pendingMessagesText(messages.count),
+                               systemImage: "envelope")
             }
-        }
-        .dukeXThemedListRowBackground()
 
-        Section("Messages") {
-            let messages = profileStore.unviewedMessages(from: snapshot?.messages ?? [])
-            if messages.isEmpty {
-                ProfileEmptyRow(title: "No pending messages", systemImage: "envelope")
-            } else {
-                ForEach(messages) { message in
-                    NavigationLink {
-                        ProfileMessageDetailView(message: message)
-                            .onAppear {
-                                profileStore.markMessageViewed(message)
-                            }
-                    } label: {
-                        ProfileMessageRow(message: message)
-                    }
-                }
+            NavigationLink {
+                ProfilePlaytimeView(
+                    totalMinutes: snapshot?.xbProfile?.totalMinutes,
+                    games: snapshot?.playtimeGames ?? []
+                )
+            } label: {
+                ProfileInfoRow(title: "Playtime",
+                               value: playtimeSummaryText(
+                                   totalMinutes: snapshot?.xbProfile?.totalMinutes,
+                                   gameCount: snapshot?.playtimeGames.count ?? 0
+                               ),
+                               systemImage: "timer")
             }
         }
         .dukeXThemedListRowBackground()
@@ -111,12 +117,16 @@ struct ProfileView: View {
         activeGamesSection
 
         Section("Events") {
-            let events = snapshot?.events ?? []
+            let events = XBLiveEvent.currentEvents(from: snapshot?.events ?? [])
             if events.isEmpty {
-                ProfileEmptyRow(title: "No xb.live events synced", systemImage: "calendar")
+                ProfileEmptyRow(title: "No events starting in the next 24 hours", systemImage: "calendar")
             } else {
                 ForEach(events) { event in
-                    ProfileEventRow(event: event)
+                    NavigationLink {
+                        ProfileEventDetailView(event: event)
+                    } label: {
+                        ProfileEventRow(event: event)
+                    }
                 }
             }
         }
@@ -198,10 +208,24 @@ struct ProfileView: View {
 
     private var poweredBySection: some View {
         Section {
-            JustifiedProfileFootnote(
-                text: "DukeX’s profile features are powered by xb.live and Insignia services. An Insignia account and xb.live profile setup may be required to access the full functionality of the Profiles section."
-            )
-            .frame(maxWidth: .infinity)
+            VStack(spacing: 8) {
+                if profileStore.isSignedIn {
+                    Button(role: .destructive, action: signOut) {
+                        Text("Sign Out")
+                            .font(.footnote.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 30)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white)
+                    .background(Color.red.opacity(0.88), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .accessibilityLabel("Sign Out")
+                }
+
+                JustifiedProfileFootnote(
+                    text: "DukeX’s profile features are powered by xb.live and Insignia services. An Insignia account and xb.live profile setup may be required to access the full functionality of the Profiles section."
+                )
+                .frame(maxWidth: .infinity)
+            }
             .padding(.vertical, 4)
         }
         .dukeXThemedListRowBackground()
@@ -213,6 +237,45 @@ struct ProfileView: View {
             return "\(Int(hours.rounded())) hr"
         }
         return String(format: "%.1f hr", hours)
+    }
+
+    private func playtimeSummaryText(totalMinutes: Double?, gameCount: Int) -> String {
+        if let totalMinutes {
+            return playTimeText(totalMinutes)
+        }
+        if gameCount > 0 {
+            return countText(gameCount)
+        }
+        return "Not Synced"
+    }
+
+    private var friendSortMode: ProfileFriendSortMode {
+        ProfileFriendSortMode(rawValue: friendSortModeRawValue) ?? .favorites
+    }
+
+    private var friendSortModeBinding: Binding<ProfileFriendSortMode> {
+        Binding(
+            get: { friendSortMode },
+            set: { friendSortModeRawValue = $0.rawValue }
+        )
+    }
+
+    private func toggleFavorite(_ friend: InsigniaFriend) {
+        let key = ProfileFriendFavorites.key(for: friend)
+        if favoriteFriendKeys.contains(key) {
+            favoriteFriendKeys.remove(key)
+        } else {
+            favoriteFriendKeys.insert(key)
+        }
+        ProfileFriendFavorites.save(favoriteFriendKeys)
+    }
+
+    private func countText(_ count: Int) -> String {
+        count == 0 ? "None" : "\(count)"
+    }
+
+    private func pendingMessagesText(_ count: Int) -> String {
+        count == 0 ? "None" : "\(count) Pending"
     }
 }
 
