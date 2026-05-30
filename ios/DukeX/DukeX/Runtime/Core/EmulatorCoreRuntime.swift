@@ -60,6 +60,9 @@ final class EmulatorCoreRuntime: ObservableObject {
     private typealias XemuPrimeCoroutines = @convention(c) (CUnsignedInt) -> Void
     private typealias XemuSetExternalMetalLayer = @convention(c) (UnsafeMutableRawPointer?) -> Void
     private typealias XemuRequestShutdown = @convention(c) () -> Void
+    private typealias QemuSystemResetRequest = @convention(c) (Int32) -> Void
+
+    private static let qemuShutdownCauseGuestReset: Int32 = 7
 
     @Published private(set) var state: RunState
 
@@ -68,6 +71,7 @@ final class EmulatorCoreRuntime: ObservableObject {
     private var primeCoroutines: XemuPrimeCoroutines?
     private var setExternalMetalLayer: XemuSetExternalMetalLayer?
     private var requestShutdown: XemuRequestShutdown?
+    private var requestSystemReset: QemuSystemResetRequest?
     private var setXboxCameraFrameProvider: XemuSetXboxCameraFrameProvider?
 
     init(bundle: Bundle = .main) {
@@ -99,8 +103,8 @@ final class EmulatorCoreRuntime: ObservableObject {
             let xboxHeadsetMicEnabled = plan.xboxHeadsetMicEnabled
             let setExternalMetalLayer = loadSetExternalMetalLayer()
             let requestShutdown = loadRequestShutdown()
+            let requestSystemReset = loadRequestSystemReset()
             let setXboxCameraFrameProvider = loadSetXboxCameraFrameProvider()
-            let restartIntent = CoreRestartIntent()
 
             let logURL = Self.prepareRunLog(for: plan, arguments: arguments)
             state = .running(plan.gameName)
@@ -130,7 +134,7 @@ final class EmulatorCoreRuntime: ObservableObject {
                     xboxHeadsetMicEnabled: xboxHeadsetMicEnabled,
                     setExternalMetalLayer: setExternalMetalLayer,
                     requestShutdown: requestShutdown,
-                    restartIntent: restartIntent,
+                    requestSystemReset: requestSystemReset,
                     session: NativeMetalPresenterSession(
                         title: plan.gameName,
                         isDashboard: plan.isDashboard
@@ -140,16 +144,6 @@ final class EmulatorCoreRuntime: ObservableObject {
                 Task { @MainActor [weak self] in
                     NSLog("Xemu core exited with status %d", status)
                     self?.state = .exited(status)
-                    guard restartIntent.isRequested else {
-                        return
-                    }
-
-                    NSLog("Restarting Xemu core for %@", plan.gameName)
-                    try? await Task.sleep(nanoseconds: 500_000_000)
-                    guard let self, self.state.canLaunch else {
-                        return
-                    }
-                    self.launch(plan: plan)
                 }
             }
         } catch {
@@ -260,6 +254,26 @@ final class EmulatorCoreRuntime: ObservableObject {
         return requestShutdown
     }
 
+    private func loadRequestSystemReset() -> QemuSystemResetRequest? {
+        if let requestSystemReset {
+            return requestSystemReset
+        }
+
+        guard let handle else {
+            return nil
+        }
+
+        guard let symbol = dlsym(handle, "qemu_system_reset_request") else {
+            NSLog("qemu_system_reset_request is not available")
+            return nil
+        }
+
+        NSLog("Resolved qemu_system_reset_request")
+        let requestSystemReset = unsafeBitCast(symbol, to: QemuSystemResetRequest.self)
+        self.requestSystemReset = requestSystemReset
+        return requestSystemReset
+    }
+
     private func loadSetXboxCameraFrameProvider() -> XemuSetXboxCameraFrameProvider? {
         if let setXboxCameraFrameProvider {
             return setXboxCameraFrameProvider
@@ -347,7 +361,7 @@ final class EmulatorCoreRuntime: ObservableObject {
         xboxHeadsetMicEnabled: Bool,
         setExternalMetalLayer: XemuSetExternalMetalLayer?,
         requestShutdown: XemuRequestShutdown?,
-        restartIntent: CoreRestartIntent,
+        requestSystemReset: QemuSystemResetRequest?,
         session: NativeMetalPresenterSession
     ) -> Int32 {
         MetalDiagnostics.configurePerformanceHUD()
@@ -459,8 +473,14 @@ final class EmulatorCoreRuntime: ObservableObject {
                     requestShutdown?()
                 },
                 onRestartRequested: {
-                    restartIntent.request()
-                    requestShutdown?()
+                    guard let requestSystemReset else {
+                        NSLog("qemu_system_reset_request unavailable; in-place restart request ignored")
+                        return false
+                    }
+
+                    NSLog("Requesting in-place Xemu system reset for %@", session.displayTitle)
+                    requestSystemReset(Self.qemuShutdownCauseGuestReset)
+                    return true
                 }
             ) {
                 setExternalMetalLayer?(layerPointer)
@@ -522,25 +542,6 @@ private enum RuntimeError: LocalizedError {
         case .dynamicLoader(let message):
             return message
         }
-    }
-}
-
-private final class CoreRestartIntent {
-    private let lock = NSLock()
-    private var requested = false
-
-    var isRequested: Bool {
-        lock.lock()
-        defer {
-            lock.unlock()
-        }
-        return requested
-    }
-
-    func request() {
-        lock.lock()
-        requested = true
-        lock.unlock()
     }
 }
 

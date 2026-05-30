@@ -13,7 +13,7 @@ final class NativeMetalPresenterHost {
     func start(
         session: NativeMetalPresenterSession,
         onExitRequested: @escaping () -> Void,
-        onRestartRequested: @escaping () -> Void
+        onRestartRequested: @escaping () -> Bool
     ) -> UnsafeMutableRawPointer? {
         guard let scene = Self.activeWindowScene() else {
             NSLog("Native Metal presenter could not find a foreground UIWindowScene")

@@ -3,7 +3,7 @@ import UIKit
 final class GameplayExitOverlayView: UIView {
     private let session: NativeMetalPresenterSession
     private let onExitRequested: () -> Void
-    private let onRestartRequested: () -> Void
+    private let onRestartRequested: () -> Bool
     private let panelView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
     private let titleLabel = UILabel()
     private let messageLabel = UILabel()
@@ -16,7 +16,7 @@ final class GameplayExitOverlayView: UIView {
     init(
         session: NativeMetalPresenterSession,
         onExitRequested: @escaping () -> Void,
-        onRestartRequested: @escaping () -> Void
+        onRestartRequested: @escaping () -> Bool
     ) {
         self.session = session
         self.onExitRequested = onExitRequested
@@ -120,7 +120,7 @@ final class GameplayExitOverlayView: UIView {
         alpha = 0
         isHidden = true
         isUserInteractionEnabled = false
-        backgroundColor = UIColor.black.withAlphaComponent(0.42)
+        backgroundColor = UIColor.black.withAlphaComponent(0.36)
 
         let dismissButton = UIButton(type: .custom)
         dismissButton.translatesAutoresizingMaskIntoConstraints = false
@@ -128,21 +128,28 @@ final class GameplayExitOverlayView: UIView {
         addSubview(dismissButton)
 
         panelView.translatesAutoresizingMaskIntoConstraints = false
-        panelView.layer.cornerRadius = 22
+        panelView.layer.cornerRadius = 18
         panelView.layer.cornerCurve = .continuous
         panelView.layer.masksToBounds = true
         addSubview(panelView)
 
-        let stack = UIStackView(arrangedSubviews: [titleLabel, messageLabel, restartButton, exitButton, cancelButton])
+        let actionStack = UIStackView(arrangedSubviews: [restartButton, exitButton])
+        actionStack.axis = .horizontal
+        actionStack.alignment = .fill
+        actionStack.distribution = .fillEqually
+        actionStack.spacing = 8
+
+        let stack = UIStackView(arrangedSubviews: [titleLabel, messageLabel, actionStack, cancelButton])
         stack.axis = .vertical
         stack.alignment = .fill
-        stack.spacing = 12
+        stack.spacing = 8
+        stack.setCustomSpacing(12, after: messageLabel)
         stack.translatesAutoresizingMaskIntoConstraints = false
         panelView.contentView.addSubview(stack)
 
         titleLabel.text = session.isDashboard ? "Exit Dashboard?" : "Exit Gameplay?"
         titleLabel.textColor = .white
-        titleLabel.font = .preferredFont(forTextStyle: .title3).withWeight(.bold)
+        titleLabel.font = .preferredFont(forTextStyle: .headline).withWeight(.bold)
         titleLabel.numberOfLines = 0
         titleLabel.textAlignment = .center
 
@@ -150,7 +157,7 @@ final class GameplayExitOverlayView: UIView {
             "DukeX will stop the dashboard and return to the Games tab." :
             "DukeX will stop \(session.displayTitle) and return to the Games tab. Unsaved progress may be lost."
         messageLabel.textColor = UIColor.white.withAlphaComponent(0.78)
-        messageLabel.font = .preferredFont(forTextStyle: .subheadline)
+        messageLabel.font = .preferredFont(forTextStyle: .footnote)
         messageLabel.numberOfLines = 0
         messageLabel.textAlignment = .center
 
@@ -177,16 +184,16 @@ final class GameplayExitOverlayView: UIView {
 
             panelView.centerXAnchor.constraint(equalTo: safeAreaLayoutGuide.centerXAnchor),
             panelView.centerYAnchor.constraint(equalTo: safeAreaLayoutGuide.centerYAnchor),
-            panelView.widthAnchor.constraint(lessThanOrEqualTo: safeAreaLayoutGuide.widthAnchor, constant: -36),
-            panelView.widthAnchor.constraint(lessThanOrEqualToConstant: 390),
+            panelView.widthAnchor.constraint(lessThanOrEqualTo: safeAreaLayoutGuide.widthAnchor, constant: -42),
+            panelView.widthAnchor.constraint(lessThanOrEqualToConstant: 340),
 
-            stack.leadingAnchor.constraint(equalTo: panelView.contentView.leadingAnchor, constant: 18),
-            stack.trailingAnchor.constraint(equalTo: panelView.contentView.trailingAnchor, constant: -18),
-            stack.topAnchor.constraint(equalTo: panelView.contentView.topAnchor, constant: 18),
-            stack.bottomAnchor.constraint(equalTo: panelView.contentView.bottomAnchor, constant: -18),
-            restartButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
-            exitButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
-            cancelButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
+            stack.leadingAnchor.constraint(equalTo: panelView.contentView.leadingAnchor, constant: 14),
+            stack.trailingAnchor.constraint(equalTo: panelView.contentView.trailingAnchor, constant: -14),
+            stack.topAnchor.constraint(equalTo: panelView.contentView.topAnchor, constant: 14),
+            stack.bottomAnchor.constraint(equalTo: panelView.contentView.bottomAnchor, constant: -14),
+            restartButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 38),
+            exitButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 38),
+            cancelButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 36),
         ])
 
         accessibilityLabel = session.isDashboard ? "Exit Dashboard Menu" : "Exit Gameplay Menu"
@@ -220,29 +227,83 @@ final class GameplayExitOverlayView: UIView {
         cancelButton.isEnabled = false
         titleLabel.text = "Restarting..."
         messageLabel.text = session.isDashboard ?
-            "Stopping and relaunching the dashboard." :
-            "Stopping and relaunching \(session.displayTitle)."
+            "Restarting the dashboard." :
+            "Restarting \(session.displayTitle)."
         restartButton.configuration = primaryButtonConfiguration(title: "Restarting", color: .systemGray)
-        onRestartRequested()
+        guard onRestartRequested() else {
+            showRestartUnavailable()
+            return
+        }
+
+        finishRestartRequest()
+    }
+
+    private func finishRestartRequest() {
+        suppressShowUntil = CACurrentMediaTime() + 0.35
+        layer.removeAllAnimations()
+        panelView.layer.removeAllAnimations()
+        alpha = 0
+        isHidden = true
+        isUserInteractionEnabled = false
+        accessibilityViewIsModal = false
+        restoreDefaultState()
+    }
+
+    private func showRestartUnavailable() {
+        actionHasBeenRequested = false
+        restartButton.isEnabled = true
+        exitButton.isEnabled = true
+        cancelButton.isEnabled = true
+        titleLabel.text = "Restart Unavailable"
+        messageLabel.text = "DukeX could not restart this session without leaving gameplay."
+        restartButton.configuration = primaryButtonConfiguration(
+            title: session.isDashboard ? "Restart Dashboard" : "Restart Game",
+            color: .systemGreen
+        )
+    }
+
+    private func restoreDefaultState() {
+        actionHasBeenRequested = false
+        restartButton.isEnabled = true
+        exitButton.isEnabled = true
+        cancelButton.isEnabled = true
+        titleLabel.text = session.isDashboard ? "Exit Dashboard?" : "Exit Gameplay?"
+        messageLabel.text = session.isDashboard ?
+            "DukeX will stop the dashboard and return to the Games tab." :
+            "DukeX will stop \(session.displayTitle) and return to the Games tab. Unsaved progress may be lost."
+        restartButton.configuration = primaryButtonConfiguration(
+            title: session.isDashboard ? "Restart Dashboard" : "Restart Game",
+            color: .systemGreen
+        )
+        exitButton.configuration = primaryButtonConfiguration(
+            title: session.isDashboard ? "Exit Dashboard" : "Exit Game",
+            color: .systemRed
+        )
     }
 
     private func primaryButtonConfiguration(title: String, color: UIColor) -> UIButton.Configuration {
         var configuration = UIButton.Configuration.filled()
-        configuration.title = title
+        configuration.attributedTitle = AttributedString(title, attributes: buttonTitleAttributes())
         configuration.baseBackgroundColor = color
         configuration.baseForegroundColor = .white
-        configuration.cornerStyle = .large
-        configuration.contentInsets = NSDirectionalEdgeInsets(top: 11, leading: 16, bottom: 11, trailing: 16)
+        configuration.cornerStyle = .medium
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 10, bottom: 7, trailing: 10)
         return configuration
     }
 
     private func secondaryButtonConfiguration(title: String) -> UIButton.Configuration {
         var configuration = UIButton.Configuration.gray()
-        configuration.title = title
+        configuration.attributedTitle = AttributedString(title, attributes: buttonTitleAttributes())
         configuration.baseForegroundColor = .white
-        configuration.cornerStyle = .large
-        configuration.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)
+        configuration.cornerStyle = .medium
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
         return configuration
+    }
+
+    private func buttonTitleAttributes() -> AttributeContainer {
+        var attributes = AttributeContainer()
+        attributes.font = UIFont.preferredFont(forTextStyle: .subheadline).withWeight(.semibold)
+        return attributes
     }
 }
 
