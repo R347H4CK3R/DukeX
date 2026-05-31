@@ -5,7 +5,13 @@ struct ThemeSettingsView: View {
 
     var body: some View {
         Toggle(isOn: themeBinding(for: .xboxNostalgia)) {
-            Label("Xbox Nostalgia Theme", systemImage: "xbox.logo")
+            Label {
+                Text("Xbox Nostalgia Theme")
+            } icon: {
+                RingedThemeGlyph {
+                    XboxNostalgiaThemeGlyph()
+                }
+            }
         }
 
         Text("Uses an original Xbox-inspired animated background and green accent across the app.")
@@ -21,7 +27,7 @@ struct ThemeSettingsView: View {
                         .renderingMode(.template)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 17, height: 17)
+                        .frame(width: 18.4, height: 18.4)
                         .foregroundStyle(Color.accentColor)
                 }
             }
@@ -76,24 +82,52 @@ private struct RingedThemeGlyph<Content: View>: View {
     }
 }
 
+private struct XboxNostalgiaThemeGlyph: View {
+    var body: some View {
+        Image("XboxNostalgiaThemeIcon")
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .frame(width: 14.2, height: 13.25)
+            .foregroundStyle(Color.accentColor)
+            .accessibilityHidden(true)
+    }
+}
+
 private struct SunflowerThemeGlyph: View {
     var body: some View {
         ZStack {
-            ForEach(0..<12, id: \.self) { index in
-                Ellipse()
-                    .fill(Color.accentColor)
-                    .frame(width: 3.8, height: 8.4)
-                    .offset(y: -5.2)
-                    .rotationEffect(.degrees(Double(index) * 30))
-            }
+            Capsule(style: .continuous)
+                .fill(Color.accentColor)
+                .frame(width: 2.1, height: 9.2)
+                .offset(y: 4.5)
 
-            Circle()
-                .fill(.black)
-                .frame(width: 6, height: 6)
-                .blendMode(.destinationOut)
+            Ellipse()
+                .fill(Color.accentColor)
+                .frame(width: 6.6, height: 3.4)
+                .rotationEffect(.degrees(-32))
+                .offset(x: 3.8, y: 5.1)
+
+            ZStack {
+                ForEach(0..<12, id: \.self) { index in
+                    Ellipse()
+                        .fill(Color.accentColor)
+                        .frame(width: 2.9, height: 6.1)
+                        .offset(y: -3.8)
+                        .rotationEffect(.degrees(Double(index) * 30))
+                }
+
+                Circle()
+                    .fill(.black)
+                    .frame(width: 4.4, height: 4.4)
+                    .blendMode(.destinationOut)
+            }
+            .frame(width: 12, height: 12)
+            .offset(y: -3.5)
+            .compositingGroup()
         }
-        .frame(width: 17, height: 17)
-        .compositingGroup()
+        .frame(width: 18, height: 18)
+        .offset(y: 0.7)
         .accessibilityHidden(true)
     }
 }
