@@ -20,6 +20,7 @@ struct GamesLibraryView: View {
     let editGameData: (LibraryFile) -> Void
     let requestRemoveGame: (LibraryFile) -> Void
     let launchManicEmu: (() -> Void)?
+    let openXBLive: (() -> Void)?
 
     var body: some View {
         GeometryReader { geometry in
@@ -136,6 +137,15 @@ struct GamesLibraryView: View {
                             .frame(width: 24, height: 24)
                     }
                     .accessibilityLabel("Open Manic EMU")
+                } else if let openXBLive {
+                    Button(action: openXBLive) {
+                        Image("XBLCommunityIcon")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 24, height: 24)
+                    }
+                    .accessibilityLabel("Open xb.live")
                 }
             }
         }

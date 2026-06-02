@@ -57,6 +57,7 @@
 		G30000000000000000000002 /* ManicSkinVirtualController.swift in Sources */ = {isa = PBXBuildFile; fileRef = G30000000000000000000012 /* ManicSkinVirtualController.swift */; };
 		G30000000000000000000003 /* ManicSkinTouchControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = G30000000000000000000013 /* ManicSkinTouchControlsView.swift */; };
 		G30000000000000000000004 /* Skins in Resources */ = {isa = PBXBuildFile; fileRef = G30000000000000000000014 /* Skins */; };
+		H40000000000000000000001 /* SkinSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = H40000000000000000000011 /* SkinSettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -113,6 +114,7 @@
 		G30000000000000000000012 /* ManicSkinVirtualController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManicSkinVirtualController.swift; sourceTree = "<group>"; };
 		G30000000000000000000013 /* ManicSkinTouchControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManicSkinTouchControlsView.swift; sourceTree = "<group>"; };
 		G30000000000000000000014 /* Skins */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Skins; sourceTree = "<group>"; };
+		H40000000000000000000011 /* SkinSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkinSettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -245,9 +247,18 @@
 			children = (
 				B1000000000000000000001B /* SettingsView.swift */,
 				B10000000000000000000014 /* SettingsRows.swift */,
+				H40000000000000000000020 /* Skins */,
 				F10000000000000000000103 /* Library */,
 			);
 			path = Settings;
+			sourceTree = "<group>";
+		};
+		H40000000000000000000020 /* Skins */ = {
+			isa = PBXGroup;
+			children = (
+				H40000000000000000000011 /* SkinSettingsView.swift */,
+			);
+			path = Skins;
 			sourceTree = "<group>";
 		};
 		F10000000000000000000103 /* Library */ = {
@@ -547,6 +558,7 @@
 					B1000000000000000000000B /* SettingsView.swift in Sources */,
 					B10000000000000000000004 /* SettingsRows.swift in Sources */,
 					F10000000000000000000005 /* LibraryColumnSettingsView.swift in Sources */,
+					H40000000000000000000001 /* SkinSettingsView.swift in Sources */,
 					F20000000000000000000003 /* GameMetadataEditorView.swift in Sources */,
 					B10000000000000000000003 /* DocumentImportPicker.swift in Sources */,
 				B10000000000000000000005 /* AutoJITCoordinator.swift in Sources */,

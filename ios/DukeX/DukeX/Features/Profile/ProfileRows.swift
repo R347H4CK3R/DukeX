@@ -262,8 +262,8 @@ struct ProfileFriendsView: View {
 
     var body: some View {
         List {
-            ProfileFriendSortPicker(selection: $sortMode)
-                .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 8, trailing: 20))
+            ProfileFriendSortPickerRow(selection: $sortMode)
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
@@ -382,6 +382,21 @@ struct ProfileFriendsView: View {
     }
 }
 
+private struct ProfileFriendSortPickerRow: View {
+    @Binding var selection: ProfileFriendSortMode
+
+    var body: some View {
+        GeometryReader { proxy in
+            ProfileFriendSortPicker(selection: $selection)
+                .frame(width: max(0, proxy.size.width - 40))
+                .padding(.horizontal, 20)
+                .padding(.top, 4)
+                .padding(.bottom, 8)
+        }
+        .frame(height: GameLibraryGridMetrics.compactControlHeight + 12)
+    }
+}
+
 private struct ProfileFriendSortPicker: View {
     @Binding var selection: ProfileFriendSortMode
 
@@ -391,7 +406,8 @@ private struct ProfileFriendSortPicker: View {
                 Text(mode.title).tag(mode)
             }
         }
-        .frame(height: 36)
+        .frame(maxWidth: .infinity)
+        .frame(height: GameLibraryGridMetrics.compactControlHeight)
         .pickerStyle(.segmented)
         .accessibilityLabel("Sort Friends")
     }

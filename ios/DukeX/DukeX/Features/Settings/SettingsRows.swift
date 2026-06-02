@@ -180,9 +180,11 @@ struct CommunityLinkRow: View {
     let imageName: String
     let glyphSize: CGFloat
     let url: URL
+    var beforeOpen: () -> Void = {}
 
     var body: some View {
         Button {
+            beforeOpen()
             openURL(url)
         } label: {
             HStack(spacing: 12) {

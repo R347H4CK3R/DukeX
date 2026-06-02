@@ -5,6 +5,7 @@ struct SettingsView: View {
     let runtimeState: EmulatorCoreRuntime.RunState
     let autoJITStatus: String?
     let importSystemFiles: () -> Void
+    let importSkins: () -> Void
     @State private var lilyDedicationTapCount = 0
     @State private var lastLilyDedicationTapDate: Date?
     @State private var lilyDedicationJiggleAngle = 0.0
@@ -108,6 +109,20 @@ struct SettingsView: View {
             }
             .dukeXThemedListRowBackground()
 
+            Section("Skins") {
+                NavigationLink {
+                    SkinAssignmentView(store: store)
+                } label: {
+                    SkinAssignmentSummaryRow(selectedSkinName: store.selectedSkinSummaryText,
+                                             skinCount: store.skins.count)
+                }
+
+                Button(action: importSkins) {
+                    Label("Import Skin", systemImage: "tray.and.arrow.down")
+                }
+            }
+            .dukeXThemedListRowBackground()
+
             Section("Library") {
                 LibraryColumnSettingsView(store: store)
             }
@@ -200,7 +215,10 @@ struct SettingsView: View {
                     detail: "Find players, events, and help for the xb.live services used by DukeX online play.",
                     imageName: "XBLCommunityIcon",
                     glyphSize: 36,
-                    url: URL(string: "https://discord.gg/xbl")!
+                    url: URL(string: "https://discord.gg/xbl")!,
+                    beforeOpen: {
+                        store.unlockLivingOriginalTheme()
+                    }
                 )
             }
             .dukeXThemedListRowBackground()

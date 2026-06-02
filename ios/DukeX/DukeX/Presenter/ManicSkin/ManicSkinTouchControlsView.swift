@@ -18,7 +18,11 @@ final class ManicSkinTouchControlsView: UIView {
     private(set) var lastDirectTouchDeliveryTime: CFTimeInterval = 0
 
     private let skin: ManicSkin
-    private let controllerBridge = ManicSkinVirtualControllerBridge()
+    private let portraitSkin: ManicSkin?
+    private let landscapeSkin: ManicSkin?
+    private let previewMode: Bool
+    private let previewOrientation: ManicSkinPreviewOrientation?
+    private let controllerBridge: ManicSkinVirtualControllerBridge
     private let backgroundImageView = UIImageView()
     private var itemImageViews: [Int: UIImageView] = [:]
     private var resolvedRepresentation: ManicSkinResolvedRepresentation?
@@ -27,11 +31,22 @@ final class ManicSkinTouchControlsView: UIView {
     private var activeTouches: [TouchTrackingKey: ActiveTouch] = [:]
     private var touchControlsActive = false
 
-    init?(skin: ManicSkin? = ManicSkin.bundledPS1()) {
-        guard let skin else {
+    init?(
+        skin: ManicSkin? = ManicSkin.bundledPS1(),
+        portraitSkin: ManicSkin? = nil,
+        landscapeSkin: ManicSkin? = nil,
+        previewMode: Bool = false,
+        previewOrientation: ManicSkinPreviewOrientation? = nil
+    ) {
+        guard let skin = skin ?? portraitSkin ?? landscapeSkin else {
             return nil
         }
         self.skin = skin
+        self.portraitSkin = portraitSkin
+        self.landscapeSkin = landscapeSkin
+        self.previewMode = previewMode
+        self.previewOrientation = previewOrientation
+        self.controllerBridge = ManicSkinVirtualControllerBridge(publishesToCore: !previewMode)
         super.init(frame: .zero)
         configureView()
     }
@@ -41,6 +56,11 @@ final class ManicSkinTouchControlsView: UIView {
             return nil
         }
         self.skin = skin
+        self.portraitSkin = nil
+        self.landscapeSkin = nil
+        self.previewMode = false
+        self.previewOrientation = nil
+        self.controllerBridge = ManicSkinVirtualControllerBridge()
         super.init(coder: coder)
         configureView()
     }
@@ -345,7 +365,7 @@ final class ManicSkinTouchControlsView: UIView {
     }
 
     private func updateControllerMode(reason: String) {
-        let shouldUseTouchControls = !controllerBridge.hasPhysicalControllerConnected()
+        let shouldUseTouchControls = previewMode || !controllerBridge.hasPhysicalControllerConnected()
         let modeChanged = shouldUseTouchControls != touchControlsActive
         let wasActive = isTouchSkinActive
         NativeMetalDiagnostics.log(
@@ -383,9 +403,10 @@ final class ManicSkinTouchControlsView: UIView {
             return
         }
 
-        let interfaceOrientation = window?.windowScene?.interfaceOrientation
+        let interfaceOrientation = previewOrientation?.interfaceOrientation ?? window?.windowScene?.interfaceOrientation
         let orientationValue = interfaceOrientation?.rawValue ?? 0
-        let signature = "\(Int(bounds.width.rounded()))x\(Int(bounds.height.rounded()))-\(safeAreaInsets)-\(traitCollection.userInterfaceIdiom.rawValue)-\(orientationValue)"
+        let activeSkin = skin(for: interfaceOrientation)
+        let signature = "\(activeSkin.baseURL.path)-\(Int(bounds.width.rounded()))x\(Int(bounds.height.rounded()))-\(safeAreaInsets)-\(traitCollection.userInterfaceIdiom.rawValue)-\(orientationValue)"
         guard signature != lastLayoutSignature else {
             return
         }
@@ -395,11 +416,13 @@ final class ManicSkinTouchControlsView: UIView {
             "old=\(lastLayoutSignature) new=\(signature) bounds=\(NativeMetalDiagnostics.rect(bounds)) safe=\(NativeMetalDiagnostics.insets(safeAreaInsets)) orientation=\(orientationValue)"
         )
         lastLayoutSignature = signature
-        guard let resolvedRepresentation = skin.resolvedRepresentation(
+        guard let resolvedRepresentation = activeSkin.resolvedRepresentation(
             in: bounds,
             safeAreaInsets: safeAreaInsets,
             traitCollection: traitCollection,
-            interfaceOrientation: interfaceOrientation
+            interfaceOrientation: interfaceOrientation,
+            styleReferenceBounds: previewMode ? window?.screen.bounds : nil,
+            styleReferenceSafeAreaInsets: previewMode ? window?.safeAreaInsets : nil
         ) else {
             self.resolvedRepresentation = nil
             backgroundImageView.image = nil
@@ -425,6 +448,17 @@ final class ManicSkinTouchControlsView: UIView {
             "SKIN_REBUILD_RESULT",
             "resolved=1 key=\(resolvedRepresentation.key) skin=\(NativeMetalDiagnostics.rect(resolvedRepresentation.skinFrame)) screen=\(NativeMetalDiagnostics.rect(resolvedRepresentation.screenFrame ?? .zero)) items=\(resolvedRepresentation.items.count) samples=\(resolvedRepresentation.items.prefix(6).map { describeItem($0) }.joined(separator: " | "))"
         )
+    }
+
+    private func skin(for interfaceOrientation: UIInterfaceOrientation?) -> ManicSkin {
+        switch interfaceOrientation {
+        case .landscapeLeft, .landscapeRight:
+            return landscapeSkin ?? skin
+        case .portrait, .portraitUpsideDown:
+            return portraitSkin ?? skin
+        default:
+            return bounds.width > bounds.height ? (landscapeSkin ?? skin) : (portraitSkin ?? skin)
+        }
     }
 
     private var hasUsableLayoutBounds: Bool {

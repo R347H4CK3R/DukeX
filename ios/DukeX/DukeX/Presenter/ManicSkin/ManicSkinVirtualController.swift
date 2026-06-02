@@ -96,6 +96,11 @@ final class ManicSkinVirtualControllerBridge {
     private var leftThumbstick = CGPoint.zero
     private var rightThumbstick = CGPoint.zero
     private var didLogMissingCoreSymbol = false
+    private let publishesToCore: Bool
+
+    init(publishesToCore: Bool = true) {
+        self.publishesToCore = publishesToCore
+    }
 
     func setTouchControlsActive(_ active: Bool) {
         NativeMetalDiagnostics.log("TOUCH_BRIDGE_ACTIVE", "active=\(active ? 1 : 0)")
@@ -194,6 +199,10 @@ final class ManicSkinVirtualControllerBridge {
     }
 
     private func publishState() {
+        guard publishesToCore else {
+            return
+        }
+
         guard let setter = resolveSetTouchControllerState() else {
             return
         }

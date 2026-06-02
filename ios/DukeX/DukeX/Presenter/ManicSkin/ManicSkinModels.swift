@@ -43,7 +43,9 @@ struct ManicSkin {
         in bounds: CGRect,
         safeAreaInsets: UIEdgeInsets,
         traitCollection: UITraitCollection,
-        interfaceOrientation: UIInterfaceOrientation?
+        interfaceOrientation: UIInterfaceOrientation?,
+        styleReferenceBounds: CGRect? = nil,
+        styleReferenceSafeAreaInsets: UIEdgeInsets? = nil
     ) -> ManicSkinResolvedRepresentation? {
         guard bounds.width > 1, bounds.height > 1 else {
             return nil
@@ -52,26 +54,26 @@ struct ManicSkin {
         let deviceKey = traitCollection.userInterfaceIdiom == .pad ? "ipad" : "iphone"
         let styleKey = preferredStyleKey(
             for: deviceKey,
-            bounds: bounds,
-            safeAreaInsets: safeAreaInsets
+            bounds: styleReferenceBounds ?? bounds,
+            safeAreaInsets: styleReferenceSafeAreaInsets ?? safeAreaInsets
         )
         let orientationKey = Self.orientationKey(
             for: interfaceOrientation,
             bounds: bounds
         )
 
-        guard let deviceRepresentations = definition.representations[deviceKey],
-              let styleRepresentations = deviceRepresentations[styleKey] ?? deviceRepresentations["standard"],
-              let representation = styleRepresentations[orientationKey] else {
+        guard let representation = representation(
+            deviceKey: deviceKey,
+            styleKey: styleKey,
+            orientationKey: orientationKey
+        ) else {
             NSLog("Manic skin representation unavailable for %@/%@/%@", deviceKey, styleKey, orientationKey)
             return nil
         }
 
         let backgroundName = representation.assets.resizable ?? representation.assets.standard
         let backgroundURL = backgroundName.map(assetURL(named:))
-        let designSize = representation.mappingSize?.size ??
-            backgroundURL.flatMap { ManicSkinPDFRenderer.pageSize(for: $0) } ??
-            representation.itemExtents
+        let designSize = designSize(for: representation)
         guard designSize.width > 1, designSize.height > 1 else {
             return nil
         }
@@ -143,6 +145,55 @@ struct ManicSkin {
         )
     }
 
+    func previewAspectRatio(
+        for orientation: ManicSkinPreviewOrientation,
+        traitCollection: UITraitCollection? = nil,
+        screenBounds: CGRect = UIScreen.main.bounds,
+        safeAreaInsets: UIEdgeInsets = .zero
+    ) -> CGFloat? {
+        let deviceKey = (traitCollection?.userInterfaceIdiom ?? UIDevice.current.userInterfaceIdiom) == .pad ?
+            "ipad" :
+            "iphone"
+        let styleKey = preferredStyleKey(
+            for: deviceKey,
+            bounds: screenBounds,
+            safeAreaInsets: safeAreaInsets
+        )
+        guard let representation = representation(
+            deviceKey: deviceKey,
+            styleKey: styleKey,
+            orientationKey: orientation.representationKey
+        ) else {
+            return nil
+        }
+
+        let size = designSize(for: representation)
+        guard size.width > 1, size.height > 1 else {
+            return nil
+        }
+        return size.width / size.height
+    }
+
+    private func representation(
+        deviceKey: String,
+        styleKey: String,
+        orientationKey: String
+    ) -> ManicSkinRepresentation? {
+        guard let deviceRepresentations = definition.representations[deviceKey] else {
+            return nil
+        }
+
+        return (deviceRepresentations[styleKey] ?? deviceRepresentations["standard"])?[orientationKey]
+    }
+
+    private func designSize(for representation: ManicSkinRepresentation) -> CGSize {
+        let backgroundName = representation.assets.resizable ?? representation.assets.standard
+        let backgroundURL = backgroundName.map(assetURL(named:))
+        return representation.mappingSize?.size ??
+            backgroundURL.flatMap { ManicSkinPDFRenderer.pageSize(for: $0) } ??
+            representation.itemExtents
+    }
+
     private func preferredStyleKey(
         for deviceKey: String,
         bounds: CGRect,
@@ -169,6 +220,66 @@ struct ManicSkin {
         default:
             return bounds.width > bounds.height ? "landscape" : "portrait"
         }
+    }
+}
+
+enum ManicSkinPreviewOrientation: String, CaseIterable, Identifiable {
+    case portrait
+    case landscape
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .portrait:
+            return "Portrait"
+        case .landscape:
+            return "Landscape"
+        }
+    }
+
+    var representationKey: String {
+        rawValue
+    }
+
+    var interfaceOrientation: UIInterfaceOrientation {
+        switch self {
+        case .portrait:
+            return .portrait
+        case .landscape:
+            return .landscapeRight
+        }
+    }
+
+    var fallbackAspectRatio: CGFloat {
+        switch self {
+        case .portrait:
+            return UIDevice.current.userInterfaceIdiom == .pad ? 0.75 : 0.48
+        case .landscape:
+            return UIDevice.current.userInterfaceIdiom == .pad ? 1.33 : 2.05
+        }
+    }
+}
+
+struct ManicSkinLibraryItem: Identifiable, Equatable {
+    let url: URL
+    let definitionName: String
+
+    var id: String { url.standardizedFileURL.path }
+    var fileName: String { url.lastPathComponent }
+    var displayName: String { url.deletingPathExtension().lastPathComponent }
+
+    init?(url: URL) {
+        guard let skin = ManicSkin(baseURL: url) else {
+            return nil
+        }
+
+        self.url = url
+        definitionName = skin.name
+    }
+
+    func makeSkin() -> ManicSkin? {
+        ManicSkin(baseURL: url)
     }
 }
 

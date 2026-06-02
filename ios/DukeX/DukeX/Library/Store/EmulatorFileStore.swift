@@ -10,11 +10,36 @@ final class EmulatorFileStore: ObservableObject {
     @Published private(set) var eeprom: LibraryFile?
     @Published private(set) var hdd: LibraryFile?
     @Published private(set) var games: [LibraryFile] = []
+    @Published private(set) var skins: [ManicSkinLibraryItem] = []
     @Published var selectedGameID = "" {
         didSet {
             UserDefaults.standard.set(selectedGameID, forKey: Self.selectedGameIDKey)
             if let selectedGame {
                 UserDefaults.standard.set(selectedGame.fileName, forKey: Self.selectedGameNameKey)
+            }
+        }
+    }
+    @Published var selectedSkinID = "" {
+        didSet {
+            UserDefaults.standard.set(selectedSkinID, forKey: Self.selectedSkinIDKey)
+            if let selectedSkin {
+                UserDefaults.standard.set(selectedSkin.fileName, forKey: Self.selectedSkinNameKey)
+            }
+        }
+    }
+    @Published var selectedPortraitSkinID = "" {
+        didSet {
+            UserDefaults.standard.set(selectedPortraitSkinID, forKey: Self.selectedPortraitSkinIDKey)
+            if let selectedPortraitSkin {
+                UserDefaults.standard.set(selectedPortraitSkin.fileName, forKey: Self.selectedPortraitSkinNameKey)
+            }
+        }
+    }
+    @Published var selectedLandscapeSkinID = "" {
+        didSet {
+            UserDefaults.standard.set(selectedLandscapeSkinID, forKey: Self.selectedLandscapeSkinIDKey)
+            if let selectedLandscapeSkin {
+                UserDefaults.standard.set(selectedLandscapeSkin.fileName, forKey: Self.selectedLandscapeSkinNameKey)
             }
         }
     }
@@ -90,6 +115,11 @@ final class EmulatorFileStore: ObservableObject {
             UserDefaults.standard.set(alwaysRememberedThemeUnlocked, forKey: Self.alwaysRememberedThemeUnlockedKey)
         }
     }
+    @Published private(set) var livingOriginalThemeUnlocked: Bool {
+        didSet {
+            UserDefaults.standard.set(livingOriginalThemeUnlocked, forKey: Self.livingOriginalThemeUnlockedKey)
+        }
+    }
     @Published var themeMode: DukeXThemeMode {
         didSet {
             UserDefaults.standard.set(themeMode.rawValue, forKey: DukeXTheme.selectedThemeDefaultsKey)
@@ -136,6 +166,12 @@ final class EmulatorFileStore: ObservableObject {
     static let libraryTabsMigrationKey = "LibraryTabsDisabledInitialDashboardAutolaunch"
     static let selectedGameIDKey = "SelectedGameID"
     static let selectedGameNameKey = "SelectedGameName"
+    static let selectedSkinIDKey = "DukeXSelectedSkinID"
+    static let selectedSkinNameKey = "DukeXSelectedSkinName"
+    static let selectedPortraitSkinIDKey = "DukeXSelectedPortraitSkinID"
+    static let selectedPortraitSkinNameKey = "DukeXSelectedPortraitSkinName"
+    static let selectedLandscapeSkinIDKey = "DukeXSelectedLandscapeSkinID"
+    static let selectedLandscapeSkinNameKey = "DukeXSelectedLandscapeSkinName"
     static let metalHUDEnabledKey = "DukeXMetalHUDEnabled"
     static let forceThirtyFPSLockEnabledKey = "DukeXForceThirtyFPSLockEnabled"
     static let depthClampEnabledKey = "DukeXDepthClampEnabled"
@@ -143,6 +179,7 @@ final class EmulatorFileStore: ObservableObject {
     static let xboxHeadsetMicPeripheralEnabledKey = "DukeXXboxHeadsetMicPeripheralEnabled"
     static let gameLibraryListViewEnabledKey = "DukeXGameLibraryListViewEnabled"
     static let alwaysRememberedThemeUnlockedKey = "DukeXAlwaysRememberedThemeUnlocked"
+    static let livingOriginalThemeUnlockedKey = "DukeXLivingOriginalThemeUnlocked"
     static let forceInsigniaNATKey = "ForceInsigniaNATEnabled"
     static let natDNSServerKey = "NATDNSServer"
     static let natHostPortKey = "NATHostPort"
@@ -155,9 +192,37 @@ final class EmulatorFileStore: ObservableObject {
     let coversDirectoryURL: URL
     let gameConfigsDirectoryURL: URL
     let shaderCachesDirectoryURL: URL
+    let skinsDirectoryURL: URL
 
     var selectedGame: LibraryFile? {
         games.first { $0.id == selectedGameID }
+    }
+
+    var selectedSkin: ManicSkinLibraryItem? {
+        selectedPortraitSkin ?? selectedLandscapeSkin ?? skins.first { $0.id == selectedSkinID }
+    }
+
+    var selectedPortraitSkin: ManicSkinLibraryItem? {
+        skins.first { $0.id == selectedPortraitSkinID }
+    }
+
+    var selectedLandscapeSkin: ManicSkinLibraryItem? {
+        skins.first { $0.id == selectedLandscapeSkinID }
+    }
+
+    var selectedSkinSummaryText: String? {
+        switch (selectedPortraitSkin, selectedLandscapeSkin) {
+        case (.some(let portrait), .some(let landscape)) where portrait.id == landscape.id:
+            return portrait.displayName
+        case (.some(let portrait), .some(let landscape)):
+            return "\(portrait.displayName) / \(landscape.displayName)"
+        case (.some(let portrait), .none):
+            return portrait.displayName
+        case (.none, .some(let landscape)):
+            return landscape.displayName
+        case (.none, .none):
+            return selectedSkin?.displayName
+        }
     }
 
     func game(matchingTitleID titleID: String) -> LibraryFile? {
@@ -192,6 +257,9 @@ final class EmulatorFileStore: ObservableObject {
         guard mode != .alwaysRemembered || alwaysRememberedThemeUnlocked else {
             return
         }
+        guard mode != .livingOriginal || livingOriginalThemeUnlocked else {
+            return
+        }
 
         if enabled {
             themeMode = mode
@@ -208,6 +276,36 @@ final class EmulatorFileStore: ObservableObject {
         alwaysRememberedThemeUnlocked = true
     }
 
+    func unlockLivingOriginalTheme() {
+        guard !livingOriginalThemeUnlocked else {
+            return
+        }
+
+        livingOriginalThemeUnlocked = true
+    }
+
+    func selectedSkin(for orientation: ManicSkinPreviewOrientation) -> ManicSkinLibraryItem? {
+        switch orientation {
+        case .portrait:
+            return selectedPortraitSkin ?? selectedSkin
+        case .landscape:
+            return selectedLandscapeSkin ?? selectedSkin
+        }
+    }
+
+    func setSelectedSkin(_ skin: ManicSkinLibraryItem, for orientation: ManicSkinPreviewOrientation) {
+        switch orientation {
+        case .portrait:
+            selectedPortraitSkinID = skin.id
+        case .landscape:
+            selectedLandscapeSkinID = skin.id
+        }
+
+        if selectedSkinID.isEmpty {
+            selectedSkinID = skin.id
+        }
+    }
+
     init(fileManager: FileManager = .default) {
         documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
         biosDirectoryURL = documentsURL.appendingPathComponent("BIOS", isDirectory: true)
@@ -215,6 +313,7 @@ final class EmulatorFileStore: ObservableObject {
         coversDirectoryURL = documentsURL.appendingPathComponent("Covers", isDirectory: true)
         gameConfigsDirectoryURL = documentsURL.appendingPathComponent("GameConfigs", isDirectory: true)
         shaderCachesDirectoryURL = documentsURL.appendingPathComponent("ShaderCaches", isDirectory: true)
+        skinsDirectoryURL = documentsURL.appendingPathComponent("Skins", isDirectory: true)
         if UserDefaults.standard.object(forKey: Self.libraryTabsMigrationKey) == nil {
             UserDefaults.standard.set(false, forKey: Self.autoLaunchDashboardOnOpenKey)
             UserDefaults.standard.set(true, forKey: Self.libraryTabsMigrationKey)
@@ -235,6 +334,8 @@ final class EmulatorFileStore: ObservableObject {
         gameLibraryListViewEnabled = UserDefaults.standard.object(forKey: Self.gameLibraryListViewEnabledKey) as? Bool ?? false
         alwaysRememberedThemeUnlocked =
             UserDefaults.standard.object(forKey: Self.alwaysRememberedThemeUnlockedKey) as? Bool ?? false
+        livingOriginalThemeUnlocked =
+            UserDefaults.standard.object(forKey: Self.livingOriginalThemeUnlockedKey) as? Bool ?? false
         themeMode = Self.currentThemeMode()
         tbCacheSize = TBCacheSize.current
         forceInsigniaNATEnabled = UserDefaults.standard.object(forKey: Self.forceInsigniaNATKey) as? Bool ?? true
@@ -243,6 +344,9 @@ final class EmulatorFileStore: ObservableObject {
         natGuestPort = UserDefaults.standard.string(forKey: Self.natGuestPortKey) ?? NetworkSettings.defaultGuestPort
         natPortProtocol = UserDefaults.standard.string(forKey: Self.natPortProtocolKey) ?? NetworkSettings.defaultProtocol
         selectedGameID = UserDefaults.standard.string(forKey: Self.selectedGameIDKey) ?? ""
+        selectedSkinID = UserDefaults.standard.string(forKey: Self.selectedSkinIDKey) ?? ""
+        selectedPortraitSkinID = UserDefaults.standard.string(forKey: Self.selectedPortraitSkinIDKey) ?? selectedSkinID
+        selectedLandscapeSkinID = UserDefaults.standard.string(forKey: Self.selectedLandscapeSkinIDKey) ?? selectedSkinID
         setenv("XEMU_IOS_UNIVERSAL_JIT", UniversalJITSupport.environmentValue(for: universalJITEnabled), 1)
         setenv("XEMU_IOS_JIT_MODE", UniversalJITSupport.currentMode.environmentValue, 1)
     }
@@ -250,10 +354,15 @@ final class EmulatorFileStore: ObservableObject {
     private static func currentThemeMode() -> DukeXThemeMode {
         let alwaysRememberedUnlocked =
             UserDefaults.standard.object(forKey: Self.alwaysRememberedThemeUnlockedKey) as? Bool ?? false
+        let livingOriginalUnlocked =
+            UserDefaults.standard.object(forKey: Self.livingOriginalThemeUnlockedKey) as? Bool ?? false
 
         if let rawValue = UserDefaults.standard.string(forKey: DukeXTheme.selectedThemeDefaultsKey),
            let mode = DukeXThemeMode(rawValue: rawValue) {
             if mode == .alwaysRemembered && !alwaysRememberedUnlocked {
+                return .standard
+            }
+            if mode == .livingOriginal && !livingOriginalUnlocked {
                 return .standard
             }
 
@@ -278,8 +387,10 @@ final class EmulatorFileStore: ObservableObject {
 
     func refresh() throws {
         try prepareDirectories()
+        try installBundledSkinsIfNeeded()
         let systemFiles = try scanDirectory(biosDirectoryURL)
         let gameFiles = try scanDirectory(romsDirectoryURL)
+        let skinFiles = try scanSkinsDirectory()
         mcpx = systemFiles
             .filter { $0.url.pathExtension.caseInsensitiveCompare("bin") == .orderedSame && $0.size == 512 }
             .sorted(by: sortByName)
@@ -309,6 +420,8 @@ final class EmulatorFileStore: ObservableObject {
             .map { makeGameLibraryFile(from: $0) }
             .sorted(by: sortByName)
 
+        skins = skinFiles
+
         try refreshFolderStorageUsage()
 
         if selectedGame == nil {
@@ -320,26 +433,53 @@ final class EmulatorFileStore: ObservableObject {
                 selectedGameID = games.first?.id ?? ""
             }
         }
+
+        if selectedSkin == nil {
+            let selectedName = UserDefaults.standard.string(forKey: Self.selectedSkinNameKey)
+            if let selectedName,
+               let matchingSkin = skins.first(where: { $0.fileName == selectedName }) {
+                selectedSkinID = matchingSkin.id
+            } else {
+                selectedSkinID = skins.first?.id ?? ""
+            }
+        }
+
+        repairSelectedSkin(
+            current: \.selectedPortraitSkin,
+            id: \.selectedPortraitSkinID,
+            nameKey: Self.selectedPortraitSkinNameKey
+        )
+        repairSelectedSkin(
+            current: \.selectedLandscapeSkin,
+            id: \.selectedLandscapeSkinID,
+            nameKey: Self.selectedLandscapeSkinNameKey
+        )
     }
 
     func importFiles(_ urls: [URL], to target: ImportTarget) {
         do {
-            let destinationDirectory = target == .systemFiles ? biosDirectoryURL : romsDirectoryURL
             try prepareDirectories()
 
-            for url in urls {
-                let didStartAccessing = url.startAccessingSecurityScopedResource()
-                defer {
-                    if didStartAccessing {
-                        url.stopAccessingSecurityScopedResource()
-                    }
-                }
+            switch target {
+            case .skins:
+                try importSkinFiles(urls)
+            case .systemFiles, .games:
+                let destinationDirectory = target == .systemFiles ? biosDirectoryURL : romsDirectoryURL
 
-                let destination = destinationDirectory.appendingPathComponent(url.lastPathComponent)
-                if FileManager.default.fileExists(atPath: destination.path) {
-                    try FileManager.default.removeItem(at: destination)
+                for url in urls {
+                    let didStartAccessing = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if didStartAccessing {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+
+                    let destination = destinationDirectory.appendingPathComponent(url.lastPathComponent)
+                    if FileManager.default.fileExists(atPath: destination.path) {
+                        try FileManager.default.removeItem(at: destination)
+                    }
+                    try FileManager.default.copyItem(at: url, to: destination)
                 }
-                try FileManager.default.copyItem(at: url, to: destination)
             }
 
             try refresh()
@@ -375,7 +515,9 @@ final class EmulatorFileStore: ObservableObject {
             tbCacheSize: tbCacheSize,
             shaderCacheURL: shaderCacheURL(for: selectedGame),
             xboxCameraEnabled: false,
-            xboxHeadsetMicEnabled: xboxHeadsetMicPeripheralEnabled
+            xboxHeadsetMicEnabled: xboxHeadsetMicPeripheralEnabled,
+            manicSkinPortraitURL: selectedPortraitSkin?.url ?? selectedSkin?.url,
+            manicSkinLandscapeURL: selectedLandscapeSkin?.url ?? selectedSkin?.url
         )
     }
 
@@ -395,7 +537,9 @@ final class EmulatorFileStore: ObservableObject {
             tbCacheSize: tbCacheSize,
             shaderCacheURL: dashboardShaderCacheURL,
             xboxCameraEnabled: false,
-            xboxHeadsetMicEnabled: xboxHeadsetMicPeripheralEnabled
+            xboxHeadsetMicEnabled: xboxHeadsetMicPeripheralEnabled,
+            manicSkinPortraitURL: selectedPortraitSkin?.url ?? selectedSkin?.url,
+            manicSkinLandscapeURL: selectedLandscapeSkin?.url ?? selectedSkin?.url
         )
     }
 
@@ -477,6 +621,7 @@ final class EmulatorFileStore: ObservableObject {
         try FileManager.default.createDirectory(at: coversDirectoryURL, withIntermediateDirectories: true, attributes: nil)
         try FileManager.default.createDirectory(at: gameConfigsDirectoryURL, withIntermediateDirectories: true, attributes: nil)
         try FileManager.default.createDirectory(at: shaderCachesDirectoryURL, withIntermediateDirectories: true, attributes: nil)
+        try FileManager.default.createDirectory(at: skinsDirectoryURL, withIntermediateDirectories: true, attributes: nil)
     }
 
     private func scanDirectory(_ url: URL) throws -> [LibraryFile] {
@@ -501,6 +646,124 @@ final class EmulatorFileStore: ObservableObject {
                 customConfigURL: nil
             )
         }
+    }
+
+    private func installBundledSkinsIfNeeded() throws {
+        guard let bundledPS1URL = Bundle.main.url(
+            forResource: "PS1",
+            withExtension: "manicskin",
+            subdirectory: "Skins"
+        ) else {
+            return
+        }
+
+        let destination = skinsDirectoryURL.appendingPathComponent(bundledPS1URL.lastPathComponent, isDirectory: true)
+        try FileManager.default.copyItemIfNeeded(from: bundledPS1URL, to: destination)
+    }
+
+    private func scanSkinsDirectory() throws -> [ManicSkinLibraryItem] {
+        let keys: Set<URLResourceKey> = [.isDirectoryKey]
+        return try FileManager.default.contentsOfDirectory(
+            at: skinsDirectoryURL,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]
+        ).compactMap { url in
+            guard url.pathExtension.caseInsensitiveCompare("manicskin") == .orderedSame else {
+                return nil
+            }
+
+            let values = try url.resourceValues(forKeys: keys)
+            guard values.isDirectory == true else {
+                return nil
+            }
+
+            return ManicSkinLibraryItem(url: url)
+        }
+        .sorted {
+            $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+        }
+    }
+
+    private func importSkinFiles(_ urls: [URL]) throws {
+        var importedCount = 0
+        for url in urls {
+            let didStartAccessing = url.startAccessingSecurityScopedResource()
+            defer {
+                if didStartAccessing {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            importedCount += try importSkinFileOrFolder(at: url)
+        }
+
+        if importedCount == 0 {
+            throw SkinImportError.noSkinsFound
+        }
+    }
+
+    private func importSkinFileOrFolder(at url: URL) throws -> Int {
+        if url.pathExtension.caseInsensitiveCompare("manicskin") == .orderedSame {
+            let destination = uniqueSkinDestinationURL(for: url)
+            try FileManager.default.copyItem(at: url, to: destination)
+            return 1
+        }
+
+        let values = try url.resourceValues(forKeys: [.isDirectoryKey])
+        guard values.isDirectory == true else {
+            return 0
+        }
+
+        let children = try FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )
+        var importedCount = 0
+        for child in children where child.pathExtension.caseInsensitiveCompare("manicskin") == .orderedSame {
+            let values = try child.resourceValues(forKeys: [.isDirectoryKey])
+            guard values.isDirectory == true else {
+                continue
+            }
+
+            let destination = uniqueSkinDestinationURL(for: child)
+            try FileManager.default.copyItem(at: child, to: destination)
+            importedCount += 1
+        }
+        return importedCount
+    }
+
+    private func repairSelectedSkin(
+        current: KeyPath<EmulatorFileStore, ManicSkinLibraryItem?>,
+        id: ReferenceWritableKeyPath<EmulatorFileStore, String>,
+        nameKey: String
+    ) {
+        guard self[keyPath: current] == nil else {
+            return
+        }
+
+        let selectedName = UserDefaults.standard.string(forKey: nameKey)
+        if let selectedName,
+           let matchingSkin = skins.first(where: { $0.fileName == selectedName }) {
+            self[keyPath: id] = matchingSkin.id
+        } else {
+            self[keyPath: id] = selectedSkin?.id ?? skins.first?.id ?? ""
+        }
+    }
+
+    private func uniqueSkinDestinationURL(for url: URL) -> URL {
+        let fileManager = FileManager.default
+        let baseName = url.deletingPathExtension().lastPathComponent
+        let pathExtension = url.pathExtension.isEmpty ? "manicskin" : url.pathExtension
+        var destination = skinsDirectoryURL.appendingPathComponent("\(baseName).\(pathExtension)", isDirectory: true)
+        var suffix = 2
+
+        while fileManager.fileExists(atPath: destination.path) {
+            destination = skinsDirectoryURL.appendingPathComponent("\(baseName) \(suffix).\(pathExtension)", isDirectory: true)
+            suffix += 1
+        }
+
+        return destination
     }
 
     private func makeGameLibraryFile(from file: LibraryFile) -> LibraryFile {
@@ -688,5 +951,16 @@ final class EmulatorFileStore: ObservableObject {
             hash = hash &* prime
         }
         return String(hash, radix: 16)
+    }
+}
+
+private enum SkinImportError: LocalizedError {
+    case noSkinsFound
+
+    var errorDescription: String? {
+        switch self {
+        case .noSkinsFound:
+            return "No .manicskin folders were found in the selected item."
+        }
     }
 }

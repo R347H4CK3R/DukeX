@@ -134,7 +134,14 @@ final class NativeMetalPresenterHost {
         }
         applyPresenterViewport(nil)
 
-        if let manicSkinControlsView = ManicSkinTouchControlsView() {
+        let portraitSkin = session.manicSkinPortraitURL.flatMap { ManicSkin(baseURL: $0) }
+        let landscapeSkin = session.manicSkinLandscapeURL.flatMap { ManicSkin(baseURL: $0) }
+        let selectedSkin = portraitSkin ?? landscapeSkin ?? ManicSkin.bundledPS1()
+        if let manicSkinControlsView = ManicSkinTouchControlsView(
+            skin: selectedSkin,
+            portraitSkin: portraitSkin,
+            landscapeSkin: landscapeSkin
+        ) {
             manicSkinControlsView.translatesAutoresizingMaskIntoConstraints = false
             manicSkinControlsView.onTouchControlsModeChanged = { [weak self] _ in
                 self?.handleManicSkinViewportChange(reason: "manicskin-mode")

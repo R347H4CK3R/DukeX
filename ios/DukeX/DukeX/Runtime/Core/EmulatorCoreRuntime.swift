@@ -164,7 +164,9 @@ final class EmulatorCoreRuntime: ObservableObject {
                     requestSystemReset: requestSystemReset,
                     session: NativeMetalPresenterSession(
                         title: plan.gameName,
-                        isDashboard: plan.isDashboard
+                        isDashboard: plan.isDashboard,
+                        manicSkinPortraitURL: plan.manicSkinPortraitURL,
+                        manicSkinLandscapeURL: plan.manicSkinLandscapeURL
                     )
                 )
 

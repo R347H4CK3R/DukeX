@@ -63,7 +63,8 @@ struct ContentView: View {
                         clearShaderCache: clearShaderCache,
                         editGameData: { gameMetadataTarget = $0 },
                         requestRemoveGame: { removalConfirmationTarget = $0 },
-                        launchManicEmu: store.themeMode == .manicFeelings ? openManicEmu : nil
+                        launchManicEmu: store.themeMode == .manicFeelings ? openManicEmu : nil,
+                        openXBLive: store.themeMode == .livingOriginal ? openXBLive : nil
                     )
                     .navigationTitle("DukeX")
                     .navigationBarTitleDisplayMode(.inline)
@@ -100,7 +101,8 @@ struct ContentView: View {
                         store: store,
                         runtimeState: runtime.state,
                         autoJITStatus: autoJIT.status,
-                        importSystemFiles: { importTarget = .systemFiles }
+                        importSystemFiles: { importTarget = .systemFiles },
+                        importSkins: { importTarget = .skins }
                     )
                         .navigationTitle("DukeX")
                         .navigationBarTitleDisplayMode(.inline)
@@ -425,6 +427,14 @@ struct ContentView: View {
         } else {
             application.open(fallbackURL)
         }
+    }
+
+    private func openXBLive() {
+        guard let url = URL(string: "https://xb.live/") else {
+            return
+        }
+
+        UIApplication.shared.open(url)
     }
 
     private func handleLaunchLink(_ url: URL) {

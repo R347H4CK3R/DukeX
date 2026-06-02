@@ -93,6 +93,7 @@ enum GameLaunchLink {
 enum ImportTarget: String, Identifiable {
     case systemFiles
     case games
+    case skins
 
     var id: String { rawValue }
 
@@ -114,6 +115,12 @@ enum ImportTarget: String, Identifiable {
                 UTType(filenameExtension: "iso"),
                 .diskImage,
                 .data,
+                .item
+            ].compactMap { $0 }
+        case .skins:
+            return [
+                UTType(filenameExtension: "manicskin"),
+                .folder,
                 .item
             ].compactMap { $0 }
         }

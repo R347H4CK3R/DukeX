@@ -12,6 +12,8 @@ struct XemuLaunchPlan: Identifiable {
     let isDashboard: Bool
     let xboxCameraEnabled: Bool
     let xboxHeadsetMicEnabled: Bool
+    let manicSkinPortraitURL: URL?
+    let manicSkinLandscapeURL: URL?
 
     var commandLine: String {
         arguments.map(Self.shellQuoted).joined(separator: " ")
@@ -30,7 +32,9 @@ struct XemuLaunchPlan: Identifiable {
         tbCacheSize: TBCacheSize,
         shaderCacheURL: URL,
         xboxCameraEnabled: Bool,
-        xboxHeadsetMicEnabled: Bool
+        xboxHeadsetMicEnabled: Bool,
+        manicSkinPortraitURL: URL?,
+        manicSkinLandscapeURL: URL?
     ) throws -> XemuLaunchPlan {
         let configURL = documentsURL.appendingPathComponent("xemu-ios.toml")
         let gamesPath = game?.url.deletingLastPathComponent().path ?? gamesDirectoryURL.path
@@ -130,7 +134,9 @@ struct XemuLaunchPlan: Identifiable {
             gameName: launchName,
             isDashboard: game == nil,
             xboxCameraEnabled: xboxCameraEnabled,
-            xboxHeadsetMicEnabled: xboxHeadsetMicEnabled
+            xboxHeadsetMicEnabled: xboxHeadsetMicEnabled,
+            manicSkinPortraitURL: manicSkinPortraitURL,
+            manicSkinLandscapeURL: manicSkinLandscapeURL
         )
     }
 

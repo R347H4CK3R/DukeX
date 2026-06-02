@@ -37,6 +37,22 @@ struct ThemeSettingsView: View {
             .font(.footnote)
             .foregroundStyle(.secondary)
 
+        if store.livingOriginalThemeUnlocked {
+            Toggle(isOn: themeBinding(for: .livingOriginal)) {
+                Label {
+                    Text("Living Original Theme")
+                } icon: {
+                    RingedThemeGlyph {
+                        XBLThemeGlyph()
+                    }
+                }
+            }
+
+            Text("Uses an OG XBL Team-inspired animated background and an orange accent across the app.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+
         if store.alwaysRememberedThemeUnlocked {
             Toggle(isOn: themeBinding(for: .alwaysRemembered)) {
                 Label {
@@ -89,6 +105,18 @@ private struct XboxNostalgiaThemeGlyph: View {
             .resizable()
             .scaledToFit()
             .frame(width: 14.2, height: 13.25)
+            .foregroundStyle(Color.accentColor)
+            .accessibilityHidden(true)
+    }
+}
+
+private struct XBLThemeGlyph: View {
+    var body: some View {
+        Image("XBLCommunityIcon")
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .frame(width: 15.8, height: 15.8)
             .foregroundStyle(Color.accentColor)
             .accessibilityHidden(true)
     }
