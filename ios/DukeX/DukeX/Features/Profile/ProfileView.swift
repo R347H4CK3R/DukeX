@@ -73,9 +73,7 @@ struct ProfileView: View {
 
             NavigationLink {
                 ProfileFriendsView(
-                    friends: friends,
-                    friendProfiles: snapshot?.friendProfiles ?? [:],
-                    friendProfileImages: profileStore.friendProfileImages,
+                    profileStore: profileStore,
                     sortMode: friendSortModeBinding,
                     favoriteFriendKeys: favoriteFriendKeys,
                     toggleFavorite: toggleFavorite,

@@ -128,9 +128,76 @@ struct InsigniaFriend: Codable, Identifiable, Equatable {
     let game: String?
     let duration: String?
     let lastSeen: String?
+    let lastSeenAt: Double?
 
     var id: String { key }
     var key: String { gamertag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: ProfileFlexibleCodingKey.self)
+        gamertag = container.flexibleString(for: [
+            "gamertag",
+            "username",
+            "displayName",
+            "display_name",
+            "name"
+        ]) ?? "Unknown"
+        status = container.flexibleString(for: [
+            "status",
+            "lastState",
+            "last_state",
+            "state"
+        ]) ?? "Offline"
+        game = container.flexibleString(for: [
+            "game",
+            "currentGame",
+            "current_game",
+            "activeGame",
+            "active_game"
+        ])
+        duration = container.flexibleString(for: [
+            "duration",
+            "timeOnline",
+            "time_online",
+            "onlineDuration",
+            "online_duration"
+        ])
+        lastSeen = container.flexibleString(for: [
+            "lastSeen",
+            "last_seen",
+            "lastOnline",
+            "last_online",
+            "lastSeenText",
+            "last_seen_text",
+            "lastOnlineText",
+            "last_online_text"
+        ])
+        lastSeenAt = container.flexibleTimestamp(for: [
+            "lastSeenAt",
+            "last_seen_at",
+            "lastOnlineAt",
+            "last_online_at",
+            "lastActiveAt",
+            "last_active_at",
+            "seenAt",
+            "seen_at"
+        ])
+
+        let onlineValue = container.flexibleBool(for: [
+            "isOnline",
+            "is_online",
+            "online",
+            "active",
+            "isActive",
+            "is_active"
+        ])
+        let normalizedStatus = status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        isOnline = onlineValue ?? (
+            normalizedStatus == "online" ||
+            normalizedStatus == "active" ||
+            game?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        )
+    }
 }
 
 struct InsigniaProfileGame: Codable, Identifiable, Equatable {
@@ -180,9 +247,12 @@ struct XBLiveProfileSnapshot: Codable, Equatable {
     let avatarURLString: String?
     let linkedGamertag: String?
     let isOnline: Bool
+    let lastState: String?
     let currentGame: String?
     let lastPlayedGame: String?
     let lastPlayedAt: Double?
+    let lastOnlineAt: Double?
+    let lastCheckedAt: Double?
     let totalMinutes: Double?
     let achievementScore: Int?
     let achievementCount: Int?
@@ -194,9 +264,12 @@ struct XBLiveFriendProfile: Codable, Equatable {
     let gamertag: String
     let avatarURLString: String?
     let isOnline: Bool?
+    let lastState: String?
     let currentGame: String?
     let lastPlayedGame: String?
     let lastPlayedAt: Double?
+    let lastOnlineAt: Double?
+    let lastCheckedAt: Double?
     let achievementScore: Int?
     let achievementCount: Int?
     let totalMinutes: Double?
@@ -1014,15 +1087,25 @@ enum XBLiveService {
     private static let baseURL = URL(string: "https://xb.live/api")!
 
     static func fetchProfile(username: String) async throws -> XBLiveProfileSnapshot {
-        let response: ProfileResponse = try await decodedResponse(path: "profile/\(escapedPathComponent(username))")
+        let response: ProfileResponse = try await decodedResponse(pathComponents: ["profile", username])
+        let isOnline = response.playTime.lastState?.lowercased() == "online" || response.playTime.currentGame != nil
+        let hasLastPlayedGame = response.playTime.lastPlayedGame?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty == false
+        let lastPlayedAt = hasLastPlayedGame ? response.playTime.lastPlayedAt : nil
+        let lastOnlineAt = response.playTime.lastOnlineAt ??
+            (isOnline ? response.playTime.lastCheckedAt : lastPlayedAt)
         return XBLiveProfileSnapshot(
             username: response.username,
             avatarURLString: response.profile.avatarURLString,
             linkedGamertag: response.profile.linkedGamertag,
-            isOnline: response.playTime.lastState?.lowercased() == "online" || response.playTime.currentGame != nil,
+            isOnline: isOnline,
+            lastState: response.playTime.lastState,
             currentGame: response.playTime.currentGame,
             lastPlayedGame: response.playTime.lastPlayedGame,
-            lastPlayedAt: response.playTime.lastPlayedAt,
+            lastPlayedAt: lastPlayedAt,
+            lastOnlineAt: lastOnlineAt,
+            lastCheckedAt: response.playTime.lastCheckedAt,
             totalMinutes: response.playTime.totalMinutes,
             achievementScore: response.achievementScore,
             achievementCount: response.achievementCount
@@ -1030,21 +1113,21 @@ enum XBLiveService {
     }
 
     static func fetchGamesPlayed(username: String) async throws -> [XBLiveGamePlayed] {
-        let response: GamesPlayedResponse = try await decodedResponse(path: "profile/\(escapedPathComponent(username))/games-played")
+        let response: GamesPlayedResponse = try await decodedResponse(pathComponents: ["profile", username, "games-played"])
         return response.games
     }
 
     static func fetchAchievements(username: String) async throws -> XBLiveAchievementsSnapshot {
-        let json = try await jsonObject(path: "profile/\(escapedPathComponent(username))/achievements")
+        let json = try await jsonObject(pathComponents: ["profile", username, "achievements"])
         return XBLiveAchievementsSnapshot(json: json)
     }
 
     static func fetchEvents() async throws -> [XBLiveEvent] {
-        try await decodedResponse(path: "events")
+        try await decodedResponse(pathComponents: ["events"])
     }
 
-    private static func decodedResponse<T: Decodable>(path: String) async throws -> T {
-        let url = baseURL.appendingPathComponent(path)
+    private static func decodedResponse<T: Decodable>(pathComponents: [String]) async throws -> T {
+        let url = endpointURL(pathComponents: pathComponents)
         let (data, response) = try await URLSession.shared.data(from: url)
 
         guard let httpResponse = response as? HTTPURLResponse,
@@ -1055,8 +1138,8 @@ enum XBLiveService {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    private static func jsonObject(path: String) async throws -> Any {
-        let url = baseURL.appendingPathComponent(path)
+    private static func jsonObject(pathComponents: [String]) async throws -> Any {
+        let url = endpointURL(pathComponents: pathComponents)
         let (data, response) = try await URLSession.shared.data(from: url)
 
         guard let httpResponse = response as? HTTPURLResponse,
@@ -1067,8 +1150,13 @@ enum XBLiveService {
         return try JSONSerialization.jsonObject(with: data)
     }
 
-    private static func escapedPathComponent(_ value: String) -> String {
-        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+    private static func endpointURL(pathComponents: [String]) -> URL {
+        var allowedCharacters = CharacterSet.urlPathAllowed
+        allowedCharacters.remove(charactersIn: "/%?#")
+        let path = pathComponents
+            .map { $0.addingPercentEncoding(withAllowedCharacters: allowedCharacters) ?? $0 }
+            .joined(separator: "/")
+        return URL(string: "\(baseURL.absoluteString)/\(path)")!
     }
 
     struct ProfileResponse: Decodable {
@@ -1078,13 +1166,59 @@ enum XBLiveService {
         let achievementScore: Int?
         let achievementCount: Int?
 
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: ProfileFlexibleCodingKey.self)
+            username = container.flexibleString(for: ["username", "gamertag", "displayName", "display_name"]) ?? "Unknown"
+            profile = (try? container.decode(Profile.self, forKey: ProfileFlexibleCodingKey(stringValue: "profile")!)) ??
+                Profile(avatarURLString: nil, linkedGamertag: nil)
+            playTime = (try? container.decode(PlayTime.self, forKey: ProfileFlexibleCodingKey(stringValue: "playTime")!)) ??
+                (try? container.decode(PlayTime.self, forKey: ProfileFlexibleCodingKey(stringValue: "play_time")!)) ??
+                PlayTime(totalMinutes: nil, lastState: nil, currentGame: nil, lastPlayedGame: nil, lastPlayedAt: nil, lastOnlineAt: nil, lastCheckedAt: nil)
+            achievementScore = container.flexibleInt(for: [
+                "achievementScore",
+                "achievement_score",
+                "gamerscore",
+                "score",
+                "totalScore",
+                "total_score"
+            ])
+            achievementCount = container.flexibleInt(for: [
+                "achievementCount",
+                "achievement_count",
+                "achievements",
+                "totalAchievements",
+                "total_achievements",
+                "totalCount",
+                "total_count"
+            ])
+        }
+
         struct Profile: Decodable {
             let avatarURLString: String?
             let linkedGamertag: String?
 
-            enum CodingKeys: String, CodingKey {
-                case avatarURLString = "avatar_url"
-                case linkedGamertag = "linked_gamertag"
+            init(avatarURLString: String?, linkedGamertag: String?) {
+                self.avatarURLString = avatarURLString
+                self.linkedGamertag = linkedGamertag
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: ProfileFlexibleCodingKey.self)
+                avatarURLString = container.flexibleString(for: [
+                    "avatar_url",
+                    "avatarURL",
+                    "avatarUrl",
+                    "avatar",
+                    "image_url",
+                    "imageUrl"
+                ])
+                linkedGamertag = container.flexibleString(for: [
+                    "linked_gamertag",
+                    "linkedGamertag",
+                    "gamertag",
+                    "xboxGamertag",
+                    "xbox_gamertag"
+                ])
             }
         }
 
@@ -1094,6 +1228,104 @@ enum XBLiveService {
             let currentGame: String?
             let lastPlayedGame: String?
             let lastPlayedAt: Double?
+            let lastOnlineAt: Double?
+            let lastCheckedAt: Double?
+
+            init(
+                totalMinutes: Double?,
+                lastState: String?,
+                currentGame: String?,
+                lastPlayedGame: String?,
+                lastPlayedAt: Double?,
+                lastOnlineAt: Double?,
+                lastCheckedAt: Double?
+            ) {
+                self.totalMinutes = totalMinutes
+                self.lastState = lastState
+                self.currentGame = currentGame
+                self.lastPlayedGame = lastPlayedGame
+                self.lastPlayedAt = lastPlayedAt
+                self.lastOnlineAt = lastOnlineAt
+                self.lastCheckedAt = lastCheckedAt
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: ProfileFlexibleCodingKey.self)
+                let minutes = container.flexibleDouble(for: [
+                    "totalMinutes",
+                    "total_minutes",
+                    "minutes",
+                    "playtimeMinutes",
+                    "playtime_minutes",
+                    "playTimeMinutes",
+                    "play_time_minutes"
+                ])
+                let seconds = container.flexibleDouble(for: [
+                    "totalSeconds",
+                    "total_seconds",
+                    "seconds",
+                    "playtimeSeconds",
+                    "playtime_seconds",
+                    "playTimeSeconds",
+                    "play_time_seconds"
+                ])
+                let hours = container.flexibleDouble(for: [
+                    "totalHours",
+                    "total_hours",
+                    "hours",
+                    "playtimeHours",
+                    "playtime_hours",
+                    "playTimeHours",
+                    "play_time_hours"
+                ])
+
+                totalMinutes = minutes ?? seconds.map { $0 / 60.0 } ?? hours.map { $0 * 60.0 }
+                lastState = container.flexibleString(for: [
+                    "lastState",
+                    "last_state",
+                    "state",
+                    "status"
+                ])
+                currentGame = container.flexibleString(for: [
+                    "currentGame",
+                    "current_game",
+                    "activeGame",
+                    "active_game",
+                    "game"
+                ])
+                lastPlayedGame = container.flexibleString(for: [
+                    "lastPlayedGame",
+                    "last_played_game",
+                    "lastGame",
+                    "last_game",
+                    "lastTitle",
+                    "last_title"
+                ])
+                lastPlayedAt = container.flexibleTimestamp(for: [
+                    "lastPlayedAt",
+                    "last_played_at",
+                    "lastPlayedTimestamp",
+                    "last_played_timestamp"
+                ])
+                lastOnlineAt = container.flexibleTimestamp(for: [
+                    "lastOnlineAt",
+                    "last_online_at",
+                    "lastSeenAt",
+                    "last_seen_at",
+                    "lastActiveAt",
+                    "last_active_at",
+                    "seenAt",
+                    "seen_at"
+                ])
+                lastCheckedAt = container.flexibleTimestamp(for: [
+                    "lastCheckTs",
+                    "last_check_ts",
+                    "lastCheckedAt",
+                    "last_checked_at",
+                    "checkedAt",
+                    "checked_at"
+                ])
+            }
         }
     }
 
@@ -1297,7 +1529,7 @@ final class InsigniaProfileStore: ObservableObject {
 
             do {
                 if session?.isAuthenticated == true {
-                    try await loadAuthenticatedData(refreshRemote: false, refreshFriendProfiles: false)
+                    try await loadAuthenticatedData(refreshRemote: true, refreshFriendProfiles: true)
                 } else {
                     let snapshot = try await InsigniaPublicService.fetchPublicSnapshot()
                     publicSnapshot = snapshot
@@ -1360,7 +1592,16 @@ final class InsigniaProfileStore: ObservableObject {
             )
         } else {
             let currentFriendKeys = Set(friends.map(\.key))
-            friendProfiles = existingFriendProfiles.filter { currentFriendKeys.contains($0.key) }
+            var retainedProfiles = existingFriendProfiles.filter { currentFriendKeys.contains($0.key) }
+            let missingProfileFriends = friends.filter { retainedProfiles[$0.key] == nil }
+            if !missingProfileFriends.isEmpty {
+                let missingProfiles = await fetchFriendProfiles(
+                    for: missingProfileFriends,
+                    existingProfiles: [:]
+                )
+                retainedProfiles.merge(missingProfiles) { _, new in new }
+            }
+            friendProfiles = retainedProfiles
         }
 
         if let livePublicSnapshot {
@@ -1401,21 +1642,49 @@ final class InsigniaProfileStore: ObservableObject {
 
             let games = (try? await XBLiveService.fetchGamesPlayed(username: friend.gamertag)) ?? []
             let lastGame = games.first { $0.gameName == xbProfile.lastPlayedGame } ?? games.first
+            let totalMinutes = xbProfile.totalMinutes ?? Self.totalMinutes(from: games)
+            let isOnline = xbProfile.isOnline
+            let currentGame = xbProfile.currentGame ?? (isOnline ? friend.game : nil)
+            let lastOnlineAt = Self.lastOnlineTimestamp(
+                isOnline: isOnline,
+                profile: xbProfile
+            )
             profiles[friend.key] = XBLiveFriendProfile(
                 gamertag: friend.gamertag,
                 avatarURLString: xbProfile.avatarURLString,
-                isOnline: xbProfile.isOnline,
-                currentGame: xbProfile.currentGame,
+                isOnline: isOnline,
+                lastState: xbProfile.lastState ?? friend.status,
+                currentGame: currentGame,
                 lastPlayedGame: xbProfile.lastPlayedGame ?? lastGame?.gameName,
                 lastPlayedAt: xbProfile.lastPlayedAt,
+                lastOnlineAt: lastOnlineAt,
+                lastCheckedAt: xbProfile.lastCheckedAt,
                 achievementScore: xbProfile.achievementScore,
                 achievementCount: xbProfile.achievementCount,
-                totalMinutes: xbProfile.totalMinutes,
+                totalMinutes: totalMinutes,
                 lastPlayedImageURLString: lastGame?.imageUrl
             )
         }
 
         return profiles
+    }
+
+    private static func lastOnlineTimestamp(
+        isOnline: Bool,
+        profile: XBLiveProfileSnapshot
+    ) -> Double? {
+        if isOnline {
+            return profile.lastCheckedAt ?? Date().timeIntervalSince1970
+        }
+        return profile.lastOnlineAt
+    }
+
+    private static func totalMinutes(from games: [XBLiveGamePlayed]) -> Double? {
+        let values = games.compactMap(\.totalMinutes)
+        guard !values.isEmpty else {
+            return nil
+        }
+        return values.reduce(0, +)
     }
 
     private func markRefreshed() {
@@ -1696,6 +1965,100 @@ private extension KeyedDecodingContainer where Key == ProfileFlexibleCodingKey {
             }
         }
         return nil
+    }
+
+    func flexibleTimestamp(for keys: [String]) -> Double? {
+        for key in keys {
+            guard let codingKey = ProfileFlexibleCodingKey(stringValue: key),
+                  contains(codingKey) else {
+                continue
+            }
+
+            if let value = try? decodeIfPresent(Double.self, forKey: codingKey) {
+                return normalizedTimestamp(value)
+            }
+            if let value = try? decodeIfPresent(Int.self, forKey: codingKey) {
+                return normalizedTimestamp(Double(value))
+            }
+            if let value = try? decodeIfPresent(Int64.self, forKey: codingKey) {
+                return normalizedTimestamp(Double(value))
+            }
+            if let value = try? decodeIfPresent(String.self, forKey: codingKey),
+               let timestamp = timestamp(from: value) {
+                return timestamp
+            }
+        }
+        return nil
+    }
+
+    func flexibleInt(for keys: [String]) -> Int? {
+        for key in keys {
+            guard let codingKey = ProfileFlexibleCodingKey(stringValue: key),
+                  contains(codingKey) else {
+                continue
+            }
+
+            if let value = try? decodeIfPresent(Int.self, forKey: codingKey) {
+                return value
+            }
+            if let value = try? decodeIfPresent(Int64.self, forKey: codingKey) {
+                return Int(value)
+            }
+            if let value = try? decodeIfPresent(Double.self, forKey: codingKey) {
+                return Int(value)
+            }
+            if let value = try? decodeIfPresent(String.self, forKey: codingKey),
+               let intValue = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return intValue
+            }
+        }
+        return nil
+    }
+
+    func flexibleBool(for keys: [String]) -> Bool? {
+        for key in keys {
+            guard let codingKey = ProfileFlexibleCodingKey(stringValue: key),
+                  contains(codingKey) else {
+                continue
+            }
+
+            if let value = try? decodeIfPresent(Bool.self, forKey: codingKey) {
+                return value
+            }
+            if let value = try? decodeIfPresent(Int.self, forKey: codingKey) {
+                return value != 0
+            }
+            if let value = try? decodeIfPresent(String.self, forKey: codingKey) {
+                let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if ["true", "yes", "online", "active", "1"].contains(normalized) {
+                    return true
+                }
+                if ["false", "no", "offline", "inactive", "0"].contains(normalized) {
+                    return false
+                }
+            }
+        }
+        return nil
+    }
+
+    private func timestamp(from value: String) -> Double? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let doubleValue = Double(trimmed) {
+            return normalizedTimestamp(doubleValue)
+        }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: trimmed) {
+            return date.timeIntervalSince1970
+        }
+
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: trimmed)?.timeIntervalSince1970
+    }
+
+    private func normalizedTimestamp(_ value: Double) -> Double {
+        value > 9_999_999_999 ? value / 1_000.0 : value
     }
 }
 

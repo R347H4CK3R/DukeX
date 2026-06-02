@@ -194,7 +194,6 @@ struct ProfileFriendRow: View {
     let friend: InsigniaFriend
     let profile: XBLiveFriendProfile?
     let customProfileImage: UIImage?
-    var isFavorite = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -206,13 +205,8 @@ struct ProfileFriendRow: View {
                     Text(friend.gamertag)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
-                    if isFavorite {
-                        Image(systemName: "star.fill")
-                            .foregroundStyle(.yellow)
-                            .imageScale(.small)
-                    }
                     Circle()
-                        .fill(friend.isOnline ? Color.green : Color.secondary.opacity(0.55))
+                        .fill(isOnline ? Color.green : Color.secondary.opacity(0.55))
                         .frame(width: 7, height: 7)
                 }
 
@@ -246,15 +240,17 @@ struct ProfileFriendRow: View {
         ProfileFriendOnlineText.statusLine(friend: friend, profile: profile)
     }
 
+    private var isOnline: Bool {
+        ProfileFriendOnlineText.isOnline(friend: friend, profile: profile)
+    }
+
     private var initial: String {
         String(friend.gamertag.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1)).uppercased()
     }
 }
 
 struct ProfileFriendsView: View {
-    let friends: [InsigniaFriend]
-    let friendProfiles: [String: XBLiveFriendProfile]
-    let friendProfileImages: [String: UIImage]
+    @ObservedObject var profileStore: InsigniaProfileStore
     @Binding var sortMode: ProfileFriendSortMode
     let favoriteFriendKeys: Set<String>
     let toggleFavorite: (InsigniaFriend) -> Void
@@ -283,8 +279,7 @@ struct ProfileFriendsView: View {
                             ProfileFriendRow(
                                 friend: friend,
                                 profile: friendProfiles[friend.key],
-                                customProfileImage: friendProfileImages[friend.key],
-                                isFavorite: isFavorite(friend)
+                                customProfileImage: friendProfileImages[friend.key]
                             )
                         }
                         .swipeActions(edge: .trailing) {
@@ -325,6 +320,21 @@ struct ProfileFriendsView: View {
         .navigationTitle("Friends")
         .navigationBarTitleDisplayMode(.inline)
         .dukeXThemedListBackground(dimming: 0.18)
+        .task {
+            profileStore.refresh()
+        }
+    }
+
+    private var friends: [InsigniaFriend] {
+        profileStore.authenticatedSnapshot?.friends ?? []
+    }
+
+    private var friendProfiles: [String: XBLiveFriendProfile] {
+        profileStore.authenticatedSnapshot?.friendProfiles ?? [:]
+    }
+
+    private var friendProfileImages: [String: UIImage] {
+        profileStore.friendProfileImages
     }
 
     private var sortedFriends: [InsigniaFriend] {
@@ -375,10 +385,13 @@ struct ProfileFriendsView: View {
 
     private func activitySortValue(for friend: InsigniaFriend) -> Double {
         let profile = friendProfiles[friend.key]
-        if friend.isOnline || profile?.isOnline == true || profile?.currentGame?.nilIfEmpty != nil {
+        if ProfileFriendOnlineText.isOnline(friend: friend, profile: profile) {
             return .greatestFiniteMagnitude
         }
-        return profile?.lastPlayedAt ?? 0
+        if let profile {
+            return profile.lastOnlineAt ?? 0
+        }
+        return friend.lastSeenAt ?? 0
     }
 }
 
@@ -414,21 +427,59 @@ private struct ProfileFriendSortPicker: View {
 }
 
 private enum ProfileFriendOnlineText {
+    static func isOnline(friend: InsigniaFriend, profile: XBLiveFriendProfile?) -> Bool {
+        if let profile {
+            return profile.isOnline == true || profile.currentGame?.nilIfEmpty != nil
+        }
+        return friend.isOnline || friend.game?.nilIfEmpty != nil
+    }
+
     static func statusLine(friend: InsigniaFriend, profile: XBLiveFriendProfile?) -> String {
-        if friend.isOnline || profile?.isOnline == true || profile?.currentGame?.nilIfEmpty != nil {
-            return "Last Online: Now"
+        if isOnline(friend: friend, profile: profile) {
+            if let game = activeGame(friend: friend, profile: profile) {
+                return "Online in \(game)"
+            }
+            return "Online"
         }
 
-        if let lastPlayedAt = profile?.lastPlayedAt,
-           let relativeText = relativeLastOnlineText(from: lastPlayedAt) {
+        if let profile {
+            if let lastOnlineAt = profile.lastOnlineAt,
+               let relativeText = relativeLastOnlineText(from: lastOnlineAt) {
+                return "Last Online: \(relativeText)"
+            }
+            return "Last Online: Unknown"
+        }
+
+        if let lastSeenAt = friend.lastSeenAt,
+           let relativeText = relativeLastOnlineText(from: lastSeenAt) {
             return "Last Online: \(relativeText)"
         }
 
         if let lastSeen = friend.lastSeen?.nilIfEmpty {
-            return "Last Online: \(lastSeen)"
+            return "Last Online: \(normalizedLastSeenText(lastSeen))"
         }
 
         return "Last Online: Unknown"
+    }
+
+    private static func activeGame(friend: InsigniaFriend, profile: XBLiveFriendProfile?) -> String? {
+        if let profile {
+            return profile.currentGame?.nilIfEmpty
+        }
+        return friend.game?.nilIfEmpty
+    }
+
+    private static func normalizedLastSeenText(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowered = trimmed.lowercased()
+        for prefix in ["last seen", "last online"] where lowered.hasPrefix(prefix) {
+            let suffix = trimmed.dropFirst(prefix.count)
+                .trimmingCharacters(in: CharacterSet(charactersIn: " :").union(.whitespacesAndNewlines))
+            if !suffix.isEmpty {
+                return String(suffix)
+            }
+        }
+        return trimmed
     }
 
     private static func relativeLastOnlineText(from timestamp: Double) -> String? {
@@ -801,7 +852,7 @@ struct ProfileFriendDetailView: View {
                             .font(.title3.weight(.semibold))
                         Text(statusLine)
                             .font(.subheadline)
-                            .foregroundStyle(friend.isOnline ? .green : .secondary)
+                            .foregroundStyle(isOnline ? .green : .secondary)
                             .multilineTextAlignment(.center)
                     }
                 }
@@ -841,6 +892,10 @@ struct ProfileFriendDetailView: View {
 
     private var statusLine: String {
         ProfileFriendOnlineText.statusLine(friend: friend, profile: profile)
+    }
+
+    private var isOnline: Bool {
+        ProfileFriendOnlineText.isOnline(friend: friend, profile: profile)
     }
 
     private var initial: String {
