@@ -12,6 +12,7 @@ final class GameplayExitOverlayView: UIView {
     private let cancelButton = UIButton(type: .system)
     private var actionHasBeenRequested = false
     private var suppressShowUntil: CFTimeInterval = 0
+    private var suppressRawTouchHandlingUntil: CFTimeInterval = 0
 
     init(
         session: NativeMetalPresenterSession,
@@ -37,12 +38,21 @@ final class GameplayExitOverlayView: UIView {
         guard !isVisible,
               !actionHasBeenRequested,
               CACurrentMediaTime() >= suppressShowUntil else {
+            NativeMetalDiagnostics.log(
+                "EXIT_SHOW_SKIP",
+                "visible=\(isVisible ? 1 : 0) action=\(actionHasBeenRequested ? 1 : 0) suppressUntil=\(String(format: "%.3f", suppressShowUntil)) now=\(String(format: "%.3f", CACurrentMediaTime()))"
+            )
             return
         }
 
+        NativeMetalDiagnostics.log(
+            "EXIT_SHOW",
+            "bounds=\(NativeMetalDiagnostics.rect(bounds)) safe=\(NativeMetalDiagnostics.insets(safeAreaInsets))"
+        )
         isHidden = false
         isUserInteractionEnabled = true
         accessibilityViewIsModal = true
+        suppressRawTouchHandlingUntil = CACurrentMediaTime() + 0.25
         UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut]) {
             self.alpha = 1
         }
@@ -50,9 +60,14 @@ final class GameplayExitOverlayView: UIView {
 
     @objc func hide() {
         guard isVisible, !actionHasBeenRequested else {
+            NativeMetalDiagnostics.log(
+                "EXIT_HIDE_SKIP",
+                "visible=\(isVisible ? 1 : 0) action=\(actionHasBeenRequested ? 1 : 0)"
+            )
             return
         }
 
+        NativeMetalDiagnostics.log("EXIT_HIDE", "bounds=\(NativeMetalDiagnostics.rect(bounds))")
         suppressShowUntil = CACurrentMediaTime() + 0.35
         UIView.animate(withDuration: 0.16, delay: 0, options: [.curveEaseIn]) {
             self.alpha = 0
@@ -72,6 +87,10 @@ final class GameplayExitOverlayView: UIView {
     }
 
     func refreshLayoutForGeometryChange() {
+        NativeMetalDiagnostics.log(
+            "EXIT_REFRESH_LAYOUT",
+            "bounds=\(NativeMetalDiagnostics.rect(bounds)) panel=\(NativeMetalDiagnostics.rect(panelView.frame)) visible=\(isVisible ? 1 : 0)"
+        )
         superview?.setNeedsLayout()
         superview?.layoutIfNeeded()
         setNeedsLayout()
@@ -83,34 +102,73 @@ final class GameplayExitOverlayView: UIView {
     @discardableResult
     func handleRawTouchEnded(from event: UIEvent) -> Bool {
         guard isVisible,
+              CACurrentMediaTime() >= suppressRawTouchHandlingUntil,
               let touches = event.allTouches else {
+            NativeMetalDiagnostics.log(
+                "EXIT_RAW_SKIP",
+                "visible=\(isVisible ? 1 : 0) suppressed=\(CACurrentMediaTime() < suppressRawTouchHandlingUntil ? 1 : 0) touches=\(event.allTouches?.count ?? 0)"
+            )
             return false
         }
 
         refreshLayoutForGeometryChange()
+        for touch in touches where touch.phase == .ended {
+            if handleTouchEnded(at: touch.location(in: self)) {
+                NativeMetalDiagnostics.log("EXIT_RAW_HANDLED", "touch=\(NativeMetalDiagnostics.touch(touch, in: self))")
+                return true
+            }
+        }
+
+        NativeMetalDiagnostics.log("EXIT_RAW_UNHANDLED", "touches=\(touches.count)")
+        return false
+    }
+
+    @discardableResult
+    func handleBridgedTouchEnded(at point: CGPoint) -> Bool {
+        guard isVisible,
+              CACurrentMediaTime() >= suppressRawTouchHandlingUntil else {
+            NativeMetalDiagnostics.log(
+                "EXIT_BRIDGED_SKIP",
+                "point=\(NativeMetalDiagnostics.point(point)) visible=\(isVisible ? 1 : 0) suppressed=\(CACurrentMediaTime() < suppressRawTouchHandlingUntil ? 1 : 0)"
+            )
+            return false
+        }
+
+        refreshLayoutForGeometryChange()
+        let handled = handleTouchEnded(at: point)
+        NativeMetalDiagnostics.log(
+            "EXIT_BRIDGED_RESULT",
+            "point=\(NativeMetalDiagnostics.point(point)) handled=\(handled ? 1 : 0)"
+        )
+        return handled
+    }
+
+    @discardableResult
+    private func handleTouchEnded(at point: CGPoint) -> Bool {
         let restartFrame = restartButton.convert(restartButton.bounds, to: self).insetBy(dx: -12, dy: -10)
         let exitFrame = exitButton.convert(exitButton.bounds, to: self).insetBy(dx: -12, dy: -10)
         let cancelFrame = cancelButton.convert(cancelButton.bounds, to: self).insetBy(dx: -12, dy: -10)
         let panelFrame = panelView.convert(panelView.bounds, to: self)
+        NativeMetalDiagnostics.log(
+            "EXIT_HIT_TEST",
+            "point=\(NativeMetalDiagnostics.point(point)) restart=\(NativeMetalDiagnostics.rect(restartFrame)) exit=\(NativeMetalDiagnostics.rect(exitFrame)) cancel=\(NativeMetalDiagnostics.rect(cancelFrame)) panel=\(NativeMetalDiagnostics.rect(panelFrame))"
+        )
 
-        for touch in touches where touch.phase == .ended {
-            let point = touch.location(in: self)
-            if restartFrame.contains(point) {
-                confirmRestart()
-                return true
-            }
-            if exitFrame.contains(point) {
-                confirmExit()
-                return true
-            }
-            if cancelFrame.contains(point) {
-                hide()
-                return true
-            }
-            if !panelFrame.contains(point) {
-                hide()
-                return true
-            }
+        if restartFrame.contains(point) {
+            confirmRestart()
+            return true
+        }
+        if exitFrame.contains(point) {
+            confirmExit()
+            return true
+        }
+        if cancelFrame.contains(point) {
+            hide()
+            return true
+        }
+        if !panelFrame.contains(point) {
+            hide()
+            return true
         }
 
         return false
@@ -182,9 +240,9 @@ final class GameplayExitOverlayView: UIView {
             dismissButton.topAnchor.constraint(equalTo: topAnchor),
             dismissButton.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            panelView.centerXAnchor.constraint(equalTo: safeAreaLayoutGuide.centerXAnchor),
-            panelView.centerYAnchor.constraint(equalTo: safeAreaLayoutGuide.centerYAnchor),
-            panelView.widthAnchor.constraint(lessThanOrEqualTo: safeAreaLayoutGuide.widthAnchor, constant: -42),
+            panelView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            panelView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            panelView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -42),
             panelView.widthAnchor.constraint(lessThanOrEqualToConstant: 340),
 
             stack.leadingAnchor.constraint(equalTo: panelView.contentView.leadingAnchor, constant: 14),
@@ -204,6 +262,7 @@ final class GameplayExitOverlayView: UIView {
             return
         }
 
+        NativeMetalDiagnostics.log("EXIT_CONFIRM", "dashboard=\(session.isDashboard ? 1 : 0)")
         actionHasBeenRequested = true
         restartButton.isEnabled = false
         exitButton.isEnabled = false
@@ -221,6 +280,7 @@ final class GameplayExitOverlayView: UIView {
             return
         }
 
+        NativeMetalDiagnostics.log("RESTART_CONFIRM", "dashboard=\(session.isDashboard ? 1 : 0)")
         actionHasBeenRequested = true
         restartButton.isEnabled = false
         exitButton.isEnabled = false
@@ -231,10 +291,12 @@ final class GameplayExitOverlayView: UIView {
             "Restarting \(session.displayTitle)."
         restartButton.configuration = primaryButtonConfiguration(title: "Restarting", color: .systemGray)
         guard onRestartRequested() else {
+            NativeMetalDiagnostics.log("RESTART_RESULT", "success=0")
             showRestartUnavailable()
             return
         }
 
+        NativeMetalDiagnostics.log("RESTART_RESULT", "success=1")
         finishRestartRequest()
     }
 

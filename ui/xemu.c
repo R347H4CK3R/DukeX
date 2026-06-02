@@ -97,7 +97,9 @@ void xemu_ios_set_external_metal_layer(void *metal_layer);
 void xemu_ios_request_shutdown(void);
 void xemu_ios_destroy_metal_view(void);
 typedef void (*XemuIOSGameplayTouchCallback)(void);
+typedef void (*XemuIOSGameplayTouchEventCallback)(int phase, int64_t touch_id, float x, float y);
 void xemu_ios_set_gameplay_touch_callback(XemuIOSGameplayTouchCallback callback);
+void xemu_ios_set_gameplay_touch_event_callback(XemuIOSGameplayTouchEventCallback callback);
 
 bool xemu_ios_vulkan_presenter_enabled(void)
 {
@@ -114,6 +116,14 @@ bool xemu_ios_vulkan_presenter_enabled(void)
 static SDL_MetalView ios_metal_view;
 static void *ios_external_metal_layer;
 static XemuIOSGameplayTouchCallback ios_gameplay_touch_callback;
+static XemuIOSGameplayTouchEventCallback ios_gameplay_touch_event_callback;
+
+enum {
+    XEMU_IOS_GAMEPLAY_TOUCH_BEGAN = 0,
+    XEMU_IOS_GAMEPLAY_TOUCH_MOVED = 1,
+    XEMU_IOS_GAMEPLAY_TOUCH_ENDED = 2,
+    XEMU_IOS_GAMEPLAY_TOUCH_CANCELLED = 3,
+};
 
 void xemu_ios_set_external_metal_layer(void *metal_layer)
 {
@@ -129,11 +139,103 @@ void xemu_ios_set_gameplay_touch_callback(XemuIOSGameplayTouchCallback callback)
     IOS_LOG("gameplay touch callback %s", callback ? "set" : "cleared");
 }
 
-static void xemu_ios_notify_gameplay_touch(void)
+__attribute__((visibility("default")))
+void xemu_ios_set_gameplay_touch_event_callback(XemuIOSGameplayTouchEventCallback callback)
 {
-    if (xemu_ios_vulkan_presenter_enabled() && ios_gameplay_touch_callback) {
+    ios_gameplay_touch_event_callback = callback;
+    IOS_LOG("gameplay touch event callback %s", callback ? "set" : "cleared");
+}
+
+static float xemu_ios_clamp_normalized_touch_coordinate(float value)
+{
+    if (value < 0.0f) {
+        return 0.0f;
+    }
+    if (value > 1.0f) {
+        return 1.0f;
+    }
+    return value;
+}
+
+static void xemu_ios_notify_gameplay_touch(int phase, int64_t touch_id, float x, float y)
+{
+    if (!xemu_ios_vulkan_presenter_enabled()) {
+        return;
+    }
+
+    if (ios_gameplay_touch_event_callback) {
+        ios_gameplay_touch_event_callback(
+            phase,
+            touch_id,
+            xemu_ios_clamp_normalized_touch_coordinate(x),
+            xemu_ios_clamp_normalized_touch_coordinate(y));
+    } else if (ios_gameplay_touch_callback) {
         ios_gameplay_touch_callback();
     }
+}
+
+static void xemu_ios_notify_gameplay_finger_touch(SDL_Event *event, int phase)
+{
+    SDL_TouchFingerEvent *finger = &event->tfinger;
+    xemu_ios_notify_gameplay_touch(
+        phase,
+        (int64_t)finger->fingerID,
+        finger->x,
+        finger->y);
+}
+
+static void xemu_ios_notify_gameplay_mouse_touch(SDL_Event *event, int phase)
+{
+    SDL_MouseButtonEvent *button = &event->button;
+    int width = 0;
+    int height = 0;
+    SDL_Window *window = SDL_GetWindowFromID(button->windowID);
+
+    if (!window) {
+        window = m_window;
+    }
+    if (window) {
+        SDL_GetWindowSize(window, &width, &height);
+    }
+    if (width <= 0) {
+        width = 1;
+    }
+    if (height <= 0) {
+        height = 1;
+    }
+
+    xemu_ios_notify_gameplay_touch(
+        phase,
+        0,
+        button->x / (float)width,
+        button->y / (float)height);
+}
+
+static void xemu_ios_notify_gameplay_mouse_motion(SDL_Event *event)
+{
+    SDL_MouseMotionEvent *motion = &event->motion;
+    int width = 0;
+    int height = 0;
+    SDL_Window *window = SDL_GetWindowFromID(motion->windowID);
+
+    if (!window) {
+        window = m_window;
+    }
+    if (window) {
+        SDL_GetWindowSize(window, &width, &height);
+    }
+    if (width <= 0) {
+        width = 1;
+    }
+    if (height <= 0) {
+        height = 1;
+    }
+
+    xemu_ios_notify_gameplay_touch(
+        XEMU_IOS_GAMEPLAY_TOUCH_MOVED,
+        0,
+        motion->x / (float)width,
+        motion->y / (float)height);
 }
 
 __attribute__((visibility("default")))
@@ -1457,21 +1559,35 @@ static void poll_events(struct xemu_console *scon)
             }
             break;
         case SDL_EVENT_MOUSE_MOTION:
+#ifdef CONFIG_IOS
+            xemu_ios_notify_gameplay_mouse_motion(ev);
+#endif
             if (mouse) break;
             handle_mousemotion(ev);
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
         case SDL_EVENT_MOUSE_BUTTON_UP:
 #ifdef CONFIG_IOS
-            xemu_ios_notify_gameplay_touch();
+            xemu_ios_notify_gameplay_mouse_touch(
+                ev,
+                ev->type == SDL_EVENT_MOUSE_BUTTON_DOWN ?
+                    XEMU_IOS_GAMEPLAY_TOUCH_BEGAN :
+                    XEMU_IOS_GAMEPLAY_TOUCH_ENDED);
 #endif
             if (mouse) break;
             handle_mousebutton(ev);
             break;
         case SDL_EVENT_FINGER_DOWN:
         case SDL_EVENT_FINGER_UP:
+        case SDL_EVENT_FINGER_MOTION:
+        case SDL_EVENT_FINGER_CANCELED:
 #ifdef CONFIG_IOS
-            xemu_ios_notify_gameplay_touch();
+            xemu_ios_notify_gameplay_finger_touch(
+                ev,
+                ev->type == SDL_EVENT_FINGER_DOWN ? XEMU_IOS_GAMEPLAY_TOUCH_BEGAN :
+                ev->type == SDL_EVENT_FINGER_MOTION ? XEMU_IOS_GAMEPLAY_TOUCH_MOVED :
+                ev->type == SDL_EVENT_FINGER_CANCELED ? XEMU_IOS_GAMEPLAY_TOUCH_CANCELLED :
+                XEMU_IOS_GAMEPLAY_TOUCH_ENDED);
 #endif
             break;
         case SDL_EVENT_MOUSE_WHEEL:
@@ -1594,6 +1710,12 @@ static void display_very_early_init(DisplayOptions *o)
     SDL_WindowFlags window_flags = (SDL_WindowFlags)(
         (use_vulkan_presenter ? SDL_WINDOW_METAL : SDL_WINDOW_OPENGL) |
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+#ifdef CONFIG_IOS
+    if (use_vulkan_presenter) {
+        window_flags = (SDL_WindowFlags)(window_flags | SDL_WINDOW_HIDDEN);
+        IOS_LOG("native presenter: creating SDL UIKit window hidden from startup");
+    }
+#endif
 
     // Create main window
     m_window = SDL_CreateWindow(

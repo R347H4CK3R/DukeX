@@ -31,6 +31,7 @@
 #include "xemu-input.h"
 #include "xemu-notifications.h"
 #include "xemu-settings.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -58,6 +59,32 @@
 
 #define XEMU_INPUT_MIN_INPUT_UPDATE_INTERVAL_US  2500
 #define XEMU_INPUT_MIN_RUMBLE_UPDATE_INTERVAL_US 2500
+
+#ifdef CONFIG_IOS
+static XemuIOSInputDiagnosticCallback s_ios_input_diagnostic_callback;
+
+void xemu_ios_input_diagnostic_log(const char *fmt, ...)
+{
+    char message[512];
+    va_list args;
+
+    va_start(args, fmt);
+    vsnprintf(message, sizeof(message), fmt, args);
+    va_end(args);
+
+    IOS_INPUT_LOG("%s", message);
+    XemuIOSInputDiagnosticCallback callback = s_ios_input_diagnostic_callback;
+    if (callback) {
+        callback(message);
+    }
+}
+
+void xemu_ios_set_input_diagnostic_callback(XemuIOSInputDiagnosticCallback callback)
+{
+    s_ios_input_diagnostic_callback = callback;
+    xemu_ios_input_diagnostic_log("diagnostic_callback registered=%d", callback ? 1 : 0);
+}
+#endif
 
 #if 0
 static void xemu_input_print_controller_state(ControllerState *state)
@@ -286,6 +313,110 @@ static ControllerState *xemu_input_find_sdl_gamepad(SDL_JoystickID instance_id)
 
 #ifdef CONFIG_IOS
 static int64_t s_ios_last_gamepad_scan_ts;
+static ControllerState *s_ios_touch_controller;
+static int s_ios_touch_requested_active;
+static unsigned int s_ios_touch_buttons;
+static int s_ios_touch_axis[CONTROLLER_AXIS__COUNT];
+static int s_ios_last_logged_active = -1;
+static unsigned int s_ios_last_logged_buttons;
+static int s_ios_last_logged_axis[CONTROLLER_AXIS__COUNT];
+static int64_t s_ios_last_touch_update_log_us;
+
+static void xemu_input_update_ios_touch_controller_state(ControllerState *state);
+
+void xemu_ios_set_touch_controller_state(int active,
+                                         uint32_t buttons,
+                                         int16_t left_trigger,
+                                         int16_t right_trigger,
+                                         int16_t left_x,
+                                         int16_t left_y,
+                                         int16_t right_x,
+                                         int16_t right_y)
+{
+    qatomic_set(&s_ios_touch_buttons, buttons);
+    qatomic_set(&s_ios_touch_axis[CONTROLLER_AXIS_LTRIG], left_trigger);
+    qatomic_set(&s_ios_touch_axis[CONTROLLER_AXIS_RTRIG], right_trigger);
+    qatomic_set(&s_ios_touch_axis[CONTROLLER_AXIS_LSTICK_X], left_x);
+    qatomic_set(&s_ios_touch_axis[CONTROLLER_AXIS_LSTICK_Y], left_y);
+    qatomic_set(&s_ios_touch_axis[CONTROLLER_AXIS_RSTICK_X], right_x);
+    qatomic_set(&s_ios_touch_axis[CONTROLLER_AXIS_RSTICK_Y], right_y);
+    qatomic_set(&s_ios_touch_requested_active, active ? 1 : 0);
+
+    bool changed =
+        s_ios_last_logged_active != (active ? 1 : 0) ||
+        s_ios_last_logged_buttons != buttons ||
+        s_ios_last_logged_axis[CONTROLLER_AXIS_LTRIG] != left_trigger ||
+        s_ios_last_logged_axis[CONTROLLER_AXIS_RTRIG] != right_trigger ||
+        s_ios_last_logged_axis[CONTROLLER_AXIS_LSTICK_X] != left_x ||
+        s_ios_last_logged_axis[CONTROLLER_AXIS_LSTICK_Y] != left_y ||
+        s_ios_last_logged_axis[CONTROLLER_AXIS_RSTICK_X] != right_x ||
+        s_ios_last_logged_axis[CONTROLLER_AXIS_RSTICK_Y] != right_y;
+
+    if (changed) {
+        s_ios_last_logged_active = active ? 1 : 0;
+        s_ios_last_logged_buttons = buttons;
+        s_ios_last_logged_axis[CONTROLLER_AXIS_LTRIG] = left_trigger;
+        s_ios_last_logged_axis[CONTROLLER_AXIS_RTRIG] = right_trigger;
+        s_ios_last_logged_axis[CONTROLLER_AXIS_LSTICK_X] = left_x;
+        s_ios_last_logged_axis[CONTROLLER_AXIS_LSTICK_Y] = left_y;
+        s_ios_last_logged_axis[CONTROLLER_AXIS_RSTICK_X] = right_x;
+        s_ios_last_logged_axis[CONTROLLER_AXIS_RSTICK_Y] = right_y;
+        xemu_ios_input_diagnostic_log(
+            "touch_set active=%d buttons=0x%x lt=%d rt=%d lx=%d ly=%d rx=%d ry=%d",
+            active ? 1 : 0,
+            buttons,
+            left_trigger,
+            right_trigger,
+            left_x,
+            left_y,
+            right_x,
+            right_y);
+    }
+}
+
+static void xemu_input_create_ios_touch_controller_if_needed(void)
+{
+    if (s_ios_touch_controller) {
+        return;
+    }
+
+    s_ios_touch_controller = malloc(sizeof(ControllerState));
+    memset(s_ios_touch_controller, 0, sizeof(ControllerState));
+    s_ios_touch_controller->type = INPUT_DEVICE_IOS_TOUCH_CONTROLLER;
+    s_ios_touch_controller->name = "DukeX Touch Controls";
+    s_ios_touch_controller->bound = -1;
+    s_ios_touch_controller->peripheral_types[0] = PERIPHERAL_NONE;
+    s_ios_touch_controller->peripheral_types[1] = PERIPHERAL_NONE;
+    s_ios_touch_controller->peripherals[0] = NULL;
+    s_ios_touch_controller->peripherals[1] = NULL;
+    QTAILQ_INSERT_TAIL(&available_controllers, s_ios_touch_controller, entry);
+}
+
+static void xemu_input_update_ios_touch_binding(void)
+{
+    if (qatomic_read(&s_ios_touch_requested_active)) {
+        xemu_input_create_ios_touch_controller_if_needed();
+        ControllerState *bound = xemu_input_get_bound(0);
+        if (bound != s_ios_touch_controller) {
+            if (bound) {
+                xemu_ios_input_diagnostic_log(
+                    "touch_binding replacing port=1 old='%s' oldType=%d",
+                    bound->name ? bound->name : "(unnamed)",
+                    bound->type);
+            }
+            xemu_input_bind(0, s_ios_touch_controller, 0);
+            xemu_input_rebind_xmu(0);
+            xemu_ios_input_diagnostic_log("touch_binding bound port=1");
+        }
+        return;
+    }
+
+    if (s_ios_touch_controller && s_ios_touch_controller->bound >= 0) {
+        int bound = s_ios_touch_controller->bound;
+        xemu_input_bind(bound, NULL, 0);
+        xemu_ios_input_diagnostic_log("touch_binding unbound port=%d", bound + 1);
+    }
+}
 
 static bool xemu_input_has_sdl_gamepad(void)
 {
@@ -441,6 +572,10 @@ void xemu_save_peripheral_settings(int player_index, int peripheral_index,
 void xemu_input_process_sdl_events(const SDL_Event *event)
 {
     if (event->type == SDL_EVENT_GAMEPAD_ADDED) {
+#ifdef CONFIG_IOS
+        xemu_input_update_ios_touch_binding();
+#endif
+
         DPRINTF("Controller Added: %d\n", event->gdevice.which);
         IOS_INPUT_LOG("controller added event id=%d", event->gdevice.which);
 
@@ -601,6 +736,10 @@ void xemu_input_update_controller(ControllerState *state)
         xemu_input_update_sdl_kbd_controller_state(state);
     } else if (state->type == INPUT_DEVICE_SDL_GAMEPAD) {
         xemu_input_update_sdl_controller_state(state);
+#ifdef CONFIG_IOS
+    } else if (state->type == INPUT_DEVICE_IOS_TOUCH_CONTROLLER) {
+        xemu_input_update_ios_touch_controller_state(state);
+#endif
     }
 
     state->last_input_updated_ts = qemu_clock_get_us(QEMU_CLOCK_REALTIME);
@@ -609,6 +748,7 @@ void xemu_input_update_controller(ControllerState *state)
 void xemu_input_update_controllers(void)
 {
 #ifdef CONFIG_IOS
+    xemu_input_update_ios_touch_binding();
     xemu_input_retry_gamepad_scan();
 #endif
 
@@ -739,6 +879,44 @@ void xemu_input_update_sdl_controller_state(ControllerState *state)
 
     // xemu_input_print_controller_state(state);
 }
+
+#ifdef CONFIG_IOS
+static void xemu_input_update_ios_touch_controller_state(ControllerState *state)
+{
+    if (!qatomic_read(&s_ios_touch_requested_active)) {
+        state->buttons = 0;
+        memset(state->axis, 0, sizeof(state->axis));
+        return;
+    }
+
+    state->buttons = qatomic_read(&s_ios_touch_buttons);
+    for (int i = 0; i < CONTROLLER_AXIS__COUNT; i++) {
+        state->axis[i] = qatomic_read(&s_ios_touch_axis[i]);
+    }
+
+    bool has_signal = state->buttons ||
+        state->axis[CONTROLLER_AXIS_LTRIG] ||
+        state->axis[CONTROLLER_AXIS_RTRIG] ||
+        state->axis[CONTROLLER_AXIS_LSTICK_X] ||
+        state->axis[CONTROLLER_AXIS_LSTICK_Y] ||
+        state->axis[CONTROLLER_AXIS_RSTICK_X] ||
+        state->axis[CONTROLLER_AXIS_RSTICK_Y];
+    int64_t now = qemu_clock_get_us(QEMU_CLOCK_REALTIME);
+    if (has_signal && now - s_ios_last_touch_update_log_us >= 50000) {
+        s_ios_last_touch_update_log_us = now;
+        xemu_ios_input_diagnostic_log(
+            "touch_update bound=%d buttons=0x%x lt=%d rt=%d lx=%d ly=%d rx=%d ry=%d",
+            state->bound + 1,
+            state->buttons,
+            state->axis[CONTROLLER_AXIS_LTRIG],
+            state->axis[CONTROLLER_AXIS_RTRIG],
+            state->axis[CONTROLLER_AXIS_LSTICK_X],
+            state->axis[CONTROLLER_AXIS_LSTICK_Y],
+            state->axis[CONTROLLER_AXIS_RSTICK_X],
+            state->axis[CONTROLLER_AXIS_RSTICK_Y]);
+    }
+}
+#endif
 
 void xemu_input_update_rumble(ControllerState *state)
 {

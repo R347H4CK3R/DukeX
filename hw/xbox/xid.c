@@ -38,6 +38,10 @@ const USBDescStrings desc_strings = {
     [STR_SERIALNUMBER] = "1",
 };
 
+#ifdef CONFIG_IOS
+static unsigned int s_ios_xid_poll_log_counter;
+#endif
+
 void update_output(USBXIDGamepadState *s)
 {
     if (xemu_input_get_test_mode()) {
@@ -101,6 +105,33 @@ void update_input(USBXIDGamepadState *s)
     s->in_state.sThumbLY = state->axis[CONTROLLER_AXIS_LSTICK_Y];
     s->in_state.sThumbRX = state->axis[CONTROLLER_AXIS_RSTICK_X];
     s->in_state.sThumbRY = state->axis[CONTROLLER_AXIS_RSTICK_Y];
+
+#ifdef CONFIG_IOS
+    if (state->type == INPUT_DEVICE_IOS_TOUCH_CONTROLLER) {
+        bool has_signal = state->buttons ||
+            state->axis[CONTROLLER_AXIS_LTRIG] ||
+            state->axis[CONTROLLER_AXIS_RTRIG] ||
+            state->axis[CONTROLLER_AXIS_LSTICK_X] ||
+            state->axis[CONTROLLER_AXIS_LSTICK_Y] ||
+            state->axis[CONTROLLER_AXIS_RSTICK_X] ||
+            state->axis[CONTROLLER_AXIS_RSTICK_Y];
+
+        s_ios_xid_poll_log_counter++;
+        if (has_signal && s_ios_xid_poll_log_counter % 4 == 1) {
+            xemu_ios_input_diagnostic_log(
+                "xid_poll port=%d buttons=0x%x wButtons=0x%x lt=%u rt=%u lx=%d ly=%d rx=%d ry=%d",
+                s->device_index + 1,
+                state->buttons,
+                s->in_state.wButtons,
+                s->in_state.bAnalogButtons[GAMEPAD_LEFT_TRIGGER],
+                s->in_state.bAnalogButtons[GAMEPAD_RIGHT_TRIGGER],
+                s->in_state.sThumbLX,
+                s->in_state.sThumbLY,
+                s->in_state.sThumbRX,
+                s->in_state.sThumbRY);
+        }
+    }
+#endif
 }
 
 void usb_xid_handle_reset(USBDevice *dev)

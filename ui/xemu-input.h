@@ -71,6 +71,7 @@ enum controller_state_axis_index {
 enum controller_input_device_type {
     INPUT_DEVICE_SDL_KEYBOARD,
     INPUT_DEVICE_SDL_GAMEPAD,
+    INPUT_DEVICE_IOS_TOUCH_CONTROLLER,
 };
 
 enum peripheral_type { PERIPHERAL_NONE, PERIPHERAL_XMU, PERIPHERAL_TYPE_COUNT };
@@ -145,6 +146,21 @@ void xemu_save_peripheral_settings(int player_index, int peripheral_index,
 void xemu_input_set_test_mode(int enabled);
 int xemu_input_get_test_mode(void);
 void xemu_input_reset_input_mapping(ControllerState *state);
+
+#ifdef CONFIG_IOS
+typedef void (*XemuIOSInputDiagnosticCallback)(const char *message);
+
+void xemu_ios_set_input_diagnostic_callback(XemuIOSInputDiagnosticCallback callback);
+void xemu_ios_input_diagnostic_log(const char *fmt, ...);
+void xemu_ios_set_touch_controller_state(int active,
+                                         uint32_t buttons,
+                                         int16_t left_trigger,
+                                         int16_t right_trigger,
+                                         int16_t left_x,
+                                         int16_t left_y,
+                                         int16_t right_x,
+                                         int16_t right_y);
+#endif
 
 #ifdef __cplusplus
 }

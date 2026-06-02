@@ -16,6 +16,10 @@ private typealias XboxCameraFrameProvider = @convention(c) (
     UnsafeMutablePointer<UInt64>?
 ) -> Int
 private typealias XemuSetXboxCameraFrameProvider = @convention(c) (XboxCameraFrameProvider?) -> Void
+private typealias XemuGameplayTouchCallback = @convention(c) (Int32, Int64, Float, Float) -> Void
+private typealias XemuSetGameplayTouchCallback = @convention(c) (XemuGameplayTouchCallback?) -> Void
+private typealias XemuInputDiagnosticCallback = @convention(c) (UnsafePointer<CChar>?) -> Void
+private typealias XemuSetInputDiagnosticCallback = @convention(c) (XemuInputDiagnosticCallback?) -> Void
 
 private let dukexXboxCameraFrameProvider: XboxCameraFrameProvider = { destination, capacity, width, height, sequence in
     XboxCameraFrameSource.shared.copyJPEGFrame(
@@ -25,6 +29,23 @@ private let dukexXboxCameraFrameProvider: XboxCameraFrameProvider = { destinatio
         height: height,
         sequence: sequence
     )
+}
+
+private let dukexGameplayTouchCallback: XemuGameplayTouchCallback = { phase, touchID, x, y in
+    NativeMetalPresenterHost.handleGameplayTouch(
+        phaseRaw: phase,
+        touchID: touchID,
+        normalizedX: x,
+        normalizedY: y
+    )
+}
+
+private let dukexInputDiagnosticCallback: XemuInputDiagnosticCallback = { message in
+    guard let message else {
+        return
+    }
+
+    NativeMetalDiagnostics.log("CORE_INPUT", String(cString: message))
 }
 
 @MainActor
@@ -73,6 +94,8 @@ final class EmulatorCoreRuntime: ObservableObject {
     private var requestShutdown: XemuRequestShutdown?
     private var requestSystemReset: QemuSystemResetRequest?
     private var setXboxCameraFrameProvider: XemuSetXboxCameraFrameProvider?
+    private var setGameplayTouchCallback: XemuSetGameplayTouchCallback?
+    private var setInputDiagnosticCallback: XemuSetInputDiagnosticCallback?
 
     init(bundle: Bundle = .main) {
         state = Self.resolveCoreURL(in: bundle).map(RunState.ready) ??
@@ -105,6 +128,8 @@ final class EmulatorCoreRuntime: ObservableObject {
             let requestShutdown = loadRequestShutdown()
             let requestSystemReset = loadRequestSystemReset()
             let setXboxCameraFrameProvider = loadSetXboxCameraFrameProvider()
+            let setGameplayTouchCallback = loadSetGameplayTouchCallback()
+            let setInputDiagnosticCallback: XemuSetInputDiagnosticCallback? = nil
 
             let logURL = Self.prepareRunLog(for: plan, arguments: arguments)
             state = .running(plan.gameName)
@@ -133,6 +158,8 @@ final class EmulatorCoreRuntime: ObservableObject {
                     xboxCameraEnabled: xboxCameraEnabled,
                     xboxHeadsetMicEnabled: xboxHeadsetMicEnabled,
                     setExternalMetalLayer: setExternalMetalLayer,
+                    setGameplayTouchCallback: setGameplayTouchCallback,
+                    setInputDiagnosticCallback: setInputDiagnosticCallback,
                     requestShutdown: requestShutdown,
                     requestSystemReset: requestSystemReset,
                     session: NativeMetalPresenterSession(
@@ -294,6 +321,46 @@ final class EmulatorCoreRuntime: ObservableObject {
         return setter
     }
 
+    private func loadSetGameplayTouchCallback() -> XemuSetGameplayTouchCallback? {
+        if let setGameplayTouchCallback {
+            return setGameplayTouchCallback
+        }
+
+        guard let handle else {
+            return nil
+        }
+
+        guard let symbol = dlsym(handle, "xemu_ios_set_gameplay_touch_event_callback") else {
+            NSLog("xemu_ios_set_gameplay_touch_event_callback is not available; native touch bridge disabled")
+            return nil
+        }
+
+        NSLog("Resolved xemu_ios_set_gameplay_touch_event_callback")
+        let setter = unsafeBitCast(symbol, to: XemuSetGameplayTouchCallback.self)
+        setGameplayTouchCallback = setter
+        return setter
+    }
+
+    private func loadSetInputDiagnosticCallback() -> XemuSetInputDiagnosticCallback? {
+        if let setInputDiagnosticCallback {
+            return setInputDiagnosticCallback
+        }
+
+        guard let handle else {
+            return nil
+        }
+
+        guard let symbol = dlsym(handle, "xemu_ios_set_input_diagnostic_callback") else {
+            NSLog("xemu_ios_set_input_diagnostic_callback is not available")
+            return nil
+        }
+
+        NSLog("Resolved xemu_ios_set_input_diagnostic_callback")
+        let setter = unsafeBitCast(symbol, to: XemuSetInputDiagnosticCallback.self)
+        setInputDiagnosticCallback = setter
+        return setter
+    }
+
     private static func prepareRunLog(
         for plan: XemuLaunchPlan,
         arguments: [String]
@@ -360,6 +427,8 @@ final class EmulatorCoreRuntime: ObservableObject {
         xboxCameraEnabled: Bool,
         xboxHeadsetMicEnabled: Bool,
         setExternalMetalLayer: XemuSetExternalMetalLayer?,
+        setGameplayTouchCallback: XemuSetGameplayTouchCallback?,
+        setInputDiagnosticCallback: XemuSetInputDiagnosticCallback?,
         requestShutdown: XemuRequestShutdown?,
         requestSystemReset: QemuSystemResetRequest?,
         session: NativeMetalPresenterSession
@@ -465,9 +534,11 @@ final class EmulatorCoreRuntime: ObservableObject {
         NSLog("Xemu core argv: %@", arguments.joined(separator: " "))
 
         let presenterHost = useVulkanSwapchain ? NativeMetalPresenterHost() : nil
-        if let presenterHost {
-            if let layerPointer = presenterHost.start(
-                session: session,
+        var gameplayTouchCallbackRegistered = false
+        var inputDiagnosticCallbackRegistered = false
+            if let presenterHost {
+                if let layerPointer = presenterHost.start(
+                    session: session,
                 onExitRequested: {
                     NotificationCenter.default.post(name: .dukeXReturnToGamesRequested, object: nil)
                     requestShutdown?()
@@ -482,11 +553,19 @@ final class EmulatorCoreRuntime: ObservableObject {
                     requestSystemReset(Self.qemuShutdownCauseGuestReset)
                     return true
                 }
-            ) {
-                setExternalMetalLayer?(layerPointer)
-                NSLog(
-                    "Native CAMetalLayer presenter active: 0x%llx",
-                    UInt64(UInt(bitPattern: layerPointer))
+                ) {
+                    setExternalMetalLayer?(layerPointer)
+                    setInputDiagnosticCallback?(dukexInputDiagnosticCallback)
+                    inputDiagnosticCallbackRegistered = setInputDiagnosticCallback != nil
+                    setGameplayTouchCallback?(dukexGameplayTouchCallback)
+                    gameplayTouchCallbackRegistered = setGameplayTouchCallback != nil
+                    NativeMetalDiagnostics.log(
+                        "CORE_BRIDGE",
+                        "externalLayer=\(String(format: "0x%llx", UInt64(UInt(bitPattern: layerPointer)))) gameplayCallbackRegistered=\(gameplayTouchCallbackRegistered ? 1 : 0) inputDiagnosticsRegistered=\(inputDiagnosticCallbackRegistered ? 1 : 0) setExternalAvailable=\(setExternalMetalLayer == nil ? 0 : 1)"
+                    )
+                    NSLog(
+                        "Native CAMetalLayer presenter active: 0x%llx",
+                        UInt64(UInt(bitPattern: layerPointer))
                 )
             } else {
                 setExternalMetalLayer?(nil)
@@ -495,6 +574,12 @@ final class EmulatorCoreRuntime: ObservableObject {
         }
         defer {
             if useVulkanSwapchain {
+                if gameplayTouchCallbackRegistered {
+                    setGameplayTouchCallback?(nil)
+                }
+                if inputDiagnosticCallbackRegistered {
+                    setInputDiagnosticCallback?(nil)
+                }
                 setExternalMetalLayer?(nil)
                 presenterHost?.stop()
             }
@@ -508,8 +593,11 @@ final class EmulatorCoreRuntime: ObservableObject {
         }
 
         var mutableArgv = argv
+        NativeMetalDiagnostics.log("CORE_ENTRY", "calling xemu_ios_main argc=\(arguments.count) mainThread=\(Thread.isMainThread ? 1 : 0)")
         return mutableArgv.withUnsafeMutableBufferPointer { buffer in
-            entryPoint(Int32(arguments.count), buffer.baseAddress)
+            let status = entryPoint(Int32(arguments.count), buffer.baseAddress)
+            NativeMetalDiagnostics.log("CORE_ENTRY", "xemu_ios_main returned status=\(status)")
+            return status
         }
     }
 

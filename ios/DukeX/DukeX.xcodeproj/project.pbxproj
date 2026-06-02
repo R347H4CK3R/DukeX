@@ -53,6 +53,10 @@
 		F20000000000000000000001 /* GameListRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000011 /* GameListRow.swift */; };
 		F20000000000000000000002 /* GameMetadataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000012 /* GameMetadataStore.swift */; };
 		F20000000000000000000003 /* GameMetadataEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000013 /* GameMetadataEditorView.swift */; };
+		G30000000000000000000001 /* ManicSkinModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = G30000000000000000000011 /* ManicSkinModels.swift */; };
+		G30000000000000000000002 /* ManicSkinVirtualController.swift in Sources */ = {isa = PBXBuildFile; fileRef = G30000000000000000000012 /* ManicSkinVirtualController.swift */; };
+		G30000000000000000000003 /* ManicSkinTouchControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = G30000000000000000000013 /* ManicSkinTouchControlsView.swift */; };
+		G30000000000000000000004 /* Skins in Resources */ = {isa = PBXBuildFile; fileRef = G30000000000000000000014 /* Skins */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -105,6 +109,10 @@
 		F20000000000000000000011 /* GameListRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameListRow.swift; sourceTree = "<group>"; };
 		F20000000000000000000012 /* GameMetadataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameMetadataStore.swift; sourceTree = "<group>"; };
 		F20000000000000000000013 /* GameMetadataEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameMetadataEditorView.swift; sourceTree = "<group>"; };
+		G30000000000000000000011 /* ManicSkinModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManicSkinModels.swift; sourceTree = "<group>"; };
+		G30000000000000000000012 /* ManicSkinVirtualController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManicSkinVirtualController.swift; sourceTree = "<group>"; };
+		G30000000000000000000013 /* ManicSkinTouchControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManicSkinTouchControlsView.swift; sourceTree = "<group>"; };
+		G30000000000000000000014 /* Skins */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Skins; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -331,12 +339,13 @@
 			isa = PBXGroup;
 			children = (
 				B10000000000000000000017 /* NativeMetalPresenterHost.swift */,
-				C10000000000000000000018 /* NativeMetalPresenterSession.swift */,
-				C10000000000000000000019 /* NativeMetalPresenterViewController.swift */,
-				D10000000000000000000141 /* Metal */,
-				D10000000000000000000142 /* HUD */,
-				D10000000000000000000143 /* ExitOverlay */,
-			);
+					C10000000000000000000018 /* NativeMetalPresenterSession.swift */,
+					C10000000000000000000019 /* NativeMetalPresenterViewController.swift */,
+					G30000000000000000000100 /* ManicSkin */,
+					D10000000000000000000141 /* Metal */,
+					D10000000000000000000142 /* HUD */,
+					D10000000000000000000143 /* ExitOverlay */,
+				);
 			path = Presenter;
 			sourceTree = "<group>";
 		};
@@ -365,11 +374,21 @@
 			children = (
 				C1000000000000000000001A /* GameplayExitOverlayView.swift */,
 			);
-			path = ExitOverlay;
-			sourceTree = "<group>";
-		};
-		D10000000000000000000150 /* Services */ = {
-			isa = PBXGroup;
+				path = ExitOverlay;
+				sourceTree = "<group>";
+			};
+			G30000000000000000000100 /* ManicSkin */ = {
+				isa = PBXGroup;
+				children = (
+					G30000000000000000000011 /* ManicSkinModels.swift */,
+					G30000000000000000000012 /* ManicSkinVirtualController.swift */,
+					G30000000000000000000013 /* ManicSkinTouchControlsView.swift */,
+				);
+				path = ManicSkin;
+				sourceTree = "<group>";
+			};
+			D10000000000000000000150 /* Services */ = {
+				isa = PBXGroup;
 			children = (
 				D10000000000000000000151 /* Insignia */,
 				F20000000000000000000100 /* GameMetadata */,
@@ -397,11 +416,12 @@
 		D10000000000000000000160 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				A10000000000000000000019 /* EarlyMetalDiagnostics.m */,
-				A10000000000000000000015 /* Assets.xcassets */,
-				A10000000000000000000016 /* Info.plist */,
-				A10000000000000000000017 /* DukeX.entitlements */,
-			);
+					A10000000000000000000019 /* EarlyMetalDiagnostics.m */,
+					A10000000000000000000015 /* Assets.xcassets */,
+					G30000000000000000000014 /* Skins */,
+					A10000000000000000000016 /* Info.plist */,
+					A10000000000000000000017 /* DukeX.entitlements */,
+				);
 			name = Resources;
 			sourceTree = "<group>";
 		};
@@ -465,6 +485,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000005 /* Assets.xcassets in Resources */,
+				G30000000000000000000004 /* Skins in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -543,10 +564,13 @@
 				C1000000000000000000000C /* DisplayStatsBridge.swift in Sources */,
 				C1000000000000000000000D /* AppResourceMonitor.swift in Sources */,
 				C1000000000000000000000E /* StatsHUDView.swift in Sources */,
-				C1000000000000000000000F /* NativeMetalPresenterView.swift in Sources */,
-				C10000000000000000000010 /* LayerConfigurators.swift in Sources */,
-				A10000000000000000000007 /* EarlyMetalDiagnostics.m in Sources */,
-			);
+					C1000000000000000000000F /* NativeMetalPresenterView.swift in Sources */,
+					C10000000000000000000010 /* LayerConfigurators.swift in Sources */,
+					G30000000000000000000001 /* ManicSkinModels.swift in Sources */,
+					G30000000000000000000002 /* ManicSkinVirtualController.swift in Sources */,
+					G30000000000000000000003 /* ManicSkinTouchControlsView.swift in Sources */,
+					A10000000000000000000007 /* EarlyMetalDiagnostics.m in Sources */,
+				);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
