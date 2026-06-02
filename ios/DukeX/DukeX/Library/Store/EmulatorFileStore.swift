@@ -156,6 +156,11 @@ final class EmulatorFileStore: ObservableObject {
             UserDefaults.standard.set(natPortProtocol, forKey: Self.natPortProtocolKey)
         }
     }
+    @Published var cloudSaveSyncEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(cloudSaveSyncEnabled, forKey: Self.cloudSaveSyncEnabledKey)
+        }
+    }
     @Published var message: UserMessage?
     @Published var launchPlan: XemuLaunchPlan?
     @Published private(set) var folderStorageUsage = FolderStorageUsage.empty
@@ -185,6 +190,7 @@ final class EmulatorFileStore: ObservableObject {
     static let natHostPortKey = "NATHostPort"
     static let natGuestPortKey = "NATGuestPort"
     static let natPortProtocolKey = "NATPortProtocol"
+    static let cloudSaveSyncEnabledKey = "DukeXCloudSaveSyncEnabled"
 
     let documentsURL: URL
     let biosDirectoryURL: URL
@@ -193,6 +199,7 @@ final class EmulatorFileStore: ObservableObject {
     let gameConfigsDirectoryURL: URL
     let shaderCachesDirectoryURL: URL
     let skinsDirectoryURL: URL
+    let cloudSavesDirectoryURL: URL
 
     var selectedGame: LibraryFile? {
         games.first { $0.id == selectedGameID }
@@ -314,6 +321,7 @@ final class EmulatorFileStore: ObservableObject {
         gameConfigsDirectoryURL = documentsURL.appendingPathComponent("GameConfigs", isDirectory: true)
         shaderCachesDirectoryURL = documentsURL.appendingPathComponent("ShaderCaches", isDirectory: true)
         skinsDirectoryURL = documentsURL.appendingPathComponent("Skins", isDirectory: true)
+        cloudSavesDirectoryURL = documentsURL.appendingPathComponent("CloudSaves", isDirectory: true)
         if UserDefaults.standard.object(forKey: Self.libraryTabsMigrationKey) == nil {
             UserDefaults.standard.set(false, forKey: Self.autoLaunchDashboardOnOpenKey)
             UserDefaults.standard.set(true, forKey: Self.libraryTabsMigrationKey)
@@ -343,6 +351,7 @@ final class EmulatorFileStore: ObservableObject {
         natHostPort = UserDefaults.standard.string(forKey: Self.natHostPortKey) ?? NetworkSettings.defaultHostPort
         natGuestPort = UserDefaults.standard.string(forKey: Self.natGuestPortKey) ?? NetworkSettings.defaultGuestPort
         natPortProtocol = UserDefaults.standard.string(forKey: Self.natPortProtocolKey) ?? NetworkSettings.defaultProtocol
+        cloudSaveSyncEnabled = UserDefaults.standard.object(forKey: Self.cloudSaveSyncEnabledKey) as? Bool ?? false
         selectedGameID = UserDefaults.standard.string(forKey: Self.selectedGameIDKey) ?? ""
         selectedSkinID = UserDefaults.standard.string(forKey: Self.selectedSkinIDKey) ?? ""
         selectedPortraitSkinID = UserDefaults.standard.string(forKey: Self.selectedPortraitSkinIDKey) ?? selectedSkinID
@@ -496,6 +505,10 @@ final class EmulatorFileStore: ObservableObject {
         }
     }
 
+    func prepareCloudSaveDirectory() throws {
+        try prepareDirectories()
+    }
+
     func makeLaunchPlan() throws -> XemuLaunchPlan {
         let systemFiles = try makeSystemFileSet()
         guard let selectedGame else {
@@ -622,6 +635,7 @@ final class EmulatorFileStore: ObservableObject {
         try FileManager.default.createDirectory(at: gameConfigsDirectoryURL, withIntermediateDirectories: true, attributes: nil)
         try FileManager.default.createDirectory(at: shaderCachesDirectoryURL, withIntermediateDirectories: true, attributes: nil)
         try FileManager.default.createDirectory(at: skinsDirectoryURL, withIntermediateDirectories: true, attributes: nil)
+        try FileManager.default.createDirectory(at: cloudSavesDirectoryURL, withIntermediateDirectories: true, attributes: nil)
     }
 
     private func scanDirectory(_ url: URL) throws -> [LibraryFile] {

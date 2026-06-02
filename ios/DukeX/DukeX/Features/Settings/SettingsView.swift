@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var store: EmulatorFileStore
+    @ObservedObject var profileStore: InsigniaProfileStore
     let runtimeState: EmulatorCoreRuntime.RunState
     let autoJITStatus: String?
     let importSystemFiles: () -> Void
@@ -10,6 +11,7 @@ struct SettingsView: View {
     @State private var lastLilyDedicationTapDate: Date?
     @State private var lilyDedicationJiggleAngle = 0.0
     @State private var lilyDedicationJiggleOffset: CGFloat = 0
+    @State private var isCloudSaveOperationRunning = false
 
     var body: some View {
         List {
@@ -186,6 +188,45 @@ struct SettingsView: View {
                 }
                 .disabled(store.forceInsigniaNATEnabled)
                 .opacity(store.forceInsigniaNATEnabled ? 0.45 : 1)
+
+                Group {
+                    Toggle(isOn: $store.cloudSaveSyncEnabled) {
+                        Label("Cloud Sync Saves", systemImage: "icloud")
+                    }
+
+                    Text("Experimental. Off by default. Uses xb.live services to sync your save files automatically across your physical Xbox hardware, DukeX, and other compatible emulators.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Button(action: pushSavesToCloud) {
+                        CloudSaveActionLabel(
+                            title: "Push Saves to Cloud",
+                            detail: "Manually uploads the latest saves from the Xbox HDD to xb.live.",
+                            systemImage: "icloud.and.arrow.up"
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: pullSavesFromCloud) {
+                        CloudSaveActionLabel(
+                            title: "Pull Saves from Cloud",
+                            detail: "Manually downloads cloud saves and imports missing titles into the Xbox HDD.",
+                            systemImage: "icloud.and.arrow.down"
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    if isCloudSaveOperationRunning {
+                        HStack(spacing: 12) {
+                            ProgressView()
+                            Text("Syncing saves...")
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(minHeight: 36)
+                    }
+                }
+                .disabled(!cloudSaveControlsEnabled || isCloudSaveOperationRunning)
+                .opacity(cloudSaveControlsEnabled ? 1 : 0.45)
             }
             .dukeXThemedListRowBackground()
 
@@ -288,5 +329,146 @@ struct SettingsView: View {
                 try? await Task.sleep(nanoseconds: step.duration)
             }
         }
+    }
+
+    private var cloudSaveControlsEnabled: Bool {
+        profileStore.isAuthenticatedForCloudServices && !isRuntimeUsingHDD
+    }
+
+    private var isRuntimeUsingHDD: Bool {
+        if case .running = runtimeState {
+            return true
+        }
+        return false
+    }
+
+    private func pushSavesToCloud() {
+        do {
+            try store.prepareCloudSaveDirectory()
+        } catch {
+            store.message = UserMessage(title: "Cloud Save Sync Failed", detail: error.localizedDescription)
+            return
+        }
+
+        let directoryURL = store.cloudSavesDirectoryURL
+        let games = store.games
+        let hdd = store.hdd
+        let eeprom = store.eeprom
+        runCloudSaveOperation(successTitle: "Saves Pushed") { sessionKey in
+            let result = try await XBLCloudSaveService().pushLocalSaves(
+                sessionKey: sessionKey,
+                hdd: hdd,
+                eeprom: eeprom,
+                cloudSavesDirectoryURL: directoryURL,
+                games: games
+            )
+            return result.pushDetail
+        }
+    }
+
+    private func pullSavesFromCloud() {
+        do {
+            try store.prepareCloudSaveDirectory()
+        } catch {
+            store.message = UserMessage(title: "Cloud Save Sync Failed", detail: error.localizedDescription)
+            return
+        }
+
+        let directoryURL = store.cloudSavesDirectoryURL
+        let hdd = store.hdd
+        let eeprom = store.eeprom
+        runCloudSaveOperation(successTitle: "Saves Pulled") { sessionKey in
+            let result = try await XBLCloudSaveService().pullRemoteSaves(
+                sessionKey: sessionKey,
+                hdd: hdd,
+                eeprom: eeprom,
+                cloudSavesDirectoryURL: directoryURL
+            )
+            return result.pullDetail
+        }
+    }
+
+    private func runCloudSaveOperation(
+        successTitle: String,
+        operation: @escaping (String) async throws -> String
+    ) {
+        guard cloudSaveControlsEnabled else {
+            if isRuntimeUsingHDD {
+                store.message = UserMessage(
+                    title: "Cloud Saves Unavailable",
+                    detail: "Stop the emulator before syncing saves so DukeX can safely read and write the Xbox HDD."
+                )
+            } else {
+                store.message = UserMessage(
+                    title: "Sign In Required",
+                    detail: "Sign in with an xb.live account in the Profile tab to use cloud saves."
+                )
+            }
+            return
+        }
+        guard !isCloudSaveOperationRunning else {
+            return
+        }
+
+        isCloudSaveOperationRunning = true
+        Task {
+            do {
+                guard let sessionKey = try InsigniaProfileStore.storedSessionKey(),
+                      !sessionKey.isEmpty else {
+                    throw CloudSaveSettingsError.missingSession
+                }
+
+                let detail = try await operation(sessionKey)
+                await MainActor.run {
+                    store.message = UserMessage(title: successTitle, detail: detail)
+                    isCloudSaveOperationRunning = false
+                }
+            } catch {
+                await MainActor.run {
+                    store.message = UserMessage(title: "Cloud Save Sync Failed", detail: error.localizedDescription)
+                    isCloudSaveOperationRunning = false
+                }
+            }
+        }
+    }
+}
+
+private enum CloudSaveSettingsError: LocalizedError {
+    case missingSession
+
+    var errorDescription: String? {
+        switch self {
+        case .missingSession:
+            return "The xb.live session is missing. Sign out and sign in again from the Profile tab."
+        }
+    }
+}
+
+private struct CloudSaveActionLabel: View {
+    @Environment(\.dukeXTheme) private var theme
+
+    let title: String
+    let detail: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .foregroundStyle(theme.accentColor)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .foregroundStyle(theme.accentColor)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(Color(uiColor: .secondaryLabel))
+                    .multilineTextAlignment(.leading)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(minHeight: 48)
+        .contentShape(Rectangle())
     }
 }

@@ -1135,6 +1135,14 @@ final class InsigniaProfileStore: ObservableObject {
         session != nil
     }
 
+    var isAuthenticatedForCloudServices: Bool {
+        session?.isAuthenticated == true
+    }
+
+    nonisolated static func storedSessionKey() throws -> String? {
+        try ProfileSessionKeychain.loadSessionKey()
+    }
+
     var registeredUsersText: String {
         publicSnapshot?.registeredUsers ?? "Not Synced"
     }

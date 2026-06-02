@@ -33,6 +33,8 @@ struct ContentView: View {
     @State private var isProfileLoginPresented = false
     @State private var selectedTab: MainTab = .games
     @State private var isGamesAutoRefreshRunning = false
+    @State private var isAutomaticCloudSaveSyncRunning = false
+    @State private var activeRuntimeWasGame = false
 
     private let tabRefreshTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
@@ -99,6 +101,7 @@ struct ContentView: View {
                 NavigationStack {
                     SettingsView(
                         store: store,
+                        profileStore: profileStore,
                         runtimeState: runtime.state,
                         autoJITStatus: autoJIT.status,
                         importSystemFiles: { importTarget = .systemFiles },
@@ -233,6 +236,7 @@ struct ContentView: View {
             .task {
                 profileStore.refresh()
                 await refreshGamesNow()
+                await pullCloudSavesAutomaticallyIfNeeded(reason: "launch")
                 if environmentRequestsAutoLaunch && !autoLaunchAttempted {
                     autoJIT.clearPendingForFreshAutomaticLaunch()
                 }
@@ -257,6 +261,9 @@ struct ContentView: View {
                 if newTab == .settings {
                     refreshLibraryForSettings()
                 }
+            }
+            .onChange(of: runtime.state) { oldState, newState in
+                handleRuntimeStateChange(from: oldState, to: newState)
             }
             .onReceive(tabRefreshTimer) { _ in
                 guard scenePhase == .active else {
@@ -343,6 +350,81 @@ struct ContentView: View {
         liveStatusStore.refresh()
     }
 
+    @MainActor
+    private func pullCloudSavesAutomaticallyIfNeeded(reason: String) async {
+        await runAutomaticCloudSaveSync(reason: reason) { sessionKey, hdd, eeprom, directoryURL in
+            let result = try await XBLCloudSaveService().pullRemoteSaves(
+                sessionKey: sessionKey,
+                hdd: hdd,
+                eeprom: eeprom,
+                cloudSavesDirectoryURL: directoryURL
+            )
+            NSLog("DukeX automatic cloud save pull completed: %@", result.pullDetail)
+        }
+    }
+
+    @MainActor
+    private func pushCloudSavesAutomaticallyIfNeeded(reason: String) async {
+        await runAutomaticCloudSaveSync(reason: reason) { sessionKey, hdd, eeprom, directoryURL in
+            let result = try await XBLCloudSaveService().pushLocalSaves(
+                sessionKey: sessionKey,
+                hdd: hdd,
+                eeprom: eeprom,
+                cloudSavesDirectoryURL: directoryURL,
+                games: store.games
+            )
+            NSLog("DukeX automatic cloud save push completed: %@", result.pushDetail)
+        }
+    }
+
+    @MainActor
+    private func runAutomaticCloudSaveSync(
+        reason: String,
+        operation: @escaping (
+            _ sessionKey: String,
+            _ hdd: LibraryFile,
+            _ eeprom: LibraryFile,
+            _ cloudSavesDirectoryURL: URL
+        ) async throws -> Void
+    ) async {
+        guard store.cloudSaveSyncEnabled else {
+            return
+        }
+        guard !runtime.state.isRunning,
+              !isAutomaticCloudSaveSyncRunning else {
+            return
+        }
+        guard let sessionKey = try? InsigniaProfileStore.storedSessionKey(),
+              !sessionKey.isEmpty else {
+            NSLog("DukeX automatic cloud save sync skipped (%@): missing xb.live session", reason)
+            return
+        }
+        guard let hdd = store.hdd else {
+            NSLog("DukeX automatic cloud save sync skipped (%@): missing HDD", reason)
+            return
+        }
+        guard let eeprom = store.eeprom else {
+            NSLog("DukeX automatic cloud save sync skipped (%@): missing EEPROM", reason)
+            return
+        }
+
+        isAutomaticCloudSaveSyncRunning = true
+        defer {
+            isAutomaticCloudSaveSyncRunning = false
+        }
+
+        do {
+            try store.prepareCloudSaveDirectory()
+            try await operation(sessionKey, hdd, eeprom, store.cloudSavesDirectoryURL)
+        } catch {
+            NSLog(
+                "DukeX automatic cloud save sync failed (%@): %@",
+                reason,
+                error.localizedDescription
+            )
+        }
+    }
+
     private func launchGame() {
         do {
             try launch(.game)
@@ -366,6 +448,7 @@ struct ContentView: View {
 
     private func launch(_ target: AutoJITLaunchTarget) throws {
         let plan = try makePlan(for: target)
+        activeRuntimeWasGame = target == .game
         guard plan.requiresJITHandoff && store.autoJITBeforeLaunchEnabled else {
             runtime.launch(plan: plan)
             return
@@ -376,6 +459,31 @@ struct ContentView: View {
             store.message = message
         }
         scheduleAutoJITFallbackIfNeeded()
+    }
+
+    private func handleRuntimeStateChange(
+        from oldState: EmulatorCoreRuntime.RunState,
+        to newState: EmulatorCoreRuntime.RunState
+    ) {
+        guard activeRuntimeWasGame,
+              oldState.isRunning else {
+            if !newState.isRunning {
+                activeRuntimeWasGame = false
+            }
+            return
+        }
+
+        switch newState {
+        case .exited:
+            activeRuntimeWasGame = false
+            Task { @MainActor in
+                await pushCloudSavesAutomaticallyIfNeeded(reason: "game exit")
+            }
+        case .failed:
+            activeRuntimeWasGame = false
+        default:
+            break
+        }
     }
 
     private func beginCoverSelection(for game: LibraryFile) {
