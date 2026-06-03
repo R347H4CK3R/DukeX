@@ -12,6 +12,8 @@ enum NativeGameplayTouchPhase: Int32 {
 
 final class NativeMetalPresenterHost {
     private static weak var activeHost: NativeMetalPresenterHost?
+    private static weak var connectedExternalDisplayRootController: NativeMetalExternalDisplayViewController?
+    private static weak var connectedExternalDisplayWindow: UIWindow?
     private static let usesEmbeddedApplicationWindowPresenter = false
     private static let usesEmbeddedWindowSubviewPresenter = false
     private static let usesRootTouchCapture = false
@@ -29,6 +31,8 @@ final class NativeMetalPresenterHost {
     private static var statusBarHiddenOverrideClasses: Set<ObjectIdentifier> = []
 
     private var window: UIWindow?
+    private var externalDisplayWindow: UIWindow?
+    private var externalDisplayRootController: NativeMetalExternalDisplayViewController?
     private var touchOverlayWindow: NativeMetalTouchOverlayWindow?
     private var touchOverlayRootController: NativeMetalTouchOverlayViewController?
     private var rootController: NativeMetalPresenterViewController?
@@ -69,6 +73,7 @@ final class NativeMetalPresenterHost {
     private var isEmbeddedPresentation = false
     private var isEmbeddedWindowSubviewPresentation = false
     private weak var embeddedPresentingController: UIViewController?
+    private var externalScreenObserverTokens: [NSObjectProtocol] = []
 
     func start(
         session: NativeMetalPresenterSession,
@@ -110,15 +115,25 @@ final class NativeMetalPresenterHost {
 
         let presenterView = NativeMetalPresenterView(frame: scene.coordinateSpace.bounds)
         presenterView.translatesAutoresizingMaskIntoConstraints = false
-        rootController.view.addSubview(presenterView)
         let tapGesture = UITapGestureRecognizer()
         tapGesture.cancelsTouchesInView = false
         tapGesture.delaysTouchesBegan = false
         tapGesture.delaysTouchesEnded = false
-        presenterView.addGestureRecognizer(tapGesture)
         self.rootController = rootController
         self.presenterView = presenterView
         self.exitMenuTapGesture = tapGesture
+        if let externalRootController = Self.connectedExternalDisplayRootController,
+           let externalWindow = Self.connectedExternalDisplayWindow {
+            activateExternalGameplayDisplay(
+                rootController: externalRootController,
+                window: externalWindow,
+                reason: "start-external-scene"
+            )
+        } else if let externalScreen = Self.activeExternalGameplayScreen() {
+            activateExternalGameplayDisplay(on: externalScreen, reason: "start")
+        } else {
+            attachPresenterViewToDeviceRoot(reason: "start")
+        }
         if Self.usesTouchProbeGesture {
             let touchProbeGesture = NativeMetalTouchProbeGestureRecognizer { [weak self] phase, touches in
                 self?.handleTouchProbeGesture(phase: phase, touches: touches)
@@ -217,6 +232,7 @@ final class NativeMetalPresenterHost {
         self.exitOverlayView = exitOverlayView
         installTouchOverlayWindowIfNeeded(scene: scene, presenterWindow: attachedWindow)
         Self.activeHost = self
+        installExternalScreenObservers()
         if Self.usesGlobalTouchRouter {
             NativeMetalGlobalTouchRouter.shared.activate(host: self)
         } else {
@@ -262,6 +278,294 @@ final class NativeMetalPresenterHost {
             touchID: touchID,
             normalizedX: normalizedX,
             normalizedY: normalizedY
+        )
+    }
+
+    static func connectExternalDisplayScene(
+        rootController: NativeMetalExternalDisplayViewController,
+        window: UIWindow,
+        reason: String
+    ) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async {
+                Self.connectExternalDisplayScene(
+                    rootController: rootController,
+                    window: window,
+                    reason: reason
+                )
+            }
+            return
+        }
+
+        connectedExternalDisplayRootController = rootController
+        connectedExternalDisplayWindow = window
+        NSLog(
+            "DukeX external display scene connected: %@ window=%@ bounds=%@",
+            reason,
+            NativeMetalDiagnostics.objectID(window),
+            NativeMetalDiagnostics.rect(window.windowScene?.coordinateSpace.bounds ?? window.bounds)
+        )
+        activeHost?.activateExternalGameplayDisplay(
+            rootController: rootController,
+            window: window,
+            reason: reason
+        )
+    }
+
+    static func disconnectExternalDisplayScene(
+        rootController: NativeMetalExternalDisplayViewController,
+        window: UIWindow,
+        reason: String
+    ) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async {
+                Self.disconnectExternalDisplayScene(
+                    rootController: rootController,
+                    window: window,
+                    reason: reason
+                )
+            }
+            return
+        }
+
+        if connectedExternalDisplayRootController === rootController {
+            connectedExternalDisplayRootController = nil
+        }
+        if connectedExternalDisplayWindow === window {
+            connectedExternalDisplayWindow = nil
+        }
+        NSLog("DukeX external display scene disconnected: %@", reason)
+        activeHost?.deactivateExternalGameplayDisplay(
+            rootController: rootController,
+            window: window,
+            reason: reason
+        )
+    }
+
+    private func installExternalScreenObservers() {
+        guard externalScreenObserverTokens.isEmpty else {
+            return
+        }
+
+        let center = NotificationCenter.default
+        externalScreenObserverTokens.append(
+            center.addObserver(
+                forName: UIScreen.didConnectNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let screen = notification.object as? UIScreen else {
+                    return
+                }
+                guard Self.connectedExternalDisplayWindow == nil else {
+                    return
+                }
+                self?.activateExternalGameplayDisplay(on: screen, reason: "screen-connect")
+            }
+        )
+        externalScreenObserverTokens.append(
+            center.addObserver(
+                forName: UIScreen.didDisconnectNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self,
+                      let screen = notification.object as? UIScreen,
+                      self.externalDisplayWindow?.screen === screen else {
+                    return
+                }
+                self.deactivateExternalGameplayDisplay(reason: "screen-disconnect")
+            }
+        )
+    }
+
+    private func removeExternalScreenObservers() {
+        let center = NotificationCenter.default
+        externalScreenObserverTokens.forEach(center.removeObserver)
+        externalScreenObserverTokens.removeAll()
+    }
+
+    private static func activeExternalGameplayScreen() -> UIScreen? {
+        UIScreen.screens.first { $0 !== UIScreen.main }
+    }
+
+    private var isUsingExternalGameplayDisplay: Bool {
+        externalDisplayWindow != nil
+    }
+
+    private var presenterContainerView: UIView? {
+        externalDisplayRootController?.view ?? rootController?.view
+    }
+
+    private func moveExitMenuTapGesture(to view: UIView?) {
+        guard let exitMenuTapGesture else {
+            return
+        }
+        guard exitMenuTapGesture.view !== view else {
+            return
+        }
+
+        exitMenuTapGesture.view?.removeGestureRecognizer(exitMenuTapGesture)
+        view?.addGestureRecognizer(exitMenuTapGesture)
+    }
+
+    private func attachPresenterViewToDeviceRoot(reason: String) {
+        guard let rootView = rootController?.view,
+              let presenterView else {
+            return
+        }
+
+        NSLayoutConstraint.deactivate(presenterLayoutConstraints)
+        presenterLayoutConstraints.removeAll()
+        if presenterView.superview !== rootView {
+            presenterView.removeFromSuperview()
+            rootView.insertSubview(presenterView, at: 0)
+        }
+        moveExitMenuTapGesture(to: presenterView)
+        activePresenterViewportFrame = nil
+        NativeMetalDiagnostics.log(
+            "EXTERNAL_DISPLAY_DETACH",
+            "reason=\(reason) presenter=main root=\(NativeMetalDiagnostics.rect(rootView.bounds))"
+        )
+    }
+
+    private func activateExternalGameplayDisplay(on screen: UIScreen, reason: String) {
+        guard Self.connectedExternalDisplayWindow == nil else {
+            return
+        }
+        guard screen !== UIScreen.main else {
+            return
+        }
+        if externalDisplayWindow?.screen === screen {
+            layoutExternalDisplayWindowIfNeeded(reason: reason)
+            return
+        }
+
+        let externalRootController = NativeMetalExternalDisplayViewController()
+        externalRootController.view.frame = screen.bounds
+        externalRootController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+
+        let externalWindow = UIWindow(frame: screen.bounds)
+        externalWindow.screen = screen
+        externalWindow.backgroundColor = .black
+        externalWindow.rootViewController = externalRootController
+        externalWindow.windowLevel = .normal
+
+        activateExternalGameplayDisplay(
+            rootController: externalRootController,
+            window: externalWindow,
+            reason: reason
+        )
+    }
+
+    private func activateExternalGameplayDisplay(
+        rootController externalRootController: NativeMetalExternalDisplayViewController,
+        window externalWindow: UIWindow,
+        reason: String
+    ) {
+        guard let presenterView,
+              let rootView = rootController?.view else {
+            return
+        }
+        if externalDisplayWindow === externalWindow,
+           externalDisplayRootController === externalRootController,
+           presenterView.superview === externalRootController.view {
+            layoutExternalDisplayWindowIfNeeded(reason: reason)
+            presenterView.refreshDrawableSize()
+            return
+        }
+
+        NSLayoutConstraint.deactivate(presenterLayoutConstraints)
+        presenterLayoutConstraints.removeAll()
+        presenterView.removeFromSuperview()
+
+        if let currentExternalWindow = externalDisplayWindow,
+           currentExternalWindow !== externalWindow {
+            currentExternalWindow.isHidden = true
+            currentExternalWindow.rootViewController = nil
+        }
+
+        externalRootController.view.addSubview(presenterView)
+        externalRootController.setGameplayActive(true)
+        externalDisplayRootController = externalRootController
+        externalDisplayWindow = externalWindow
+        moveExitMenuTapGesture(to: rootView)
+        activePresenterViewportFrame = nil
+
+        externalWindow.isHidden = false
+        applyPresenterViewport(nil)
+        layoutExternalDisplayWindowIfNeeded(reason: reason)
+        pendingManicSkinLayoutRefresh = true
+        manicSkinControlsView?.refreshLayoutForGeometryChange(forceRebuild: true)
+        presenterView.refreshDrawableSize()
+
+        NativeMetalDiagnostics.log(
+            "EXTERNAL_DISPLAY_ATTACH",
+            "reason=\(reason) screen=\(NativeMetalDiagnostics.rect(externalWindow.windowScene?.coordinateSpace.bounds ?? externalWindow.screen.bounds)) scale=\(String(format: "%.2f", externalWindow.screen.scale)) window=\(NativeMetalDiagnostics.objectID(externalWindow)) scene=\(NativeMetalDiagnostics.objectID(externalWindow.windowScene))"
+        )
+        NSLog(
+            "DukeX external gameplay display attached: %@ window=%@ scene=%@",
+            reason,
+            NativeMetalDiagnostics.objectID(externalWindow),
+            NativeMetalDiagnostics.objectID(externalWindow.windowScene)
+        )
+    }
+
+    private func deactivateExternalGameplayDisplay(reason: String) {
+        guard externalDisplayWindow != nil else {
+            return
+        }
+
+        let oldWindow = externalDisplayWindow
+        let isConnectedSceneWindow = oldWindow != nil && Self.connectedExternalDisplayWindow === oldWindow
+        oldWindow?.isHidden = isConnectedSceneWindow ? false : true
+        if isConnectedSceneWindow == false {
+            oldWindow?.rootViewController = nil
+        } else if let externalDisplayRootController {
+            externalDisplayRootController.setGameplayActive(false)
+        }
+        externalDisplayRootController = nil
+        externalDisplayWindow = nil
+
+        attachPresenterViewToDeviceRoot(reason: reason)
+        refreshPresenterViewportForManicSkin(reason: "external-\(reason)")
+        forcePresenterLayout(reason: "external-\(reason)")
+    }
+
+    private func deactivateExternalGameplayDisplay(
+        rootController externalRootController: NativeMetalExternalDisplayViewController,
+        window externalWindow: UIWindow,
+        reason: String
+    ) {
+        guard externalDisplayWindow === externalWindow ||
+              externalDisplayRootController === externalRootController else {
+            return
+        }
+
+        deactivateExternalGameplayDisplay(reason: reason)
+    }
+
+    private func layoutExternalDisplayWindowIfNeeded(reason: String) {
+        guard let externalDisplayWindow,
+              let externalRootView = externalDisplayRootController?.view else {
+            return
+        }
+
+        let screenBounds = externalDisplayWindow.windowScene?.coordinateSpace.bounds ??
+            externalDisplayWindow.screen.bounds
+        UIView.performWithoutAnimation {
+            externalDisplayWindow.frame = screenBounds
+            externalDisplayWindow.bounds = CGRect(origin: .zero, size: screenBounds.size)
+            externalRootView.frame = externalDisplayWindow.bounds
+            externalRootView.bounds = externalDisplayWindow.bounds
+            externalDisplayWindow.setNeedsLayout()
+            externalRootView.setNeedsLayout()
+            externalDisplayWindow.layoutIfNeeded()
+            externalRootView.layoutIfNeeded()
+        }
+        NativeMetalDiagnostics.log(
+            "EXTERNAL_DISPLAY_LAYOUT",
+            "reason=\(reason) frame=\(NativeMetalDiagnostics.rect(externalDisplayWindow.frame)) root=\(NativeMetalDiagnostics.rect(externalRootView.bounds))"
         )
     }
 
@@ -732,7 +1036,11 @@ final class NativeMetalPresenterHost {
             NSLayoutConstraint.deactivate(manicSkinLayoutConstraints)
             manicSkinLayoutConstraints.removeAll()
             manicSkinControlsView.removeFromSuperview()
-            rootView.insertSubview(manicSkinControlsView, aboveSubview: presenterView)
+            if presenterView.superview === rootView {
+                rootView.insertSubview(manicSkinControlsView, aboveSubview: presenterView)
+            } else {
+                rootView.addSubview(manicSkinControlsView)
+            }
             if let exitOverlayView {
                 rootView.bringSubviewToFront(exitOverlayView)
             }
@@ -1084,6 +1392,7 @@ final class NativeMetalPresenterHost {
         }
 
         normalizeSceneWindowFrames(reason: reason)
+        layoutExternalDisplayWindowIfNeeded(reason: reason)
         layoutTouchOverlayWindowIfNeeded(reason: reason)
         quarantineSDLUIKitWindows(reason: reason)
         ensureTouchOverlayWindowIsKey(reason: "sync-\(reason)")
@@ -1474,12 +1783,12 @@ final class NativeMetalPresenterHost {
     }
 
     private func applyPresenterViewport(_ viewport: CGRect?) {
-        guard let rootView = rootController?.view,
+        guard let rootView = presenterContainerView,
               let presenterView else {
             return
         }
 
-        let normalizedFrame = viewport?.roundedForLayout
+        let normalizedFrame = isUsingExternalGameplayDisplay ? nil : viewport?.roundedForLayout
         if presenterLayoutConstraints.isEmpty == false {
             if let activePresenterViewportFrame,
                let normalizedFrame,
@@ -1517,7 +1826,7 @@ final class NativeMetalPresenterHost {
         presenterView.setNeedsLayout()
         NativeMetalDiagnostics.log(
             "VIEWPORT_APPLY",
-            "viewport=\(NativeMetalDiagnostics.rect(normalizedFrame ?? .zero)) full=\(normalizedFrame == nil ? 1 : 0)"
+            "viewport=\(NativeMetalDiagnostics.rect(normalizedFrame ?? .zero)) full=\(normalizedFrame == nil ? 1 : 0) external=\(isUsingExternalGameplayDisplay ? 1 : 0)"
         )
     }
 
@@ -2342,6 +2651,7 @@ final class NativeMetalPresenterHost {
     func stop() {
         geometryDisplayLink?.invalidate()
         geometryDisplayLink = nil
+        removeExternalScreenObservers()
         runLoopTimers.forEach { $0.invalidate() }
         runLoopTimers.removeAll()
         hitTestFallbackReleaseTokens.removeAll()
@@ -2371,6 +2681,15 @@ final class NativeMetalPresenterHost {
             touchOverlayWindow.onGeometryChanged = nil
             touchOverlayWindow.rootViewController = nil
         }
+        if let externalDisplayWindow {
+            let isConnectedSceneWindow = Self.connectedExternalDisplayWindow === externalDisplayWindow
+            externalDisplayWindow.isHidden = isConnectedSceneWindow ? false : true
+            if isConnectedSceneWindow == false {
+                externalDisplayWindow.rootViewController = nil
+            } else if let externalDisplayRootController {
+                externalDisplayRootController.setGameplayActive(false)
+            }
+        }
         if let rootView = rootController?.view as? NativeMetalPresenterRootView {
             rootView.presenterHost = nil
             rootView.onGeometryChanged = nil
@@ -2392,6 +2711,8 @@ final class NativeMetalPresenterHost {
         presenterView = nil
         touchOverlayRootController = nil
         touchOverlayWindow = nil
+        externalDisplayRootController = nil
+        externalDisplayWindow = nil
         rootController = nil
         window = nil
         isEmbeddedPresentation = false
@@ -2401,7 +2722,7 @@ final class NativeMetalPresenterHost {
     }
 
     fileprivate var diagnosticSummary: String {
-        "mode=\(isEmbeddedPresentation ? "embedded" : "window") window=\(NativeMetalDiagnostics.objectID(window)) key=\(window?.isKeyWindow == true ? 1 : 0) hidden=\(window?.isHidden == true ? 1 : 0) touchWindow=\(NativeMetalDiagnostics.objectID(touchOverlayWindow)) touchKey=\(touchOverlayWindow?.isKeyWindow == true ? 1 : 0) touchHidden=\(touchOverlayWindow?.isHidden == true ? 1 : 0) root=\(NativeMetalDiagnostics.rect(rootController?.view.bounds ?? .zero)) skin=\(manicSkinControlsView?.isTouchSkinActive == true ? 1 : 0) overlay=\(exitOverlayView?.isMenuVisible == true ? 1 : 0) viewport=\(NativeMetalDiagnostics.rect(activePresenterViewportFrame ?? .zero))"
+        "mode=\(isEmbeddedPresentation ? "embedded" : "window") window=\(NativeMetalDiagnostics.objectID(window)) key=\(window?.isKeyWindow == true ? 1 : 0) hidden=\(window?.isHidden == true ? 1 : 0) externalWindow=\(NativeMetalDiagnostics.objectID(externalDisplayWindow)) externalHidden=\(externalDisplayWindow?.isHidden == true ? 1 : 0) touchWindow=\(NativeMetalDiagnostics.objectID(touchOverlayWindow)) touchKey=\(touchOverlayWindow?.isKeyWindow == true ? 1 : 0) touchHidden=\(touchOverlayWindow?.isHidden == true ? 1 : 0) root=\(NativeMetalDiagnostics.rect(rootController?.view.bounds ?? .zero)) skin=\(manicSkinControlsView?.isTouchSkinActive == true ? 1 : 0) overlay=\(exitOverlayView?.isMenuVisible == true ? 1 : 0) viewport=\(NativeMetalDiagnostics.rect(activePresenterViewportFrame ?? .zero))"
     }
 
     private static func activeWindowScene() -> UIWindowScene? {
@@ -2416,6 +2737,51 @@ final class NativeMetalPresenterHost {
 private enum NativeMetalWindowSendEventStage {
     case beforeOriginal
     case afterOriginal
+}
+
+final class NativeMetalExternalDisplayViewController: UIViewController {
+    private let idleLogoView: UIImageView = {
+        let imageView = UIImageView(image: UIImage(named: "DukeXLogo"))
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.contentMode = .scaleAspectFit
+        imageView.alpha = 0.72
+        imageView.accessibilityLabel = "DukeX"
+        return imageView
+    }()
+
+    override func loadView() {
+        let rootView = UIView()
+        rootView.backgroundColor = .black
+        rootView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view = rootView
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        view.addSubview(idleLogoView)
+        let widthConstraint = idleLogoView.widthAnchor.constraint(equalToConstant: 420)
+        widthConstraint.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            idleLogoView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            idleLogoView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            idleLogoView.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, multiplier: 0.55),
+            idleLogoView.heightAnchor.constraint(lessThanOrEqualToConstant: 96),
+            widthConstraint
+        ])
+    }
+
+    func setGameplayActive(_ isActive: Bool) {
+        idleLogoView.isHidden = isActive
+    }
+
+    override var prefersStatusBarHidden: Bool {
+        true
+    }
+
+    override var prefersHomeIndicatorAutoHidden: Bool {
+        true
+    }
 }
 
 private final class NativeMetalGlobalTouchRouter {
