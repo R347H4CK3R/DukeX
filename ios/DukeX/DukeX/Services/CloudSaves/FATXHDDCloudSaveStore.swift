@@ -105,6 +105,11 @@ struct FATXHDDCloudSaveStore {
         return true
     }
 
+    func xboxLiveAccountSet() throws -> XboxLiveAccountSet {
+        let image = try XboxDiskImageFactory.open(url: hddURL, readOnly: true)
+        return try XboxLiveAccountSet.read(from: image)
+    }
+
     private func openVolume(readOnly: Bool) throws -> FATXVolume {
         let image = try XboxDiskImageFactory.open(url: hddURL, readOnly: readOnly)
         return try FATXVolume.findEPartition(on: image)
@@ -865,7 +870,84 @@ private struct FATXPartitionCandidate {
     let isPreferredEPartition: Bool
 }
 
-private protocol XboxDiskImage: AnyObject {
+struct XboxLiveAccountSet {
+    fileprivate static let accountRecordLength = 0x6C
+    private static let maxAccountCount = 8
+    private static let sectorSize = 512
+    private static let firstAccountSector = 12
+    private static let accountOffsetInSector = 0x0C
+    private static let configHeader: UInt32 = 0x79132568
+
+    let partition: Int
+    let accounts: [XboxLiveAccount]
+
+    fileprivate static func read(from image: XboxDiskImage) throws -> XboxLiveAccountSet {
+        let byteOffset = UInt64(firstAccountSector * sectorSize)
+        let sectors = try image.read(at: byteOffset, count: maxAccountCount * sectorSize)
+        let accounts = (0..<maxAccountCount).compactMap { slot -> XboxLiveAccount? in
+            let sectorOffset = slot * sectorSize
+            guard sectorOffset + sectorSize <= sectors.count,
+                  sectors.uint32LE(at: sectorOffset) == configHeader else {
+                return nil
+            }
+
+            let recordStart = sectorOffset + accountOffsetInSector
+            let recordEnd = recordStart + accountRecordLength
+            guard recordEnd <= sectors.count else {
+                return nil
+            }
+
+            let record = sectors.subdata(in: recordStart..<recordEnd)
+            guard accountRecordIsPresent(record) else {
+                return nil
+            }
+
+            return XboxLiveAccount(
+                slot: slot,
+                gamertag: gamertag(from: record),
+                xuidHex: String(format: "%016llX", record.uint64LE(at: 0)),
+                recordData: record
+            )
+        }
+
+        return XboxLiveAccountSet(partition: 0, accounts: accounts)
+    }
+
+    private static func accountRecordIsPresent(_ record: Data) -> Bool {
+        guard record.count >= accountRecordLength else {
+            return false
+        }
+
+        let firstGamertagByte = record[0x0C]
+        guard firstGamertagByte >= 0x20, firstGamertagByte <= 0x7E else {
+            return false
+        }
+
+        let xuid = record.uint64LE(at: 0)
+        return xuid != 0 && xuid != UInt64.max
+    }
+
+    private static func gamertag(from record: Data) -> String {
+        var bytes: [UInt8] = []
+        for offset in 0x0C..<(0x0C + 15) {
+            let byte = record[offset]
+            if byte == 0 {
+                break
+            }
+            bytes.append((byte >= 0x20 && byte < 0x7F) ? byte : UInt8(ascii: "?"))
+        }
+        return String(bytes: bytes, encoding: .ascii) ?? ""
+    }
+}
+
+struct XboxLiveAccount {
+    let slot: Int
+    let gamertag: String
+    let xuidHex: String
+    let recordData: Data
+}
+
+fileprivate protocol XboxDiskImage: AnyObject {
     var virtualSize: UInt64 { get }
     func read(at offset: UInt64, count: Int) throws -> Data
     func write(at offset: UInt64, data: Data) throws
@@ -1148,6 +1230,10 @@ private extension Data {
             (UInt32(self[offset + 1]) << 16) |
             (UInt32(self[offset + 2]) << 8) |
             UInt32(self[offset + 3])
+    }
+
+    func uint64LE(at offset: Int) -> UInt64 {
+        UInt64(uint32LE(at: offset)) | (UInt64(uint32LE(at: offset + 4)) << 32)
     }
 
     func uint64BE(at offset: Int) -> UInt64 {
