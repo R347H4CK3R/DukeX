@@ -30,7 +30,7 @@ void xemu_ios_configure_presenter_metal_layer(void *metal_layer)
         return;
     }
 
-    CGFloat scale = [UIScreen mainScreen].scale;
+    CGFloat scale = layer.contentsScale > 0.0 ? layer.contentsScale : 1.0;
     CGRect bounds = layer.bounds;
 
     layer.opaque = YES;

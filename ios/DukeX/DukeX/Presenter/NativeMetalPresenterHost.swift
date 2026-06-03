@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import ObjectiveC
 import QuartzCore
@@ -69,6 +70,7 @@ final class NativeMetalPresenterHost {
     private var lastTouchRoutingRefreshTime: CFTimeInterval = 0
     private var touchRecognizerRefreshSequence: Int64 = 0
     private var manicSkinRemountSequence: Int64 = 0
+    private var externalDisplayCompatibilityCheckSequence: Int64 = 0
     private var lastManicSkinRemountTime: CFTimeInterval = 0
     private var isEmbeddedPresentation = false
     private var isEmbeddedWindowSubviewPresentation = false
@@ -233,6 +235,8 @@ final class NativeMetalPresenterHost {
         installTouchOverlayWindowIfNeeded(scene: scene, presenterWindow: attachedWindow)
         Self.activeHost = self
         installExternalScreenObservers()
+        logExternalDisplayState(reason: "presenter-start")
+        scheduleExternalDisplayCompatibilityCheck(reason: "presenter-start")
         if Self.usesGlobalTouchRouter {
             NativeMetalGlobalTouchRouter.shared.activate(host: self)
         } else {
@@ -357,7 +361,15 @@ final class NativeMetalPresenterHost {
                 guard let screen = notification.object as? UIScreen else {
                     return
                 }
+                self?.logExternalDisplayState(reason: "screen-connect")
                 guard Self.connectedExternalDisplayWindow == nil else {
+                    return
+                }
+                guard Self.canUseScreenForDedicatedExternalDisplay(screen) else {
+                    NSLog(
+                        "DukeX AirPlay display fallback: mirrored external screen detected; keeping local renderer for system mirroring. %@",
+                        Self.screenDiagnosticDescription(screen)
+                    )
                     return
                 }
                 self?.activateExternalGameplayDisplay(on: screen, reason: "screen-connect")
@@ -374,7 +386,37 @@ final class NativeMetalPresenterHost {
                       self.externalDisplayWindow?.screen === screen else {
                     return
                 }
+                self.logExternalDisplayState(reason: "screen-disconnect")
                 self.deactivateExternalGameplayDisplay(reason: "screen-disconnect")
+            }
+        )
+        externalScreenObserverTokens.append(
+            center.addObserver(
+                forName: UIScreen.capturedDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.logExternalDisplayState(reason: "screen-captured-change")
+                self?.scheduleExternalDisplayCompatibilityCheck(reason: "screen-captured-change")
+            }
+        )
+        externalScreenObserverTokens.append(
+            center.addObserver(
+                forName: UIScreen.modeDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.logExternalDisplayState(reason: "screen-mode-change")
+                self?.scheduleExternalDisplayCompatibilityCheck(reason: "screen-mode-change")
+            }
+        )
+        externalScreenObserverTokens.append(
+            center.addObserver(
+                forName: AVAudioSession.routeChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                self?.handleAudioRouteChange(notification)
             }
         )
     }
@@ -386,7 +428,11 @@ final class NativeMetalPresenterHost {
     }
 
     private static func activeExternalGameplayScreen() -> UIScreen? {
-        UIScreen.screens.first { $0 !== UIScreen.main }
+        UIScreen.screens.first { canUseScreenForDedicatedExternalDisplay($0) }
+    }
+
+    private static func canUseScreenForDedicatedExternalDisplay(_ screen: UIScreen) -> Bool {
+        screen !== UIScreen.main && screen.mirrored == nil
     }
 
     private var isUsingExternalGameplayDisplay: Bool {
@@ -395,6 +441,154 @@ final class NativeMetalPresenterHost {
 
     private var presenterContainerView: UIView? {
         externalDisplayRootController?.view ?? rootController?.view
+    }
+
+    private func handleAudioRouteChange(_ notification: Notification) {
+        let reason = Self.audioRouteChangeReasonDescription(notification)
+        let previousRoute = notification.userInfo?[AVAudioSessionRouteChangePreviousRouteKey]
+            .flatMap { $0 as? AVAudioSessionRouteDescription }
+            .map(Self.audioRouteDiagnosticDescription) ?? "none"
+        NSLog(
+            "DukeX audio route changed: %@ current=[%@] previous=[%@]",
+            reason,
+            Self.audioRouteDiagnosticDescription(AVAudioSession.sharedInstance().currentRoute),
+            previousRoute
+        )
+        logExternalDisplayState(reason: "audio-route-\(reason)")
+        scheduleExternalDisplayCompatibilityCheck(reason: "audio-route-\(reason)")
+    }
+
+    private func scheduleExternalDisplayCompatibilityCheck(reason: String) {
+        externalDisplayCompatibilityCheckSequence += 1
+        let sequence = externalDisplayCompatibilityCheckSequence
+        for delay in [0.35, 1.25] {
+            scheduleMainRunLoopTimer(
+                label: "external-display-compat-\(reason)-\(String(format: "%.2f", delay))",
+                delay: delay
+            ) { [weak self] in
+                guard let self,
+                      sequence == self.externalDisplayCompatibilityCheckSequence else {
+                    return
+                }
+                self.evaluateExternalDisplayCompatibility(reason: "\(reason)-settled")
+            }
+        }
+    }
+
+    private func evaluateExternalDisplayCompatibility(reason: String) {
+        let route = AVAudioSession.sharedInstance().currentRoute
+        let airPlayAudioActive = Self.isAirPlayAudioRouteActive(route)
+        let usableScreen = Self.activeExternalGameplayScreen()
+        let mirroredScreens = UIScreen.screens.filter {
+            $0 !== UIScreen.main && $0.mirrored != nil
+        }
+
+        logExternalDisplayState(reason: "compat-\(reason)")
+        guard airPlayAudioActive else {
+            return
+        }
+        if externalDisplayWindow != nil || Self.connectedExternalDisplayWindow != nil {
+            return
+        }
+        if let usableScreen {
+            activateExternalGameplayDisplay(on: usableScreen, reason: "airplay-compat-\(reason)")
+            return
+        }
+        if mirroredScreens.isEmpty == false {
+            NSLog(
+                "DukeX AirPlay display fallback active: audio route is AirPlay and only mirrored screens are available; keeping local renderer visible for system mirroring."
+            )
+            return
+        }
+
+        NSLog(
+            "DukeX AirPlay display warning: audio route is AirPlay but UIKit has not exposed an external display scene or screen. route=[%@] screens=[%@]",
+            Self.audioRouteDiagnosticDescription(route),
+            Self.screenSnapshotDescription()
+        )
+    }
+
+    private func logExternalDisplayState(reason: String) {
+        let route = AVAudioSession.sharedInstance().currentRoute
+        let message =
+            "reason=\(reason) airPlayAudio=\(Self.isAirPlayAudioRouteActive(route) ? 1 : 0) " +
+            "connectedSceneWindow=\(NativeMetalDiagnostics.objectID(Self.connectedExternalDisplayWindow)) " +
+            "activeExternalWindow=\(NativeMetalDiagnostics.objectID(externalDisplayWindow)) " +
+            "route=[\(Self.audioRouteDiagnosticDescription(route))] screens=[\(Self.screenSnapshotDescription())]"
+        NativeMetalDiagnostics.log("AIRPLAY_DISPLAY", message)
+        NSLog("DukeX AirPlay/display state: %@", message)
+    }
+
+    private static func audioRouteChangeReasonDescription(_ notification: Notification) -> String {
+        guard let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: rawReason) else {
+            return "unknown"
+        }
+
+        switch reason {
+        case .unknown:
+            return "unknown"
+        case .newDeviceAvailable:
+            return "new-device"
+        case .oldDeviceUnavailable:
+            return "old-device"
+        case .categoryChange:
+            return "category-change"
+        case .override:
+            return "override"
+        case .wakeFromSleep:
+            return "wake-from-sleep"
+        case .noSuitableRouteForCategory:
+            return "no-suitable-route"
+        case .routeConfigurationChange:
+            return "route-config-change"
+        @unknown default:
+            return "unknown-\(rawReason)"
+        }
+    }
+
+    private static func isAirPlayAudioRouteActive(_ route: AVAudioSessionRouteDescription) -> Bool {
+        route.outputs.contains { output in
+            output.portType == .airPlay ||
+                output.portName.localizedCaseInsensitiveContains("AirPlay")
+        }
+    }
+
+    private static func audioRouteDiagnosticDescription(_ route: AVAudioSessionRouteDescription) -> String {
+        let inputDescription = route.inputs.map(Self.audioPortDiagnosticDescription).joined(separator: ",")
+        let outputDescription = route.outputs.map(Self.audioPortDiagnosticDescription).joined(separator: ",")
+        return "inputs={\(inputDescription.isEmpty ? "none" : inputDescription)} outputs={\(outputDescription.isEmpty ? "none" : outputDescription)}"
+    }
+
+    private static func audioPortDiagnosticDescription(_ port: AVAudioSessionPortDescription) -> String {
+        "\(port.portType.rawValue):\(port.portName)"
+    }
+
+    private static func screenSnapshotDescription() -> String {
+        UIScreen.screens.enumerated().map { index, screen in
+            "s\(index){\(screenDiagnosticDescription(screen))}"
+        }.joined(separator: " ")
+    }
+
+    private static func screenDiagnosticDescription(_ screen: UIScreen) -> String {
+        let mirroredScreen = screen.mirrored.map { mirrored in
+            mirrored === UIScreen.main ? "main" : NativeMetalDiagnostics.objectID(mirrored)
+        } ?? "nil"
+        let currentMode = screen.currentMode.map(Self.screenModeDescription) ?? "nil"
+        let preferredMode = screen.preferredMode.map(Self.screenModeDescription) ?? "nil"
+        return
+            "id=\(NativeMetalDiagnostics.objectID(screen)) " +
+            "main=\(screen === UIScreen.main ? 1 : 0) captured=\(screen.isCaptured ? 1 : 0) " +
+            "mirrored=\(mirroredScreen) bounds=\(NativeMetalDiagnostics.rect(screen.bounds)) " +
+            "native=\(NativeMetalDiagnostics.rect(screen.nativeBounds)) " +
+            "scale=\(String(format: "%.2f", screen.scale)) " +
+            "nativeScale=\(String(format: "%.2f", screen.nativeScale)) " +
+            "maxFPS=\(screen.maximumFramesPerSecond) " +
+            "currentMode=\(currentMode) preferredMode=\(preferredMode)"
+    }
+
+    private static func screenModeDescription(_ mode: UIScreenMode) -> String {
+        String(format: "%.0fx%.0f", mode.size.width, mode.size.height)
     }
 
     private func moveExitMenuTapGesture(to view: UIView?) {

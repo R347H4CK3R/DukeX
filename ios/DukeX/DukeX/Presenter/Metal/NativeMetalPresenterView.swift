@@ -53,7 +53,9 @@ final class NativeMetalPresenterView: UIView {
     }
 
     func updateDrawableSize() {
-        let scale = window?.windowScene?.screen.scale ?? max(traitCollection.displayScale, 1)
+        let scale = window?.windowScene?.screen.scale ??
+            window?.screen.scale ??
+            max(traitCollection.displayScale, 1)
         contentScaleFactor = scale
         metalLayer.contentsScale = scale
 
