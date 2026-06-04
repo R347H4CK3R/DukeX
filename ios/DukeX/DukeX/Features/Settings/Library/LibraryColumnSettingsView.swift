@@ -18,6 +18,20 @@ struct ThemeSettingsView: View {
             .font(.footnote)
             .foregroundStyle(.secondary)
 
+        Toggle(isOn: themeBinding(for: .whatTheBleem)) {
+            Label {
+                Text("What the Bleem Theme")
+            } icon: {
+                RingedThemeGlyph {
+                    PlayStationThemeGlyph()
+                }
+            }
+        }
+
+        Text("Uses a Playstation-inspired animated background and blue accent for those who feel Xbox isn't enough.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+
         Toggle(isOn: themeBinding(for: .manicFeelings)) {
             Label {
                 Text("Manic Feelings Theme")
@@ -105,6 +119,18 @@ private struct XboxNostalgiaThemeGlyph: View {
             .resizable()
             .scaledToFit()
             .frame(width: 14.2, height: 13.25)
+            .foregroundStyle(Color.accentColor)
+            .accessibilityHidden(true)
+    }
+}
+
+private struct PlayStationThemeGlyph: View {
+    var body: some View {
+        Image(systemName: "playstation.logo")
+            .resizable()
+            .scaledToFit()
+            .frame(width: 13.8, height: 13.8)
+            .symbolRenderingMode(.monochrome)
             .foregroundStyle(Color.accentColor)
             .accessibilityHidden(true)
     }

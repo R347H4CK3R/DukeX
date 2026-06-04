@@ -4,6 +4,7 @@ import UIKit
 enum DukeXThemeMode: String, CaseIterable, Identifiable {
     case standard
     case xboxNostalgia
+    case whatTheBleem
     case manicFeelings
     case livingOriginal
     case alwaysRemembered
@@ -12,7 +13,7 @@ enum DukeXThemeMode: String, CaseIterable, Identifiable {
 
     var usesAnimatedBackground: Bool {
         switch self {
-        case .xboxNostalgia, .manicFeelings, .livingOriginal, .alwaysRemembered:
+        case .xboxNostalgia, .whatTheBleem, .manicFeelings, .livingOriginal, .alwaysRemembered:
             return true
         case .standard:
             return false
@@ -30,6 +31,7 @@ struct DukeXTheme: Equatable {
 
     private static let standardAccentColor = Color(red: 0.0, green: 0.38, blue: 0.42)
     static let originalXboxGreen = Color(red: 0.33, green: 0.86, blue: 0.24)
+    static let whatTheBleemBlue = Color(red: 0.10, green: 0.34, blue: 1.00)
     static let manicFeelingsRed = Color(red: 1.00, green: 0.05, blue: 0.20)
     static let livingOriginalOrange = Color(red: 1.00, green: 0.48, blue: 0.12)
     static let alwaysRememberedLavender = Color(red: 0.64, green: 0.44, blue: 0.92)
@@ -46,6 +48,10 @@ struct DukeXTheme: Equatable {
 
     var xboxNostalgiaEnabled: Bool {
         mode == .xboxNostalgia
+    }
+
+    var whatTheBleemEnabled: Bool {
+        mode == .whatTheBleem
     }
 
     var manicFeelingsEnabled: Bool {
@@ -74,6 +80,8 @@ struct DukeXTheme: Equatable {
             return Self.standardAccentColor
         case .xboxNostalgia:
             return Self.originalXboxGreen
+        case .whatTheBleem:
+            return Self.whatTheBleemBlue
         case .manicFeelings:
             return Self.manicFeelingsRed
         case .livingOriginal:
@@ -91,6 +99,11 @@ struct DukeXTheme: Equatable {
             return Self.dynamicColor(
                 light: UIColor(red: 0.915, green: 0.970, blue: 0.910, alpha: 1.0),
                 dark: UIColor(red: 0.010, green: 0.025, blue: 0.014, alpha: 1.0)
+            )
+        case .whatTheBleem:
+            return Self.dynamicColor(
+                light: UIColor(red: 0.900, green: 0.945, blue: 1.000, alpha: 1.0),
+                dark: UIColor(red: 0.006, green: 0.018, blue: 0.070, alpha: 1.0)
             )
         case .manicFeelings:
             return Self.dynamicColor(
@@ -119,6 +132,11 @@ struct DukeXTheme: Equatable {
                 light: UIColor(red: 0.945, green: 0.985, blue: 0.940, alpha: 0.78),
                 dark: UIColor(red: 0.045, green: 0.090, blue: 0.052, alpha: 0.74)
             )
+        case .whatTheBleem:
+            return Self.dynamicColor(
+                light: UIColor(red: 0.925, green: 0.955, blue: 1.000, alpha: 0.78),
+                dark: UIColor(red: 0.018, green: 0.048, blue: 0.120, alpha: 0.74)
+            )
         case .manicFeelings:
             return Self.dynamicColor(
                 light: UIColor(red: 1.000, green: 0.940, blue: 0.955, alpha: 0.78),
@@ -146,6 +164,11 @@ struct DukeXTheme: Equatable {
                 light: UIColor(red: 0.970, green: 0.995, blue: 0.965, alpha: 0.84),
                 dark: UIColor(red: 0.060, green: 0.125, blue: 0.067, alpha: 0.78)
             )
+        case .whatTheBleem:
+            return Self.dynamicColor(
+                light: UIColor(red: 0.950, green: 0.975, blue: 1.000, alpha: 0.84),
+                dark: UIColor(red: 0.030, green: 0.072, blue: 0.160, alpha: 0.78)
+            )
         case .manicFeelings:
             return Self.dynamicColor(
                 light: UIColor(red: 1.000, green: 0.965, blue: 0.972, alpha: 0.84),
@@ -170,6 +193,8 @@ struct DukeXTheme: Equatable {
             return Color.primary.opacity(0.06)
         case .xboxNostalgia:
             return Self.originalXboxGreen.opacity(0.24)
+        case .whatTheBleem:
+            return Self.whatTheBleemBlue.opacity(0.26)
         case .manicFeelings:
             return Self.manicFeelingsRed.opacity(0.26)
         case .livingOriginal:
@@ -181,6 +206,8 @@ struct DukeXTheme: Equatable {
 
     func animatedBackgroundColors(for colorScheme: ColorScheme) -> [Color] {
         switch mode {
+        case .whatTheBleem:
+            return Self.whatTheBleemBackgroundColors(for: colorScheme)
         case .manicFeelings:
             return Self.manicBackgroundColors(for: colorScheme)
         case .livingOriginal:
@@ -194,6 +221,8 @@ struct DukeXTheme: Equatable {
 
     func animatedDotColor(for colorScheme: ColorScheme) -> Color {
         switch mode {
+        case .whatTheBleem:
+            return Self.whatTheBleemDotColor(for: colorScheme)
         case .manicFeelings:
             return Self.manicDotColor(for: colorScheme)
         case .livingOriginal:
@@ -207,6 +236,8 @@ struct DukeXTheme: Equatable {
 
     func animatedAccentDotColor(for colorScheme: ColorScheme) -> Color {
         switch mode {
+        case .whatTheBleem:
+            return Self.whatTheBleemAccentDotColor(for: colorScheme)
         case .manicFeelings:
             return Self.manicAccentDotColor(for: colorScheme)
         case .livingOriginal:
@@ -220,6 +251,8 @@ struct DukeXTheme: Equatable {
 
     func animatedSecondaryDotColor(for colorScheme: ColorScheme) -> Color {
         switch mode {
+        case .whatTheBleem:
+            return Self.whatTheBleemSecondaryDotColor(for: colorScheme)
         case .manicFeelings:
             return Self.manicSecondaryDotColor(for: colorScheme)
         case .livingOriginal:
@@ -233,6 +266,8 @@ struct DukeXTheme: Equatable {
 
     func animatedGlowColors(for colorScheme: ColorScheme) -> (topLeading: Color, accent: Color, bottom: Color) {
         switch mode {
+        case .whatTheBleem:
+            return Self.whatTheBleemGlowColors(for: colorScheme)
         case .manicFeelings:
             return Self.manicGlowColors(for: colorScheme)
         case .livingOriginal:
@@ -257,6 +292,22 @@ struct DukeXTheme: Equatable {
             Color(red: 0.944, green: 0.986, blue: 0.944),
             Color(red: 0.904, green: 0.972, blue: 0.912),
             Color(red: 0.848, green: 0.940, blue: 0.875)
+        ]
+    }
+
+    private static func whatTheBleemBackgroundColors(for colorScheme: ColorScheme) -> [Color] {
+        if colorScheme == .dark {
+            return [
+                Color(red: 0.018, green: 0.040, blue: 0.160),
+                Color(red: 0.004, green: 0.018, blue: 0.075),
+                Color(red: 0.000, green: 0.004, blue: 0.022)
+            ]
+        }
+
+        return [
+            Color(red: 0.890, green: 0.945, blue: 1.000),
+            Color(red: 0.685, green: 0.820, blue: 1.000),
+            Color(red: 0.190, green: 0.430, blue: 0.980)
         ]
     }
 
@@ -316,6 +367,14 @@ struct DukeXTheme: Equatable {
         return Color(red: 0.10, green: 0.42, blue: 0.18).opacity(0.11)
     }
 
+    private static func whatTheBleemDotColor(for colorScheme: ColorScheme) -> Color {
+        if colorScheme == .dark {
+            return Color(red: 0.35, green: 0.62, blue: 1.00).opacity(0.25)
+        }
+
+        return Color(red: 0.02, green: 0.14, blue: 0.46).opacity(0.11)
+    }
+
     private static func manicDotColor(for colorScheme: ColorScheme) -> Color {
         if colorScheme == .dark {
             return Color(red: 1.00, green: 0.38, blue: 0.50).opacity(0.24)
@@ -346,6 +405,14 @@ struct DukeXTheme: Equatable {
         }
 
         return Color(red: 0.22, green: 0.70, blue: 0.28).opacity(0.12)
+    }
+
+    private static func whatTheBleemAccentDotColor(for colorScheme: ColorScheme) -> Color {
+        if colorScheme == .dark {
+            return Self.whatTheBleemBlue.opacity(0.34)
+        }
+
+        return Color.white.opacity(0.16)
     }
 
     private static func manicAccentDotColor(for colorScheme: ColorScheme) -> Color {
@@ -380,6 +447,14 @@ struct DukeXTheme: Equatable {
         return Color(red: 0.12, green: 0.44, blue: 0.18).opacity(0.05)
     }
 
+    private static func whatTheBleemSecondaryDotColor(for colorScheme: ColorScheme) -> Color {
+        if colorScheme == .dark {
+            return Color(red: 0.18, green: 0.45, blue: 1.00).opacity(0.13)
+        }
+
+        return Color(red: 0.04, green: 0.18, blue: 0.48).opacity(0.05)
+    }
+
     private static func manicSecondaryDotColor(for colorScheme: ColorScheme) -> Color {
         if colorScheme == .dark {
             return Color(red: 1.00, green: 0.35, blue: 0.48).opacity(0.13)
@@ -411,6 +486,16 @@ struct DukeXTheme: Equatable {
             accent: Color(red: 0.30, green: 0.95, blue: 0.34)
                 .opacity(colorScheme == .dark ? 0.14 : 0.06),
             bottom: Color.black.opacity(colorScheme == .dark ? 0.30 : 0.10)
+        )
+    }
+
+    private static func whatTheBleemGlowColors(for colorScheme: ColorScheme) -> (topLeading: Color, accent: Color, bottom: Color) {
+        (
+            topLeading: Color(red: 0.50, green: 0.75, blue: 1.00)
+                .opacity(colorScheme == .dark ? 0.18 : 0.16),
+            accent: Self.whatTheBleemBlue
+                .opacity(colorScheme == .dark ? 0.18 : 0.09),
+            bottom: Color.black.opacity(colorScheme == .dark ? 0.34 : 0.14)
         )
     }
 
@@ -451,6 +536,8 @@ struct DukeXTheme: Equatable {
             tintColor = UIColor(red: 0.0, green: 0.38, blue: 0.42, alpha: 1.0)
         case .xboxNostalgia:
             tintColor = UIColor(red: 0.33, green: 0.86, blue: 0.24, alpha: 1.0)
+        case .whatTheBleem:
+            tintColor = UIColor(red: 0.10, green: 0.34, blue: 1.00, alpha: 1.0)
         case .manicFeelings:
             tintColor = UIColor(red: 1.00, green: 0.05, blue: 0.20, alpha: 1.0)
         case .livingOriginal:
@@ -479,6 +566,9 @@ struct DukeXTheme: Equatable {
             case .xboxNostalgia:
                 tabAppearance.backgroundColor = UIColor(red: 0.02, green: 0.08, blue: 0.03, alpha: 0.34)
                 tabAppearance.shadowColor = UIColor(red: 0.33, green: 0.86, blue: 0.24, alpha: 0.16)
+            case .whatTheBleem:
+                tabAppearance.backgroundColor = UIColor(red: 0.02, green: 0.04, blue: 0.14, alpha: 0.36)
+                tabAppearance.shadowColor = UIColor(red: 0.10, green: 0.34, blue: 1.00, alpha: 0.18)
             case .manicFeelings:
                 tabAppearance.backgroundColor = UIColor(red: 0.13, green: 0.01, blue: 0.03, alpha: 0.36)
                 tabAppearance.shadowColor = UIColor(red: 1.00, green: 0.05, blue: 0.20, alpha: 0.18)
@@ -603,6 +693,14 @@ private struct DukeXGlassListRowBackground: View {
             }
 
             return Color(red: 1.000, green: 0.920, blue: 0.940).opacity(0.46)
+        }
+
+        if theme.whatTheBleemEnabled {
+            if colorScheme == .dark {
+                return Color(red: 0.018, green: 0.040, blue: 0.120).opacity(0.60)
+            }
+
+            return Color(red: 0.900, green: 0.945, blue: 1.000).opacity(0.46)
         }
 
         if theme.alwaysRememberedEnabled {
