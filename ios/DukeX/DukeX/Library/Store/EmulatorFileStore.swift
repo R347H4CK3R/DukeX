@@ -391,6 +391,9 @@ final class EmulatorFileStore: ObservableObject {
         do {
             try prepareDirectories()
             try refresh()
+            if await scrapeMissingGameCoversIfNeeded() {
+                try refresh()
+            }
         } catch {
             message = UserMessage(title: "Library Error", detail: error.localizedDescription)
         }
@@ -572,6 +575,47 @@ final class EmulatorFileStore: ObservableObject {
         let imageData = UIImage(data: data)?.jpegData(compressionQuality: 0.92) ?? data
         try imageData.write(to: coverURL(for: game), options: .atomic)
         try refresh()
+    }
+
+    private func scrapeMissingGameCoversIfNeeded() async -> Bool {
+        var addedCover = false
+        let gamesNeedingCovers = games.filter { game in
+            game.kind == .game &&
+            game.coverURL == nil &&
+            GameLaunchLink.normalizedTitleID(game.titleID) != nil
+        }
+
+        guard !gamesNeedingCovers.isEmpty else {
+            return false
+        }
+
+        for game in gamesNeedingCovers {
+            let destination = coverURL(for: game)
+            guard !FileManager.default.fileExists(atPath: destination.path),
+                  let titleID = GameLaunchLink.normalizedTitleID(game.titleID) else {
+                continue
+            }
+
+            do {
+                guard let coverData = try await XDBCoverArtScraper.fetchCoverData(for: titleID) else {
+                    continue
+                }
+
+                let imageData = UIImage(data: coverData)?.jpegData(compressionQuality: 0.92) ?? coverData
+                try imageData.write(to: destination, options: .atomic)
+                addedCover = true
+                NSLog("DukeX xdb cover scrape installed cover for %@ [%@]", game.displayName, titleID)
+            } catch {
+                NSLog(
+                    "DukeX xdb cover scrape failed for %@ [%@]: %@",
+                    game.displayName,
+                    titleID,
+                    error.localizedDescription
+                )
+            }
+        }
+
+        return addedCover
     }
 
     func importCustomConfig(_ url: URL, for game: LibraryFile) throws {
@@ -1194,5 +1238,61 @@ private enum SkinImportError: LocalizedError {
         case .archiveExtractionFailed(let name):
             return "\(name) could not be opened as a .manicskin archive."
         }
+    }
+}
+
+private enum XDBCoverArtScraper {
+    private static let rawBaseURL = URL(string: "https://raw.githubusercontent.com/xemu-project/xdb/main/titles")!
+
+    static func fetchCoverData(for titleID: String) async throws -> Data? {
+        guard let titlePath = titlePath(for: titleID) else {
+            return nil
+        }
+
+        for fileName in ["cover_front.jpg", "cover_front_thumbnail.jpg"] {
+            let url = rawBaseURL
+                .appendingPathComponent(titlePath.publisherCode)
+                .appendingPathComponent(titlePath.releaseCode)
+                .appendingPathComponent(fileName)
+
+            var request = URLRequest(url: url)
+            request.cachePolicy = .returnCacheDataElseLoad
+            request.timeoutInterval = 20
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                continue
+            }
+
+            switch httpResponse.statusCode {
+            case 200 where UIImage(data: data) != nil:
+                return data
+            case 404:
+                continue
+            default:
+                continue
+            }
+        }
+
+        return nil
+    }
+
+    private static func titlePath(for titleID: String) -> (publisherCode: String, releaseCode: String)? {
+        let normalized = titleID.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard normalized.count == 8,
+              UInt32(normalized, radix: 16) != nil,
+              let publisherHigh = UInt8(normalized.prefix(2), radix: 16),
+              let publisherLow = UInt8(normalized.dropFirst(2).prefix(2), radix: 16),
+              let releaseNumber = UInt16(normalized.suffix(4), radix: 16) else {
+            return nil
+        }
+
+        let publisherBytes = [publisherHigh, publisherLow]
+        guard let publisherCode = String(bytes: publisherBytes, encoding: .ascii),
+              publisherCode.rangeOfCharacter(from: CharacterSet.alphanumerics.inverted) == nil else {
+            return nil
+        }
+
+        return (publisherCode, String(format: "%03d", Int(releaseNumber)))
     }
 }
