@@ -35,6 +35,7 @@ struct ContentView: View {
     @State private var isGamesAutoRefreshRunning = false
     @State private var isAutomaticCloudSaveSyncRunning = false
     @State private var activeRuntimeWasGame = false
+    @State private var lastObservedRuntimeState: EmulatorCoreRuntime.RunState?
 
     private let tabRefreshTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
@@ -178,7 +179,7 @@ struct ContentView: View {
                 selection: $selectedCoverItem,
                 matching: .images
             )
-            .onChange(of: selectedCoverItem) { _, item in
+            .onChange(of: selectedCoverItem) { item in
                 handleSelectedCover(item)
             }
             .photosPicker(
@@ -186,7 +187,7 @@ struct ContentView: View {
                 selection: $selectedProfileImageItem,
                 matching: .images
             )
-            .onChange(of: selectedProfileImageItem) { _, item in
+            .onChange(of: selectedProfileImageItem) { item in
                 handleSelectedProfileImage(item)
             }
             .photosPicker(
@@ -194,7 +195,7 @@ struct ContentView: View {
                 selection: $selectedFriendProfileImageItem,
                 matching: .images
             )
-            .onChange(of: selectedFriendProfileImageItem) { _, item in
+            .onChange(of: selectedFriendProfileImageItem) { item in
                 handleSelectedFriendProfileImage(item)
             }
             .alert(item: $store.message) { message in
@@ -206,10 +207,7 @@ struct ContentView: View {
             }
             .confirmationDialog(
                 "Remove Game",
-                isPresented: Binding(
-                    get: { removalConfirmationTarget != nil },
-                    set: { if !$0 { removalConfirmationTarget = nil } }
-                ),
+                isPresented: removalConfirmationPresented,
                 titleVisibility: .visible
             ) {
                 if let game = removalConfirmationTarget {
@@ -229,6 +227,7 @@ struct ContentView: View {
                 LaunchPlanView(plan: plan)
             }
             .onAppear {
+                lastObservedRuntimeState = runtime.state
                 if !environmentRequestsAutoLaunch {
                     resumePendingAutoJITLaunchIfNeeded()
                 }
@@ -245,7 +244,7 @@ struct ContentView: View {
                 }
                 autoLaunchIfRequested()
             }
-            .onChange(of: scenePhase) { _, newPhase in
+            .onChange(of: scenePhase) { newPhase in
                 switch newPhase {
                 case .active:
                     autoJIT.markAppReturnedFromStikDebugIfPending()
@@ -256,14 +255,16 @@ struct ContentView: View {
                     break
                 }
             }
-            .onChange(of: selectedTab) { _, newTab in
+            .onChange(of: selectedTab) { newTab in
                 refreshGamesAndProfile()
                 if newTab == .settings {
                     refreshLibraryForSettings()
                 }
             }
-            .onChange(of: runtime.state) { oldState, newState in
+            .onChange(of: runtime.state) { newState in
+                let oldState = lastObservedRuntimeState ?? newState
                 handleRuntimeStateChange(from: oldState, to: newState)
+                lastObservedRuntimeState = newState
             }
             .onReceive(tabRefreshTimer) { _ in
                 guard scenePhase == .active else {
@@ -284,7 +285,7 @@ struct ContentView: View {
         .onAppear {
             DukeXTheme.applyUIKitAppearance(themeMode: store.themeMode)
         }
-        .onChange(of: store.themeMode) { _, themeMode in
+        .onChange(of: store.themeMode) { themeMode in
             DukeXTheme.applyUIKitAppearance(themeMode: themeMode)
         }
     }
@@ -293,6 +294,17 @@ struct ContentView: View {
         let environment = ProcessInfo.processInfo.environment
         return environment["XEMU_IOS_AUTO_LAUNCH_GAME"] == "1" ||
             environment["XEMU_IOS_AUTO_LAUNCH_DASHBOARD"] == "1"
+    }
+
+    private var removalConfirmationPresented: Binding<Bool> {
+        Binding(
+            get: { removalConfirmationTarget != nil },
+            set: { isPresented in
+                if !isPresented {
+                    removalConfirmationTarget = nil
+                }
+            }
+        )
     }
 
     private func refreshLibraryForSettings() {

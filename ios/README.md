@@ -20,7 +20,7 @@ The shell writes `Documents/xemu-ios.toml` with core settings:
 - `sys.files.hdd_path` for the HDD image.
 - `sys.files.dvd_path` for the selected game.
 
-DukeX chooses the JIT path by iOS version. iOS 18.x uses QEMU TCG's
+DukeX chooses the JIT path by iOS version. iOS 16 through 18 use QEMU TCG's
 split W^X mapping path after the process has been granted JIT. iOS 26 or later
 uses the Universal.js path exposed as `XEMU_IOS_UNIVERSAL_JIT=1`, which lets
 the TCG hook in `tcg/ios-jit.c` issue the `brk #0xf00d` prepare-region request
@@ -36,7 +36,7 @@ From that no-space workspace, run the first iPhoneOS arm64 build pass with:
 ios/scripts/build-core-ios.sh
 ```
 
-The script targets an iOS `18.0` deployment baseline.
+The script targets an iOS `16.0` deployment baseline.
 
 That build produces:
 

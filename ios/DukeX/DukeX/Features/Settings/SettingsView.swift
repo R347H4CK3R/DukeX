@@ -20,7 +20,7 @@ struct SettingsView: View {
                     Label("Universal.js JIT", systemImage: "bolt.horizontal.circle")
                 }
 
-                Text("Required on iOS 26 or later. iOS 18.x uses W^X reprotection after JIT is enabled.")
+                Text("Required on iOS 26 or later. iOS 16 through 18 use W^X reprotection after JIT is enabled.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 

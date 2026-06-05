@@ -5,7 +5,7 @@
   </p>
   <p>
     <img src="https://img.shields.io/badge/status-experimental-8f95c4?style=flat-square" alt="Status: experimental">
-    <img src="https://img.shields.io/badge/platform-iOS%2018%2B%20arm64-111827?style=flat-square" alt="Platform: iOS 18+ arm64">
+    <img src="https://img.shields.io/badge/platform-iOS%2016%2B%20arm64-111827?style=flat-square" alt="Platform: iOS 16+ arm64">
     <img src="https://img.shields.io/badge/renderer-MoltenVK%20%2B%20Metal-1f6feb?style=flat-square" alt="Renderer: MoltenVK and Metal">
     <img src="https://img.shields.io/badge/JIT-version%20aware-2f855a?style=flat-square" alt="JIT: version aware">
   </p>
@@ -24,7 +24,7 @@ MoltenVK and a native `CAMetalLayer`.
 ## At a Glance
 
 - Latest release: `v1.0.0`.
-- Device target: iPhoneOS arm64, install target iOS 18.0 or later.
+- Device target: iPhoneOS arm64, install target iOS 16.0 or later.
 - Runtime: TCG with version-aware JIT setup; iOS 26 or later uses the
   StikDebug Universal.js flow.
 - Graphics: xemu Vulkan renderer through MoltenVK with a native Metal
@@ -68,7 +68,7 @@ availability. DukeX should be treated as experimental software.
 ### Runtime
 
 - Supported iPhone or iPad hardware for device testing.
-- iOS 18.0 or later. iOS 18.x uses W^X reprotection after JIT has
+- iOS 16.0 or later. iOS 16 through 18 use W^X reprotection after JIT has
   been enabled for the process. iOS 26 or later requires StikDebug with
   Universal.js assigned to the DukeX bundle identifier.
 - Legally obtained Xbox flash BIOS, MCPX ROM, and HDD image.

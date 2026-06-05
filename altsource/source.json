@@ -16,7 +16,7 @@
       "bundleIdentifier": "com.mafty.dukex",
       "developerName": "Manic EMU Development Team",
       "subtitle": "Original Xbox emulation for iOS",
-      "localizedDescription": "DukeX is an experimental iOS-focused frontend for xemu. It embeds the xemu core in a native Swift shell, provides an iPhone-friendly library and settings experience, and presents the Vulkan renderer through MoltenVK and a native CAMetalLayer.\n\nCurrent features include a native SwiftUI library, profile, and settings interface; user-accessible BIOS, ROMs, Covers, GameConfigs, and ShaderCaches folders; game launch and dashboard launch; game-library sorting by favorites, title, Live support, and recently played; portrait and landscape column controls; per-game cover art; custom config import; shader-cache clearing; Insignia-oriented NAT defaults; Insignia live indicators for supported titles; built-in FPS/system statistics; app-owned launch logs; and translation block cache size controls for performance testing.\n\nDukeX installs on iOS 18.0 or later. iOS 18.x uses W^X reprotection after JIT has been enabled for the process. iOS 26 or later requires StikDebug with Universal.js assigned to the DukeX bundle identifier.\n\nDukeX does not include Xbox system files, game images, or signing certificates. Users and testers are required to provide their own legally obtained files. DukeX is intended solely for legitimate emulation and preservation purposes, and is not designed for use with pirated materials.",
+      "localizedDescription": "DukeX is an experimental iOS-focused frontend for xemu. It embeds the xemu core in a native Swift shell, provides an iPhone-friendly library and settings experience, and presents the Vulkan renderer through MoltenVK and a native CAMetalLayer.\n\nCurrent features include a native SwiftUI library, profile, and settings interface; user-accessible BIOS, ROMs, Covers, GameConfigs, and ShaderCaches folders; game launch and dashboard launch; game-library sorting by favorites, title, Live support, and recently played; portrait and landscape column controls; per-game cover art; custom config import; shader-cache clearing; Insignia-oriented NAT defaults; Insignia live indicators for supported titles; built-in FPS/system statistics; app-owned launch logs; and translation block cache size controls for performance testing.\n\nDukeX installs on iOS 16.0 or later. iOS 16 through 18 use W^X reprotection after JIT has been enabled for the process. iOS 26 or later requires StikDebug with Universal.js assigned to the DukeX bundle identifier.\n\nDukeX does not include Xbox system files, game images, or signing certificates. Users and testers are required to provide their own legally obtained files. DukeX is intended solely for legitimate emulation and preservation purposes, and is not designed for use with pirated materials.",
       "iconURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/dukex-icon.png",
       "tintColor": "#8FCA39",
       "category": "games",
@@ -26,10 +26,10 @@
           "buildVersion": "100",
           "marketingVersion": "DukeX v1.0.0",
           "date": "2026-05-18",
-          "localizedDescription": "Initial DukeX release with native SwiftUI library, profile, and settings tabs; game-library sorting by favorites, title, Live support, and recently played; portrait and landscape column controls; Insignia-oriented NAT defaults and live indicators; built-in FPS/system statistics; app-owned launch logs; and the current iOS 18.x W^X JIT path plus the iOS 26+ StikDebug Universal.js workflow.",
+          "localizedDescription": "Initial DukeX release with native SwiftUI library, profile, and settings tabs; game-library sorting by favorites, title, Live support, and recently played; portrait and landscape column controls; Insignia-oriented NAT defaults and live indicators; built-in FPS/system statistics; app-owned launch logs; and the current iOS 16 through 18 W^X JIT path plus the iOS 26+ StikDebug Universal.js workflow.",
           "downloadURL": "https://github.com/MaftyManicEMU/DukeX/releases/download/v1.0.0/DukeX.v1.0.0.ipa",
           "size": 14406551,
-          "minOSVersion": "18.0"
+          "minOSVersion": "16.0"
         }
       ],
       "appPermissions": {
@@ -65,7 +65,7 @@
     {
       "title": "DukeX v1.0.0",
       "identifier": "dukex-1.0.0",
-      "caption": "Initial DukeX release with Games tab sorting, favorites, orientation-specific library columns, refreshed AltSource assets, and the current iOS 18+/iOS 26+ JIT workflows.",
+      "caption": "Initial DukeX release with Games tab sorting, favorites, orientation-specific library columns, refreshed AltSource assets, and the current iOS 16+/iOS 26+ JIT workflows.",
       "date": "2026-05-18",
       "tintColor": "#8FCA39",
       "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/landscape-screenshots.png",
