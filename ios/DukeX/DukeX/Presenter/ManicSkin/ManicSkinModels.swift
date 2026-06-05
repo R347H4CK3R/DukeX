@@ -7,6 +7,7 @@ struct ManicSkin {
     let name: String
     let baseURL: URL
     let definition: ManicSkinDefinition
+    private let resources: ManicSkinResourceProvider
 
     static func bundledPS1() -> ManicSkin? {
         guard let baseURL = Bundle.main.url(
@@ -22,21 +23,25 @@ struct ManicSkin {
     }
 
     init?(baseURL: URL) {
-        let infoURL = baseURL.appendingPathComponent("info.json")
+        let resources = ManicSkinResourceProvider(baseURL: baseURL)
         do {
-            let data = try Data(contentsOf: infoURL)
+            guard let data = resources.data(named: "info.json") else {
+                NSLog("Manic skin info.json not found at %@", baseURL.path)
+                return nil
+            }
             let definition = try JSONDecoder().decode(ManicSkinDefinition.self, from: data)
             self.name = definition.name
             self.baseURL = baseURL
             self.definition = definition
+            self.resources = resources
         } catch {
-            NSLog("Manic skin failed to load %@: %@", infoURL.path, error.localizedDescription)
+            NSLog("Manic skin failed to load %@: %@", baseURL.path, error.localizedDescription)
             return nil
         }
     }
 
-    func assetURL(named name: String) -> URL {
-        baseURL.appendingPathComponent(name)
+    func asset(named name: String) -> ManicSkinResource {
+        resources.resource(named: name)
     }
 
     func resolvedRepresentation(
@@ -72,7 +77,7 @@ struct ManicSkin {
         }
 
         let backgroundName = representation.assets.resizable ?? representation.assets.standard
-        let backgroundURL = backgroundName.map(assetURL(named:))
+        let backgroundResource = backgroundName.map(asset(named:))
         let designSize = designSize(for: representation)
         guard designSize.width > 1, designSize.height > 1 else {
             return nil
@@ -107,26 +112,42 @@ struct ManicSkin {
             if let thumbstick = item.thumbstick,
                case .analog(let inputs) = item.inputs {
                 let element = ManicSkinInputMapper.thumbstickElement(for: inputs)
+                let visualFrame = Self.thumbstickVisualFrame(
+                    in: transformedFrame,
+                    thumbstick: thumbstick,
+                    scale: scale
+                )
                 return ManicSkinResolvedItem(
                     id: index,
                     kind: .thumbstick(element: element),
-                    assetURL: assetURL(named: thumbstick.name),
+                    asset: asset(named: thumbstick.name),
                     frame: transformedFrame,
+                    visualFrame: visualFrame,
                     hitFrame: hitFrame,
                     scale: scale
                 )
             }
 
-            guard let assetName = item.asset?.normal,
-                  case .buttons(let inputs) = item.inputs else {
+            guard let assetName = item.asset?.normal else {
+                return nil
+            }
+            let inputs: [String]
+            switch item.inputs {
+            case .buttons(let buttonInputs):
+                inputs = buttonInputs
+            case .analog(let mappedInputs):
+                inputs = Set(mappedInputs.values).sorted()
+            }
+            guard !inputs.isEmpty else {
                 return nil
             }
 
             return ManicSkinResolvedItem(
                 id: index,
                 kind: .buttons(inputs),
-                assetURL: assetURL(named: assetName),
+                asset: asset(named: assetName),
                 frame: transformedFrame,
+                visualFrame: transformedFrame,
                 hitFrame: hitFrame,
                 scale: scale
             )
@@ -139,7 +160,7 @@ struct ManicSkin {
         return ManicSkinResolvedRepresentation(
             key: "\(deviceKey)-\(styleKey)-\(orientationKey)",
             skinFrame: skinFrame,
-            backgroundURL: backgroundURL,
+            background: backgroundResource,
             screenFrame: screenFrame,
             items: resolvedItems
         )
@@ -188,10 +209,29 @@ struct ManicSkin {
 
     private func designSize(for representation: ManicSkinRepresentation) -> CGSize {
         let backgroundName = representation.assets.resizable ?? representation.assets.standard
-        let backgroundURL = backgroundName.map(assetURL(named:))
+        let backgroundResource = backgroundName.map(asset(named:))
         return representation.mappingSize?.size ??
-            backgroundURL.flatMap { ManicSkinPDFRenderer.pageSize(for: $0) } ??
+            backgroundResource.flatMap { ManicSkinPDFRenderer.pageSize(for: $0) } ??
             representation.itemExtents
+    }
+
+    private static func thumbstickVisualFrame(
+        in frame: CGRect,
+        thumbstick: ManicSkinThumbstick,
+        scale: CGFloat
+    ) -> CGRect {
+        let width = (thumbstick.width ?? frame.width / scale) * scale
+        let height = (thumbstick.height ?? frame.height / scale) * scale
+        guard width > 1, height > 1 else {
+            return frame
+        }
+
+        return CGRect(
+            x: frame.midX - width * 0.5,
+            y: frame.midY - height * 0.5,
+            width: width,
+            height: height
+        )
     }
 
     private func preferredStyleKey(
@@ -378,7 +418,7 @@ struct ManicSkinExtendedEdges: Decodable {
 struct ManicSkinResolvedRepresentation {
     let key: String
     let skinFrame: CGRect
-    let backgroundURL: URL?
+    let background: ManicSkinResource?
     let screenFrame: CGRect?
     let items: [ManicSkinResolvedItem]
 }
@@ -391,23 +431,81 @@ struct ManicSkinResolvedItem {
 
     let id: Int
     let kind: Kind
-    let assetURL: URL
+    let asset: ManicSkinResource
     let frame: CGRect
+    let visualFrame: CGRect
     let hitFrame: CGRect
     let scale: CGFloat
+}
+
+private enum ManicSkinResourceProvider {
+    case directory(URL)
+    case archive(URL)
+
+    init(baseURL: URL) {
+        let values = try? baseURL.resourceValues(forKeys: [.isDirectoryKey])
+        if values?.isDirectory == true {
+            self = .directory(baseURL)
+        } else {
+            self = .archive(baseURL)
+        }
+    }
+
+    func resource(named name: String) -> ManicSkinResource {
+        switch self {
+        case .directory(let baseURL):
+            return ManicSkinResource(source: .file(baseURL.appendingPathComponent(name)))
+        case .archive(let archiveURL):
+            return ManicSkinResource(source: .archive(archiveURL: archiveURL, entryName: name))
+        }
+    }
+
+    func data(named name: String) -> Data? {
+        resource(named: name).data()
+    }
+}
+
+struct ManicSkinResource {
+    enum Source {
+        case file(URL)
+        case archive(archiveURL: URL, entryName: String)
+    }
+
+    let source: Source
+
+    var cacheKey: String {
+        switch source {
+        case .file(let url):
+            return url.path
+        case .archive(let archiveURL, let entryName):
+            return "\(archiveURL.path)#\(entryName)"
+        }
+    }
+
+    func data() -> Data? {
+        switch source {
+        case .file(let url):
+            return try? Data(contentsOf: url)
+        case .archive(let archiveURL, let entryName):
+            return try? DukeXZipArchive.data(
+                forEntryNamed: entryName,
+                inArchiveAtPath: archiveURL.path
+            )
+        }
+    }
 }
 
 enum ManicSkinPDFRenderer {
     private static let imageCache = NSCache<NSString, UIImage>()
     private static let sizeCache = NSCache<NSString, NSValue>()
 
-    static func pageSize(for url: URL) -> CGSize? {
-        let key = url.path as NSString
+    static func pageSize(for resource: ManicSkinResource) -> CGSize? {
+        let key = resource.cacheKey as NSString
         if let cached = sizeCache.object(forKey: key) {
             return cached.cgSizeValue
         }
 
-        guard let page = page(for: url) else {
+        guard let page = page(for: resource) else {
             return nil
         }
 
@@ -416,19 +514,19 @@ enum ManicSkinPDFRenderer {
         return size
     }
 
-    static func image(for url: URL, targetSize: CGSize, scale: CGFloat) -> UIImage? {
+    static func image(for resource: ManicSkinResource, targetSize: CGSize, scale: CGFloat) -> UIImage? {
         guard targetSize.width > 1, targetSize.height > 1 else {
             return nil
         }
 
         let pixelWidth = Int((targetSize.width * scale).rounded())
         let pixelHeight = Int((targetSize.height * scale).rounded())
-        let cacheKey = "\(url.path)#\(pixelWidth)x\(pixelHeight)" as NSString
+        let cacheKey = "\(resource.cacheKey)#\(pixelWidth)x\(pixelHeight)" as NSString
         if let image = imageCache.object(forKey: cacheKey) {
             return image
         }
 
-        guard let page = page(for: url) else {
+        guard let page = page(for: resource) else {
             return nil
         }
 
@@ -452,8 +550,16 @@ enum ManicSkinPDFRenderer {
         return image
     }
 
-    private static func page(for url: URL) -> CGPDFPage? {
-        guard let provider = CGDataProvider(url: url as CFURL),
+    private static func page(for resource: ManicSkinResource) -> CGPDFPage? {
+        let provider: CGDataProvider?
+        switch resource.source {
+        case .file(let url):
+            provider = CGDataProvider(url: url as CFURL)
+        case .archive:
+            provider = resource.data().flatMap { CGDataProvider(data: $0 as CFData) }
+        }
+
+        guard let provider,
               let document = CGPDFDocument(provider) else {
             return nil
         }

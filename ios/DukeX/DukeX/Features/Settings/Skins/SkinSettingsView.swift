@@ -6,6 +6,7 @@ struct SkinAssignmentView: View {
     @Environment(\.dukeXTheme) private var theme
     @State private var selectedOrientation: ManicSkinPreviewOrientation = .portrait
     @State private var previewRequest: SkinPreviewRequest?
+    @State private var removalConfirmationTarget: ManicSkinLibraryItem?
 
     var body: some View {
         GeometryReader { geometry in
@@ -35,6 +36,9 @@ struct SkinAssignmentView: View {
                                             item: skin,
                                             orientation: selectedOrientation
                                         )
+                                    },
+                                    requestRemoveSkin: {
+                                        removalConfirmationTarget = skin
                                     }
                                 )
                             }
@@ -56,6 +60,27 @@ struct SkinAssignmentView: View {
             SkinFullScreenPreview(request: request)
                 .environment(\.dukeXTheme, theme)
         }
+        .confirmationDialog(
+            "Remove Skin",
+            isPresented: Binding(
+                get: { removalConfirmationTarget != nil },
+                set: { if !$0 { removalConfirmationTarget = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let skin = removalConfirmationTarget {
+                Button("Remove \(skin.displayName)", role: .destructive) {
+                    removeSkin(skin)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                removalConfirmationTarget = nil
+            }
+        } message: {
+            if let skin = removalConfirmationTarget {
+                Text("Are you sure you would like to remove \(skin.displayName) and clear any assignments using it?")
+            }
+        }
     }
 
     private func skinColumnCount(for size: CGSize) -> Int {
@@ -63,6 +88,18 @@ struct SkinAssignmentView: View {
         return isLandscape
             ? store.landscapeGameLibraryColumnCount.columnCount
             : store.portraitGameLibraryColumnCount.columnCount
+    }
+
+    private func removeSkin(_ skin: ManicSkinLibraryItem) {
+        defer {
+            removalConfirmationTarget = nil
+        }
+
+        do {
+            try store.removeSkin(skin)
+        } catch {
+            store.message = UserMessage(title: "Skin Not Removed", detail: error.localizedDescription)
+        }
     }
 }
 
@@ -138,6 +175,7 @@ private struct SkinPreviewTile: View {
     let isSelected: Bool
     let assign: () -> Void
     let preview: () -> Void
+    let requestRemoveSkin: () -> Void
 
     var body: some View {
         VStack(spacing: 6) {
@@ -197,6 +235,11 @@ private struct SkinPreviewTile: View {
                 .strokeBorder(theme.borderColor, lineWidth: 1)
         }
         .contentShape(Rectangle())
+        .contextMenu {
+            Button(role: .destructive, action: requestRemoveSkin) {
+                Label("Remove Skin", systemImage: "trash")
+            }
+        }
     }
 
     @ViewBuilder
@@ -292,11 +335,7 @@ private struct SkinFullScreenPreview: View {
             }
 
             if let skin = request.item.makeSkin() {
-                ManicSkinPreviewRepresentable(
-                    skin: skin,
-                    isInteractive: true,
-                    previewOrientation: request.orientation
-                )
+                interactivePreview(for: skin)
                     .ignoresSafeArea()
             } else {
                 Text(request.item.displayName)
@@ -332,6 +371,27 @@ private struct SkinFullScreenPreview: View {
             }
         }
         .tint(theme.accentColor)
+    }
+
+    @ViewBuilder
+    private func interactivePreview(for skin: ManicSkin) -> some View {
+        GeometryReader { proxy in
+            let size = proxy.size
+            let isLandscapeContainer = size.width > size.height
+            let shouldRotate = request.orientation == .landscape && !isLandscapeContainer
+            let renderSize = shouldRotate ?
+                CGSize(width: size.height, height: size.width) :
+                size
+
+            ManicSkinPreviewRepresentable(
+                skin: skin,
+                isInteractive: true,
+                previewOrientation: request.orientation
+            )
+            .frame(width: renderSize.width, height: renderSize.height)
+            .rotationEffect(.degrees(shouldRotate ? 90 : 0))
+            .position(x: size.width / 2, y: size.height / 2)
+        }
     }
 }
 

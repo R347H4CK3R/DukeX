@@ -120,7 +120,6 @@ enum ImportTarget: String, Identifiable {
         case .skins:
             return [
                 UTType(filenameExtension: "manicskin"),
-                .folder,
                 .item
             ].compactMap { $0 }
         }

@@ -177,6 +177,7 @@ final class EmulatorFileStore: ObservableObject {
     static let selectedPortraitSkinNameKey = "DukeXSelectedPortraitSkinName"
     static let selectedLandscapeSkinIDKey = "DukeXSelectedLandscapeSkinID"
     static let selectedLandscapeSkinNameKey = "DukeXSelectedLandscapeSkinName"
+    static let removedBundledSkinNamesKey = "DukeXRemovedBundledSkinNames"
     static let metalHUDEnabledKey = "DukeXMetalHUDEnabled"
     static let forceThirtyFPSLockEnabledKey = "DukeXForceThirtyFPSLockEnabled"
     static let depthClampEnabledKey = "DukeXDepthClampEnabled"
@@ -191,6 +192,7 @@ final class EmulatorFileStore: ObservableObject {
     static let natGuestPortKey = "NATGuestPort"
     static let natPortProtocolKey = "NATPortProtocol"
     static let cloudSaveSyncEnabledKey = "DukeXCloudSaveSyncEnabled"
+    private static let bundledSkinFileNames: Set<String> = ["PS1.manicskin"]
 
     let documentsURL: URL
     let biosDirectoryURL: URL
@@ -468,10 +470,11 @@ final class EmulatorFileStore: ObservableObject {
     func importFiles(_ urls: [URL], to target: ImportTarget) {
         do {
             try prepareDirectories()
+            var importedSkinCount: Int?
 
             switch target {
             case .skins:
-                try importSkinFiles(urls)
+                importedSkinCount = try importSkinFiles(urls)
             case .systemFiles, .games:
                 let destinationDirectory = target == .systemFiles ? biosDirectoryURL : romsDirectoryURL
 
@@ -492,6 +495,14 @@ final class EmulatorFileStore: ObservableObject {
             }
 
             try refresh()
+            if let importedSkinCount {
+                message = UserMessage(
+                    title: importedSkinCount == 1 ? "Skin Imported" : "Skins Imported",
+                    detail: importedSkinCount == 1 ?
+                        "The skin is ready in Assign Skin." :
+                        "\(importedSkinCount) skins are ready in Assign Skin."
+                )
+            }
         } catch {
             message = UserMessage(title: "Import Failed", detail: error.localizedDescription)
         }
@@ -615,6 +626,25 @@ final class EmulatorFileStore: ObservableObject {
         try refresh()
     }
 
+    func removeSkin(_ skin: ManicSkinLibraryItem) throws {
+        try prepareDirectories()
+
+        if FileManager.default.fileExists(atPath: skin.url.path) {
+            try FileManager.default.removeItem(at: skin.url)
+        }
+
+        if Self.bundledSkinFileNames.contains(skin.fileName) {
+            markBundledSkinRemoved(named: skin.fileName)
+        }
+
+        clearSkinSelectionIfNeeded(skin)
+        try refresh()
+        message = UserMessage(
+            title: "Skin Removed",
+            detail: "\(skin.displayName) was removed from Assign Skin."
+        )
+    }
+
     private func makeSystemFileSet() throws -> (bios: LibraryFile, mcpx: LibraryFile, eeprom: LibraryFile?, hdd: LibraryFile) {
         guard let bios else {
             throw LaunchPlanError.missing("Flash BIOS")
@@ -671,12 +701,25 @@ final class EmulatorFileStore: ObservableObject {
             return
         }
 
-        let destination = skinsDirectoryURL.appendingPathComponent(bundledPS1URL.lastPathComponent, isDirectory: true)
-        try FileManager.default.copyItemIfNeeded(from: bundledPS1URL, to: destination)
+        guard !isBundledSkinRemoved(named: bundledPS1URL.lastPathComponent) else {
+            return
+        }
+
+        let values = try bundledPS1URL.resourceValues(forKeys: [.isDirectoryKey])
+        let destination = skinsDirectoryURL.appendingPathComponent(bundledPS1URL.lastPathComponent)
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            return
+        }
+
+        if values.isDirectory == true {
+            try DukeXZipArchive.createArchive(atPath: destination.path, fromDirectory: bundledPS1URL.path)
+        } else {
+            try FileManager.default.copyItem(at: bundledPS1URL, to: destination)
+        }
     }
 
     private func scanSkinsDirectory() throws -> [ManicSkinLibraryItem] {
-        let keys: Set<URLResourceKey> = [.isDirectoryKey]
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey]
         return try FileManager.default.contentsOfDirectory(
             at: skinsDirectoryURL,
             includingPropertiesForKeys: Array(keys),
@@ -687,18 +730,23 @@ final class EmulatorFileStore: ObservableObject {
             }
 
             let values = try url.resourceValues(forKeys: keys)
-            guard values.isDirectory == true else {
+            guard values.isDirectory == true || values.isRegularFile == true else {
                 return nil
             }
 
-            return ManicSkinLibraryItem(url: url)
+            guard let item = ManicSkinLibraryItem(url: url) else {
+                NSLog("DukeX skipped invalid Manic skin at %@", url.path)
+                return nil
+            }
+
+            return item
         }
         .sorted {
             $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
         }
     }
 
-    private func importSkinFiles(_ urls: [URL]) throws {
+    private func importSkinFiles(_ urls: [URL]) throws -> Int {
         var importedCount = 0
         for url in urls {
             let didStartAccessing = url.startAccessingSecurityScopedResource()
@@ -714,12 +762,12 @@ final class EmulatorFileStore: ObservableObject {
         if importedCount == 0 {
             throw SkinImportError.noSkinsFound
         }
+        return importedCount
     }
 
     private func importSkinFileOrFolder(at url: URL) throws -> Int {
         if url.pathExtension.caseInsensitiveCompare("manicskin") == .orderedSame {
-            let destination = uniqueSkinDestinationURL(for: url)
-            try FileManager.default.copyItem(at: url, to: destination)
+            try installSkinArchive(at: url)
             return 1
         }
 
@@ -733,18 +781,129 @@ final class EmulatorFileStore: ObservableObject {
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         )
-        var importedCount = 0
-        for child in children where child.pathExtension.caseInsensitiveCompare("manicskin") == .orderedSame {
+        let skinPackages = children.filter {
+            $0.pathExtension.caseInsensitiveCompare("manicskin") == .orderedSame
+        }
+        try skinPackages.forEach { child in
             let values = try child.resourceValues(forKeys: [.isDirectoryKey])
+            if values.isDirectory == true {
+                try validateSkinPackage(at: child)
+            }
+        }
+        for child in skinPackages {
+            try installSkinArchive(at: child)
+        }
+        let importedCount = skinPackages.count
+        return importedCount
+    }
+
+    private func installSkinArchive(at url: URL) throws {
+        guard ManicSkin(baseURL: url) != nil else {
+            throw SkinImportError.invalidSkin(url.lastPathComponent)
+        }
+        let destination = uniqueSkinDestinationURL(
+            forBaseName: url.deletingPathExtension().lastPathComponent,
+            isDirectory: false
+        )
+        let values = try url.resourceValues(forKeys: [.isDirectoryKey])
+        if values.isDirectory == true {
+            try DukeXZipArchive.createArchive(atPath: destination.path, fromDirectory: url.path)
+        } else {
+            try FileManager.default.copyItem(at: url, to: destination)
+        }
+        guard ManicSkin(baseURL: destination) != nil else {
+            throw SkinImportError.importedSkinUnreadable(url.lastPathComponent)
+        }
+        unmarkBundledSkinRemoved(named: destination.lastPathComponent)
+    }
+
+    private func importSkinPackage(at url: URL) throws {
+        try validateSkinPackage(at: url)
+        try copyValidatedSkinPackage(at: url)
+    }
+
+    private func validateSkinPackage(at url: URL) throws {
+        let values = try url.resourceValues(forKeys: [.isDirectoryKey])
+        guard values.isDirectory == true else {
+            throw SkinImportError.notSkinPackage(url.lastPathComponent)
+        }
+        guard ManicSkin(baseURL: url) != nil else {
+            throw SkinImportError.invalidSkin(url.lastPathComponent)
+        }
+    }
+
+    private func copyValidatedSkinPackage(at url: URL) throws {
+        let destination = uniqueSkinDestinationURL(
+            forBaseName: url.deletingPathExtension().lastPathComponent,
+            isDirectory: false
+        )
+        try DukeXZipArchive.createArchive(atPath: destination.path, fromDirectory: url.path)
+        guard ManicSkin(baseURL: destination) != nil else {
+            throw SkinImportError.importedSkinUnreadable(url.lastPathComponent)
+        }
+        unmarkBundledSkinRemoved(named: destination.lastPathComponent)
+    }
+
+    private func extractedSkinPackageURL(from archiveURL: URL) throws -> URL {
+        let extractURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DukeXSkinImport-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: extractURL, withIntermediateDirectories: true)
+        do {
+            try DukeXZipArchive.extractArchive(atPath: archiveURL.path, toDirectory: extractURL.path)
+        } catch {
+            throw SkinImportError.archiveExtractionFailed(archiveURL.lastPathComponent)
+        }
+
+        if ManicSkin(baseURL: extractURL) != nil {
+            return extractURL
+        }
+
+        let candidateURLs = try skinPackageCandidates(in: extractURL)
+        if let validCandidate = candidateURLs.first(where: { ManicSkin(baseURL: $0) != nil }) {
+            return validCandidate
+        }
+
+        throw SkinImportError.invalidSkin(archiveURL.lastPathComponent)
+    }
+
+    private func skinPackageCandidates(in directoryURL: URL) throws -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directoryURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var candidates: [URL] = []
+        for case let url as URL in enumerator {
+            let values = try url.resourceValues(forKeys: [.isDirectoryKey])
             guard values.isDirectory == true else {
                 continue
             }
-
-            let destination = uniqueSkinDestinationURL(for: child)
-            try FileManager.default.copyItem(at: child, to: destination)
-            importedCount += 1
+            if FileManager.default.fileExists(atPath: url.appendingPathComponent("info.json").path) {
+                candidates.append(url)
+            }
         }
-        return importedCount
+
+        return candidates.sorted { first, second in
+            first.pathComponents.count < second.pathComponents.count
+        }
+    }
+
+    private func copySkinPackageContents(from sourceURL: URL, to destinationURL: URL) throws {
+        try FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+        let children = try FileManager.default.contentsOfDirectory(
+            at: sourceURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        for child in children {
+            try FileManager.default.copyItem(
+                at: child,
+                to: destinationURL.appendingPathComponent(child.lastPathComponent)
+            )
+        }
     }
 
     private func repairSelectedSkin(
@@ -765,15 +924,62 @@ final class EmulatorFileStore: ObservableObject {
         }
     }
 
-    private func uniqueSkinDestinationURL(for url: URL) -> URL {
+    private func clearSkinSelectionIfNeeded(_ skin: ManicSkinLibraryItem) {
+        if selectedPortraitSkinID == skin.id {
+            selectedPortraitSkinID = ""
+        }
+        if selectedLandscapeSkinID == skin.id {
+            selectedLandscapeSkinID = ""
+        }
+        if selectedSkinID == skin.id {
+            selectedSkinID = ""
+        }
+
+        clearSkinNameDefault(Self.selectedSkinNameKey, matching: skin.fileName)
+        clearSkinNameDefault(Self.selectedPortraitSkinNameKey, matching: skin.fileName)
+        clearSkinNameDefault(Self.selectedLandscapeSkinNameKey, matching: skin.fileName)
+    }
+
+    private func clearSkinNameDefault(_ key: String, matching fileName: String) {
+        guard UserDefaults.standard.string(forKey: key) == fileName else {
+            return
+        }
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+
+    private func isBundledSkinRemoved(named fileName: String) -> Bool {
+        removedBundledSkinNames.contains(fileName)
+    }
+
+    private func markBundledSkinRemoved(named fileName: String) {
+        var fileNames = removedBundledSkinNames
+        fileNames.insert(fileName)
+        saveRemovedBundledSkinNames(fileNames)
+    }
+
+    private func unmarkBundledSkinRemoved(named fileName: String) {
+        var fileNames = removedBundledSkinNames
+        guard fileNames.remove(fileName) != nil else {
+            return
+        }
+        saveRemovedBundledSkinNames(fileNames)
+    }
+
+    private var removedBundledSkinNames: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: Self.removedBundledSkinNamesKey) ?? [])
+    }
+
+    private func saveRemovedBundledSkinNames(_ fileNames: Set<String>) {
+        UserDefaults.standard.set(fileNames.sorted(), forKey: Self.removedBundledSkinNamesKey)
+    }
+
+    private func uniqueSkinDestinationURL(forBaseName baseName: String, isDirectory: Bool) -> URL {
         let fileManager = FileManager.default
-        let baseName = url.deletingPathExtension().lastPathComponent
-        let pathExtension = url.pathExtension.isEmpty ? "manicskin" : url.pathExtension
-        var destination = skinsDirectoryURL.appendingPathComponent("\(baseName).\(pathExtension)", isDirectory: true)
+        var destination = skinsDirectoryURL.appendingPathComponent("\(baseName).manicskin", isDirectory: isDirectory)
         var suffix = 2
 
         while fileManager.fileExists(atPath: destination.path) {
-            destination = skinsDirectoryURL.appendingPathComponent("\(baseName) \(suffix).\(pathExtension)", isDirectory: true)
+            destination = skinsDirectoryURL.appendingPathComponent("\(baseName) \(suffix).manicskin", isDirectory: isDirectory)
             suffix += 1
         }
 
@@ -970,11 +1176,23 @@ final class EmulatorFileStore: ObservableObject {
 
 private enum SkinImportError: LocalizedError {
     case noSkinsFound
+    case notSkinPackage(String)
+    case invalidSkin(String)
+    case importedSkinUnreadable(String)
+    case archiveExtractionFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .noSkinsFound:
-            return "No .manicskin folders were found in the selected item."
+            return "No .manicskin skin files were found in the selected item."
+        case .notSkinPackage(let name):
+            return "\(name) is not a valid .manicskin skin package."
+        case .invalidSkin(let name):
+            return "\(name) could not be loaded. Make sure it contains a valid info.json and DukeX-compatible skin layout."
+        case .importedSkinUnreadable(let name):
+            return "\(name) was copied, but the imported copy could not be loaded."
+        case .archiveExtractionFailed(let name):
+            return "\(name) could not be opened as a .manicskin archive."
         }
     }
 }

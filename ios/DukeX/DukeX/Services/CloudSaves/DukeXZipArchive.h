@@ -12,6 +12,10 @@ NS_ASSUME_NONNULL_BEGIN
                  toDirectory:(NSString *)directoryPath
                        error:(NSError ** _Nullable)error;
 
++ (nullable NSData *)dataForEntryNamed:(NSString *)entryName
+                       inArchiveAtPath:(NSString *)archivePath
+                                 error:(NSError ** _Nullable)error;
+
 @end
 
 NS_ASSUME_NONNULL_END

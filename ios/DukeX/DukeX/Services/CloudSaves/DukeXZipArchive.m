@@ -143,4 +143,48 @@ static NSString *DukeXZipArchiveRelativePath(NSString *basePath, NSString *fileP
     return ok;
 }
 
++ (NSData *)dataForEntryNamed:(NSString *)entryName
+              inArchiveAtPath:(NSString *)archivePath
+                        error:(NSError **)error
+{
+    if (entryName.length == 0 ||
+        [entryName containsString:@"../"] ||
+        [entryName hasPrefix:@"/"]) {
+        DukeXZipArchiveSetError(error, @"Invalid archive entry name.");
+        return nil;
+    }
+
+    mz_zip_archive zip;
+    memset(&zip, 0, sizeof(zip));
+
+    if (!mz_zip_reader_init_file(&zip, archivePath.UTF8String, 0)) {
+        DukeXZipArchiveSetError(error, @"Could not open the .manicskin archive.");
+        return nil;
+    }
+
+    mz_uint fileIndex = 0;
+    if (!mz_zip_reader_locate_file_v2(&zip,
+                                      entryName.UTF8String,
+                                      NULL,
+                                      0,
+                                      &fileIndex)) {
+        mz_zip_reader_end(&zip);
+        DukeXZipArchiveSetError(error, [NSString stringWithFormat:@"Could not find %@ in the .manicskin archive.", entryName]);
+        return nil;
+    }
+
+    size_t size = 0;
+    void *bytes = mz_zip_reader_extract_to_heap(&zip, fileIndex, &size, 0);
+    if (bytes == NULL) {
+        mz_zip_reader_end(&zip);
+        DukeXZipArchiveSetError(error, [NSString stringWithFormat:@"Could not read %@ from the .manicskin archive.", entryName]);
+        return nil;
+    }
+
+    NSData *data = [NSData dataWithBytes:bytes length:size];
+    mz_free(bytes);
+    mz_zip_reader_end(&zip);
+    return data;
+}
+
 @end

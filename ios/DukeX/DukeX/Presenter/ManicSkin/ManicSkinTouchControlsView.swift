@@ -434,7 +434,7 @@ final class ManicSkinTouchControlsView: UIView {
 
         self.resolvedRepresentation = resolvedRepresentation
         backgroundImageView.frame = resolvedRepresentation.skinFrame
-        backgroundImageView.image = resolvedRepresentation.backgroundURL.flatMap {
+        backgroundImageView.image = resolvedRepresentation.background.flatMap {
             ManicSkinPDFRenderer.image(
                 for: $0,
                 targetSize: resolvedRepresentation.skinFrame.size,
@@ -470,13 +470,13 @@ final class ManicSkinTouchControlsView: UIView {
 
         let scale = window?.screen.scale ?? UIScreen.main.scale
         for item in representation.items {
-            let imageView = UIImageView(frame: item.frame)
+            let imageView = UIImageView(frame: item.visualFrame)
             imageView.contentMode = .scaleToFill
             imageView.isUserInteractionEnabled = false
             imageView.alpha = 0.94
             imageView.image = ManicSkinPDFRenderer.image(
-                for: item.assetURL,
-                targetSize: item.frame.size,
+                for: item.asset,
+                targetSize: item.visualFrame.size,
                 scale: scale
             )
             addSubview(imageView)
@@ -517,18 +517,20 @@ final class ManicSkinTouchControlsView: UIView {
             return false
         }
 
-        activeTouches[key] = ActiveTouch(item: item)
+        let activeTouch = ActiveTouch(item: item)
         NativeMetalDiagnostics.log(
             "SKIN_BEGIN",
             "point=\(NativeMetalDiagnostics.point(point)) item=\(describeItem(item)) activeTouches=\(activeTouches.count)"
         )
         switch item.kind {
         case .buttons(let inputs):
+            activeTouches[key] = activeTouch
             for input in inputs {
                 controllerBridge.setButtonInput(input, pressed: true)
             }
             setItemPressed(item.id, pressed: true)
         case .thumbstick(let element):
+            activeTouches[key] = activeTouch
             updateThumbstick(item: item, element: element, point: point)
         }
         return true
@@ -646,6 +648,12 @@ final class ManicSkinTouchControlsView: UIView {
             x /= length
             y /= length
         }
+        if abs(x) < 0.1 {
+            x = 0
+        }
+        if abs(y) < 0.1 {
+            y = 0
+        }
 
         let position = CGPoint(x: x, y: y)
         NativeMetalDiagnostics.log(
@@ -653,7 +661,7 @@ final class ManicSkinTouchControlsView: UIView {
             "item=\(item.id) element=\(element) point=\(NativeMetalDiagnostics.point(point)) position=\(NativeMetalDiagnostics.point(position))"
         )
         controllerBridge.setThumbstick(element: element, position: position)
-        setThumbstickVisual(item.id, position: position, radius: radius)
+        setThumbstickVisual(item, position: position, radius: radius)
     }
 
     private func item(at point: CGPoint) -> ManicSkinResolvedItem? {
@@ -693,8 +701,7 @@ final class ManicSkinTouchControlsView: UIView {
         case .buttons:
             return item.hitFrame
         case .thumbstick:
-            let expansion = max(item.frame.width, item.frame.height) * 0.42
-            return item.hitFrame.insetBy(dx: -expansion, dy: -expansion)
+            return item.frame
         }
     }
 
@@ -706,7 +713,7 @@ final class ManicSkinTouchControlsView: UIView {
         case .thumbstick(let element):
             kind = "thumbstick:\(element)"
         }
-        return "id=\(item.id) kind=\(kind) frame=\(NativeMetalDiagnostics.rect(item.frame)) hit=\(NativeMetalDiagnostics.rect(item.hitFrame))"
+        return "id=\(item.id) kind=\(kind) frame=\(NativeMetalDiagnostics.rect(item.frame)) visual=\(NativeMetalDiagnostics.rect(item.visualFrame)) hit=\(NativeMetalDiagnostics.rect(item.hitFrame))"
     }
 
     private func setItemPressed(_ itemID: Int, pressed: Bool) {
@@ -720,17 +727,34 @@ final class ManicSkinTouchControlsView: UIView {
         }
     }
 
-    private func setThumbstickVisual(_ itemID: Int, position: CGPoint, radius: CGFloat) {
-        guard let imageView = itemImageViews[itemID] else {
+    private func setThumbstickVisual(_ item: ManicSkinResolvedItem, position: CGPoint, radius: CGFloat) {
+        guard let imageView = itemImageViews[item.id] else {
             return
         }
 
-        let travel = radius * 0.22
+        let travel = thumbstickVisualTravel(for: item, radius: radius)
         imageView.alpha = 0.74
         imageView.transform = CGAffineTransform(
             translationX: position.x * travel,
             y: -position.y * travel
         )
+    }
+
+    private func thumbstickVisualTravel(for item: ManicSkinResolvedItem, radius: CGFloat) -> CGFloat {
+        let controlDiameter = min(item.frame.width, item.frame.height)
+        let visualDiameter = min(item.visualFrame.width, item.visualFrame.height)
+        let legacyTravel = radius * 0.22
+        guard controlDiameter > 1, visualDiameter > 1 else {
+            return legacyTravel
+        }
+
+        let visualRatio = visualDiameter / controlDiameter
+        guard visualRatio < 0.75 else {
+            return legacyTravel
+        }
+
+        let containedTravel = max((controlDiameter - visualDiameter) * 0.5, 0)
+        return max(containedTravel, legacyTravel)
     }
 
     private func resetThumbstickVisual(_ itemID: Int) {
