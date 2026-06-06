@@ -218,7 +218,7 @@ final class ManicSkinTouchControlsView: UIView {
 
         let isThumbstick: Bool
         switch item.kind {
-        case .buttons:
+        case .buttons, .directionalPad:
             isThumbstick = false
         case .thumbstick:
             isThumbstick = true
@@ -470,12 +470,15 @@ final class ManicSkinTouchControlsView: UIView {
 
         let scale = window?.screen.scale ?? UIScreen.main.scale
         for item in representation.items {
+            guard let asset = item.asset else {
+                continue
+            }
             let imageView = UIImageView(frame: item.visualFrame)
             imageView.contentMode = .scaleToFill
             imageView.isUserInteractionEnabled = false
             imageView.alpha = 0.94
             imageView.image = ManicSkinPDFRenderer.image(
-                for: item.asset,
+                for: asset,
                 targetSize: item.visualFrame.size,
                 scale: scale
             )
@@ -529,6 +532,9 @@ final class ManicSkinTouchControlsView: UIView {
                 controllerBridge.setButtonInput(input, pressed: true)
             }
             setItemPressed(item.id, pressed: true)
+        case .directionalPad:
+            activeTouches[key] = activeTouch
+            updateDirectionalPad(item: item, key: key, point: point)
         case .thumbstick(let element):
             activeTouches[key] = activeTouch
             updateThumbstick(item: item, element: element, point: point)
@@ -552,6 +558,8 @@ final class ManicSkinTouchControlsView: UIView {
         switch activeTouch.item.kind {
         case .buttons:
             break
+        case .directionalPad:
+            updateDirectionalPad(item: activeTouch.item, key: key, point: point)
         case .thumbstick(let element):
             updateThumbstick(item: activeTouch.item, element: element, point: point)
         }
@@ -601,6 +609,25 @@ final class ManicSkinTouchControlsView: UIView {
                !isInputStillActive(ManicSkinInputMapper.menuInput) {
                 onMenuRequested?()
             }
+        case .directionalPad:
+            for input in activeTouch.directionalInputs {
+                if isInputStillActive(input) {
+                    NativeMetalDiagnostics.log(
+                        "SKIN_INPUT_RELEASE_DEFER",
+                        "input=\(input) reason=still-held activeTouches=\(activeTouches.count)"
+                    )
+                } else {
+                    controllerBridge.setButtonInput(input, pressed: false)
+                }
+            }
+            if isItemStillActive(activeTouch.item.id) {
+                NativeMetalDiagnostics.log(
+                    "SKIN_ITEM_VISUAL_RELEASE_DEFER",
+                    "item=\(activeTouch.item.id) reason=still-held activeTouches=\(activeTouches.count)"
+                )
+            } else {
+                setItemPressed(activeTouch.item.id, pressed: false)
+            }
         case .thumbstick(let element):
             if isThumbstickElementStillActive(element) {
                 NativeMetalDiagnostics.log(
@@ -628,7 +655,7 @@ final class ManicSkinTouchControlsView: UIView {
         }
         for activeTouch in activeTouches.values {
             switch activeTouch.item.kind {
-            case .buttons:
+            case .buttons, .directionalPad:
                 setItemPressed(activeTouch.item.id, pressed: false)
             case .thumbstick:
                 resetThumbstickVisual(activeTouch.item.id)
@@ -636,6 +663,55 @@ final class ManicSkinTouchControlsView: UIView {
         }
         activeTouches.removeAll()
         controllerBridge.releaseAllInputs()
+    }
+
+    private func updateDirectionalPad(item: ManicSkinResolvedItem, key: TouchTrackingKey, point: CGPoint) {
+        let previousInputs = activeTouches[key]?.directionalInputs ?? []
+        let nextInputs = directionalPadInputs(for: item, point: point)
+        activeTouches[key] = ActiveTouch(item: item, directionalInputs: nextInputs)
+
+        for input in nextInputs.subtracting(previousInputs) {
+            controllerBridge.setButtonInput(input, pressed: true)
+        }
+
+        for input in previousInputs.subtracting(nextInputs) where !isInputStillActive(input) {
+            controllerBridge.setButtonInput(input, pressed: false)
+        }
+
+        setItemPressed(item.id, pressed: !nextInputs.isEmpty)
+        NativeMetalDiagnostics.log(
+            "SKIN_DPAD_UPDATE",
+            "item=\(item.id) point=\(NativeMetalDiagnostics.point(point)) inputs=\(nextInputs.sorted().joined(separator: ","))"
+        )
+    }
+
+    private func directionalPadInputs(for item: ManicSkinResolvedItem, point: CGPoint) -> Set<String> {
+        guard case .directionalPad(let directionalInputs) = item.kind else {
+            return []
+        }
+
+        let horizontalRadius = max(item.frame.width * 0.5, 1)
+        let verticalRadius = max(item.frame.height * 0.5, 1)
+        let horizontal = (point.x - item.frame.midX) / horizontalRadius
+        let vertical = (point.y - item.frame.midY) / verticalRadius
+        let threshold: CGFloat = 0.28
+
+        var activeInputs = Set<String>()
+        for directionalInput in directionalInputs {
+            switch directionalInput.direction {
+            case .up where vertical <= -threshold:
+                activeInputs.insert(directionalInput.input)
+            case .down where vertical >= threshold:
+                activeInputs.insert(directionalInput.input)
+            case .left where horizontal <= -threshold:
+                activeInputs.insert(directionalInput.input)
+            case .right where horizontal >= threshold:
+                activeInputs.insert(directionalInput.input)
+            default:
+                break
+            }
+        }
+        return activeInputs
     }
 
     private func updateThumbstick(item: ManicSkinResolvedItem, element: String, point: CGPoint) {
@@ -676,10 +752,14 @@ final class ManicSkinTouchControlsView: UIView {
 
     private func isInputStillActive(_ input: String) -> Bool {
         activeTouches.values.contains { activeTouch in
-            guard case .buttons(let inputs) = activeTouch.item.kind else {
+            switch activeTouch.item.kind {
+            case .buttons(let inputs):
+                return inputs.contains(input)
+            case .directionalPad:
+                return activeTouch.directionalInputs.contains(input)
+            case .thumbstick:
                 return false
             }
-            return inputs.contains(input)
         }
     }
 
@@ -698,7 +778,7 @@ final class ManicSkinTouchControlsView: UIView {
 
     private func effectiveHitFrame(for item: ManicSkinResolvedItem) -> CGRect {
         switch item.kind {
-        case .buttons:
+        case .buttons, .directionalPad:
             return item.hitFrame
         case .thumbstick:
             return item.frame
@@ -710,6 +790,9 @@ final class ManicSkinTouchControlsView: UIView {
         switch item.kind {
         case .buttons(let inputs):
             kind = "buttons:\(inputs.joined(separator: ","))"
+        case .directionalPad(let directionalInputs):
+            let inputs = directionalInputs.map { "\($0.direction.rawValue)=\($0.input)" }.joined(separator: ",")
+            kind = "dpad:\(inputs)"
         case .thumbstick(let element):
             kind = "thumbstick:\(element)"
         }
@@ -775,6 +858,7 @@ final class ManicSkinTouchControlsView: UIView {
 
 private struct ActiveTouch {
     let item: ManicSkinResolvedItem
+    var directionalInputs = Set<String>()
 }
 
 struct ManicSkinFallbackTarget {

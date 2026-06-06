@@ -76,7 +76,7 @@ struct ManicSkin {
             return nil
         }
 
-        let backgroundName = representation.assets.resizable ?? representation.assets.standard
+        let backgroundName = representation.assets.preferredBackgroundName
         let backgroundResource = backgroundName.map(asset(named:))
         let designSize = designSize(for: representation)
         guard designSize.width > 1, designSize.height > 1 else {
@@ -128,14 +128,23 @@ struct ManicSkin {
                 )
             }
 
-            guard let assetName = item.asset?.normal else {
-                return nil
-            }
+            let visualAsset = item.asset?.normal.map { asset(named: $0) }
             let inputs: [String]
             switch item.inputs {
             case .buttons(let buttonInputs):
                 inputs = buttonInputs
             case .analog(let mappedInputs):
+                if let directionalInputs = Self.directionalPadInputs(for: mappedInputs) {
+                    return ManicSkinResolvedItem(
+                        id: index,
+                        kind: .directionalPad(directionalInputs),
+                        asset: visualAsset,
+                        frame: transformedFrame,
+                        visualFrame: transformedFrame,
+                        hitFrame: hitFrame,
+                        scale: scale
+                    )
+                }
                 inputs = Set(mappedInputs.values).sorted()
             }
             guard !inputs.isEmpty else {
@@ -145,7 +154,7 @@ struct ManicSkin {
             return ManicSkinResolvedItem(
                 id: index,
                 kind: .buttons(inputs),
-                asset: asset(named: assetName),
+                asset: visualAsset,
                 frame: transformedFrame,
                 visualFrame: transformedFrame,
                 hitFrame: hitFrame,
@@ -208,7 +217,7 @@ struct ManicSkin {
     }
 
     private func designSize(for representation: ManicSkinRepresentation) -> CGSize {
-        let backgroundName = representation.assets.resizable ?? representation.assets.standard
+        let backgroundName = representation.assets.preferredBackgroundName
         let backgroundResource = backgroundName.map(asset(named:))
         return representation.mappingSize?.size ??
             backgroundResource.flatMap { ManicSkinPDFRenderer.pageSize(for: $0) } ??
@@ -232,6 +241,17 @@ struct ManicSkin {
             width: width,
             height: height
         )
+    }
+
+    private static func directionalPadInputs(for inputs: [String: String]) -> [ManicSkinDirectionalInput]? {
+        let directionalInputs = ManicSkinDirectionalPadDirection.allCases.compactMap { direction -> ManicSkinDirectionalInput? in
+            guard let input = inputs[direction.rawValue],
+                  ManicSkinInputMapper.isDigitalDirection(input) else {
+                return nil
+            }
+            return ManicSkinDirectionalInput(direction: direction, input: input)
+        }
+        return directionalInputs.isEmpty ? nil : directionalInputs
     }
 
     private func preferredStyleKey(
@@ -352,6 +372,13 @@ struct ManicSkinRepresentation: Decodable {
 struct ManicSkinRepresentationAssets: Decodable {
     let resizable: String?
     let standard: String?
+    let small: String?
+    let medium: String?
+    let large: String?
+
+    var preferredBackgroundName: String? {
+        resizable ?? standard ?? large ?? medium ?? small
+    }
 }
 
 struct ManicSkinSize: Decodable {
@@ -413,6 +440,28 @@ struct ManicSkinExtendedEdges: Decodable {
     let bottom: CGFloat
     let left: CGFloat
     let right: CGFloat
+
+    private enum CodingKeys: String, CodingKey {
+        case top
+        case bottom
+        case left
+        case right
+    }
+
+    init(top: CGFloat, bottom: CGFloat, left: CGFloat, right: CGFloat) {
+        self.top = top
+        self.bottom = bottom
+        self.left = left
+        self.right = right
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        top = try container.decodeIfPresent(CGFloat.self, forKey: .top) ?? 0
+        bottom = try container.decodeIfPresent(CGFloat.self, forKey: .bottom) ?? 0
+        left = try container.decodeIfPresent(CGFloat.self, forKey: .left) ?? 0
+        right = try container.decodeIfPresent(CGFloat.self, forKey: .right) ?? 0
+    }
 }
 
 struct ManicSkinResolvedRepresentation {
@@ -426,16 +475,29 @@ struct ManicSkinResolvedRepresentation {
 struct ManicSkinResolvedItem {
     enum Kind {
         case buttons([String])
+        case directionalPad([ManicSkinDirectionalInput])
         case thumbstick(element: String)
     }
 
     let id: Int
     let kind: Kind
-    let asset: ManicSkinResource
+    let asset: ManicSkinResource?
     let frame: CGRect
     let visualFrame: CGRect
     let hitFrame: CGRect
     let scale: CGFloat
+}
+
+enum ManicSkinDirectionalPadDirection: String, CaseIterable {
+    case up
+    case down
+    case left
+    case right
+}
+
+struct ManicSkinDirectionalInput {
+    let direction: ManicSkinDirectionalPadDirection
+    let input: String
 }
 
 private enum ManicSkinResourceProvider {
@@ -505,11 +567,15 @@ enum ManicSkinPDFRenderer {
             return cached.cgSizeValue
         }
 
-        guard let page = page(for: resource) else {
+        let size: CGSize
+        if let page = page(for: resource) {
+            size = page.getBoxRect(.mediaBox).size
+        } else if let image = rasterImage(for: resource) {
+            size = image.size
+        } else {
             return nil
         }
 
-        let size = page.getBoxRect(.mediaBox).size
         sizeCache.setObject(NSValue(cgSize: size), forKey: key)
         return size
     }
@@ -526,24 +592,29 @@ enum ManicSkinPDFRenderer {
             return image
         }
 
-        guard let page = page(for: resource) else {
-            return nil
-        }
-
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
         format.opaque = false
         let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
-        let image = renderer.image { context in
-            let cgContext = context.cgContext
-            let bounds = CGRect(origin: .zero, size: targetSize)
-            cgContext.clear(bounds)
-            cgContext.saveGState()
-            cgContext.translateBy(x: 0, y: bounds.height)
-            cgContext.scaleBy(x: 1, y: -1)
-            cgContext.concatenate(page.getDrawingTransform(.mediaBox, rect: bounds, rotate: 0, preserveAspectRatio: true))
-            cgContext.drawPDFPage(page)
-            cgContext.restoreGState()
+        let image: UIImage
+        if let page = page(for: resource) {
+            image = renderer.image { context in
+                let cgContext = context.cgContext
+                let bounds = CGRect(origin: .zero, size: targetSize)
+                cgContext.clear(bounds)
+                cgContext.saveGState()
+                cgContext.translateBy(x: 0, y: bounds.height)
+                cgContext.scaleBy(x: 1, y: -1)
+                cgContext.concatenate(page.getDrawingTransform(.mediaBox, rect: bounds, rotate: 0, preserveAspectRatio: true))
+                cgContext.drawPDFPage(page)
+                cgContext.restoreGState()
+            }
+        } else if let rasterImage = rasterImage(for: resource) {
+            image = renderer.image { _ in
+                rasterImage.draw(in: CGRect(origin: .zero, size: targetSize))
+            }
+        } else {
+            return nil
         }
 
         imageCache.setObject(image, forKey: cacheKey)
@@ -564,5 +635,14 @@ enum ManicSkinPDFRenderer {
             return nil
         }
         return document.page(at: 1)
+    }
+
+    private static func rasterImage(for resource: ManicSkinResource) -> UIImage? {
+        switch resource.source {
+        case .file(let url):
+            return UIImage(contentsOfFile: url.path)
+        case .archive:
+            return resource.data().flatMap { UIImage(data: $0) }
+        }
     }
 }

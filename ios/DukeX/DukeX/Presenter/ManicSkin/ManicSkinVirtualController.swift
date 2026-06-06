@@ -32,12 +32,12 @@ enum ManicSkinInputMapper {
     }
 
     private static let buttonMasks: [String: UInt32] = [
-        "a": CoreButton.b,
-        "b": CoreButton.a,
-        "x": CoreButton.y,
-        "y": CoreButton.x,
-        "l2": CoreButton.white,
-        "r2": CoreButton.black,
+        "a": CoreButton.a,
+        "b": CoreButton.b,
+        "x": CoreButton.x,
+        "y": CoreButton.y,
+        "l1": CoreButton.white,
+        "r1": CoreButton.black,
         "l3": CoreButton.leftThumb,
         "r3": CoreButton.rightThumb,
         "start": CoreButton.start,
@@ -45,8 +45,8 @@ enum ManicSkinInputMapper {
     ]
 
     private static let triggerAxes: [String: TriggerAxis] = [
-        "l1": .left,
-        "r1": .right
+        "l2": .left,
+        "r2": .right
     ]
 
     private static let digitalDirections: Set<String> = ["up", "down", "left", "right"]

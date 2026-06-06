@@ -158,7 +158,7 @@ static NSString *DukeXZipArchiveRelativePath(NSString *basePath, NSString *fileP
     memset(&zip, 0, sizeof(zip));
 
     if (!mz_zip_reader_init_file(&zip, archivePath.UTF8String, 0)) {
-        DukeXZipArchiveSetError(error, @"Could not open the .manicskin archive.");
+        DukeXZipArchiveSetError(error, @"Could not open the skin archive.");
         return nil;
     }
 
@@ -169,7 +169,7 @@ static NSString *DukeXZipArchiveRelativePath(NSString *basePath, NSString *fileP
                                       0,
                                       &fileIndex)) {
         mz_zip_reader_end(&zip);
-        DukeXZipArchiveSetError(error, [NSString stringWithFormat:@"Could not find %@ in the .manicskin archive.", entryName]);
+        DukeXZipArchiveSetError(error, [NSString stringWithFormat:@"Could not find %@ in the skin archive.", entryName]);
         return nil;
     }
 
@@ -177,7 +177,7 @@ static NSString *DukeXZipArchiveRelativePath(NSString *basePath, NSString *fileP
     void *bytes = mz_zip_reader_extract_to_heap(&zip, fileIndex, &size, 0);
     if (bytes == NULL) {
         mz_zip_reader_end(&zip);
-        DukeXZipArchiveSetError(error, [NSString stringWithFormat:@"Could not read %@ from the .manicskin archive.", entryName]);
+        DukeXZipArchiveSetError(error, [NSString stringWithFormat:@"Could not read %@ from the skin archive.", entryName]);
         return nil;
     }
 

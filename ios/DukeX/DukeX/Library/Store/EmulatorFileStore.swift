@@ -769,7 +769,7 @@ final class EmulatorFileStore: ObservableObject {
             includingPropertiesForKeys: Array(keys),
             options: [.skipsHiddenFiles]
         ).compactMap { url in
-            guard url.pathExtension.caseInsensitiveCompare("manicskin") == .orderedSame else {
+            guard SkinPackageFormat.isSupportedPackage(url) else {
                 return nil
             }
 
@@ -810,7 +810,7 @@ final class EmulatorFileStore: ObservableObject {
     }
 
     private func importSkinFileOrFolder(at url: URL) throws -> Int {
-        if url.pathExtension.caseInsensitiveCompare("manicskin") == .orderedSame {
+        if SkinPackageFormat.isSupportedPackage(url) {
             try installSkinArchive(at: url)
             return 1
         }
@@ -826,7 +826,7 @@ final class EmulatorFileStore: ObservableObject {
             options: [.skipsHiddenFiles]
         )
         let skinPackages = children.filter {
-            $0.pathExtension.caseInsensitiveCompare("manicskin") == .orderedSame
+            SkinPackageFormat.isSupportedPackage($0)
         }
         try skinPackages.forEach { child in
             let values = try child.resourceValues(forKeys: [.isDirectoryKey])
@@ -847,6 +847,7 @@ final class EmulatorFileStore: ObservableObject {
         }
         let destination = uniqueSkinDestinationURL(
             forBaseName: url.deletingPathExtension().lastPathComponent,
+            fileExtension: SkinPackageFormat.fileExtension(for: url),
             isDirectory: false
         )
         let values = try url.resourceValues(forKeys: [.isDirectoryKey])
@@ -879,6 +880,7 @@ final class EmulatorFileStore: ObservableObject {
     private func copyValidatedSkinPackage(at url: URL) throws {
         let destination = uniqueSkinDestinationURL(
             forBaseName: url.deletingPathExtension().lastPathComponent,
+            fileExtension: SkinPackageFormat.fileExtension(for: url),
             isDirectory: false
         )
         try DukeXZipArchive.createArchive(atPath: destination.path, fromDirectory: url.path)
@@ -1017,13 +1019,23 @@ final class EmulatorFileStore: ObservableObject {
         UserDefaults.standard.set(fileNames.sorted(), forKey: Self.removedBundledSkinNamesKey)
     }
 
-    private func uniqueSkinDestinationURL(forBaseName baseName: String, isDirectory: Bool) -> URL {
+    private func uniqueSkinDestinationURL(
+        forBaseName baseName: String,
+        fileExtension: String,
+        isDirectory: Bool
+    ) -> URL {
         let fileManager = FileManager.default
-        var destination = skinsDirectoryURL.appendingPathComponent("\(baseName).manicskin", isDirectory: isDirectory)
+        var destination = skinsDirectoryURL.appendingPathComponent(
+            "\(baseName).\(fileExtension)",
+            isDirectory: isDirectory
+        )
         var suffix = 2
 
         while fileManager.fileExists(atPath: destination.path) {
-            destination = skinsDirectoryURL.appendingPathComponent("\(baseName) \(suffix).manicskin", isDirectory: isDirectory)
+            destination = skinsDirectoryURL.appendingPathComponent(
+                "\(baseName) \(suffix).\(fileExtension)",
+                isDirectory: isDirectory
+            )
             suffix += 1
         }
 
@@ -1228,15 +1240,15 @@ private enum SkinImportError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noSkinsFound:
-            return "No .manicskin skin files were found in the selected item."
+            return "No \(SkinPackageFormat.readableFileExtensions) skin files were found in the selected item."
         case .notSkinPackage(let name):
-            return "\(name) is not a valid .manicskin skin package."
+            return "\(name) is not a valid skin package."
         case .invalidSkin(let name):
             return "\(name) could not be loaded. Make sure it contains a valid info.json and DukeX-compatible skin layout."
         case .importedSkinUnreadable(let name):
             return "\(name) was copied, but the imported copy could not be loaded."
         case .archiveExtractionFailed(let name):
-            return "\(name) could not be opened as a .manicskin archive."
+            return "\(name) could not be opened as a skin archive."
         }
     }
 }

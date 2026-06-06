@@ -90,6 +90,31 @@ enum GameLaunchLink {
     }
 }
 
+enum SkinPackageFormat {
+    static let fileExtensions = ["manicskin", "deltaskin", "gammaskin"]
+    static let readableFileExtensions = ".manicskin, .deltaskin, or .gammaskin"
+
+    static var allowedContentTypes: [UTType] {
+        fileExtensions.map { UTType(filenameExtension: $0) }.compactMap { $0 }
+    }
+
+    static func isSupportedPackage(_ url: URL) -> Bool {
+        isSupportedExtension(url.pathExtension)
+    }
+
+    static func isSupportedExtension(_ pathExtension: String) -> Bool {
+        fileExtensions.contains {
+            pathExtension.caseInsensitiveCompare($0) == .orderedSame
+        }
+    }
+
+    static func fileExtension(for url: URL) -> String {
+        fileExtensions.first {
+            url.pathExtension.caseInsensitiveCompare($0) == .orderedSame
+        } ?? fileExtensions[0]
+    }
+}
+
 enum ImportTarget: String, Identifiable {
     case systemFiles
     case games
@@ -118,10 +143,7 @@ enum ImportTarget: String, Identifiable {
                 .item
             ].compactMap { $0 }
         case .skins:
-            return [
-                UTType(filenameExtension: "manicskin"),
-                .item
-            ].compactMap { $0 }
+            return SkinPackageFormat.allowedContentTypes + [.item]
         }
     }
 }
