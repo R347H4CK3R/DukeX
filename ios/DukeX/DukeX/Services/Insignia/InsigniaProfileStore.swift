@@ -274,6 +274,8 @@ struct XBLiveFriendProfile: Codable, Equatable {
     let achievementCount: Int?
     let totalMinutes: Double?
     let lastPlayedImageURLString: String?
+    let gamesPlayed: [XBLiveGamePlayed]?
+    let achievements: XBLiveAchievementsSnapshot?
 
     var avatarURL: URL? { avatarURLString.flatMap(URL.init(string:)) }
     var lastPlayedImageURL: URL? { lastPlayedImageURLString.flatMap(URL.init(string:)) }
@@ -1640,7 +1642,12 @@ final class InsigniaProfileStore: ObservableObject {
                 continue
             }
 
-            let games = (try? await XBLiveService.fetchGamesPlayed(username: friend.gamertag)) ?? []
+            let existingProfile = existingProfiles[friend.key]
+            let games = (try? await XBLiveService.fetchGamesPlayed(username: friend.gamertag)) ??
+                existingProfile?.gamesPlayed ??
+                []
+            let achievements = (try? await XBLiveService.fetchAchievements(username: friend.gamertag)) ??
+                existingProfile?.achievements
             let lastGame = games.first { $0.gameName == xbProfile.lastPlayedGame } ?? games.first
             let totalMinutes = xbProfile.totalMinutes ?? Self.totalMinutes(from: games)
             let isOnline = xbProfile.isOnline
@@ -1662,7 +1669,9 @@ final class InsigniaProfileStore: ObservableObject {
                 achievementScore: xbProfile.achievementScore,
                 achievementCount: xbProfile.achievementCount,
                 totalMinutes: totalMinutes,
-                lastPlayedImageURLString: lastGame?.imageUrl
+                lastPlayedImageURLString: lastGame?.imageUrl,
+                gamesPlayed: games,
+                achievements: achievements
             )
         }
 

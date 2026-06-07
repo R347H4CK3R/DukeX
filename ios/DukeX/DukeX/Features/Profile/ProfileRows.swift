@@ -301,6 +301,7 @@ struct ProfileFriendsView: View {
                                 friend: friend,
                                 profile: friendProfiles[friend.key],
                                 customProfileImage: friendProfileImages[friend.key],
+                                supportedGames: supportedGames,
                                 changeProfileImage: { changeFriendProfileImage(friend) }
                             )
                         } label: {
@@ -359,6 +360,10 @@ struct ProfileFriendsView: View {
 
     private var friendProfiles: [String: XBLiveFriendProfile] {
         profileStore.authenticatedSnapshot?.friendProfiles ?? [:]
+    }
+
+    private var supportedGames: [InsigniaSupportedGame] {
+        profileStore.authenticatedSnapshot?.supportedGames ?? []
     }
 
     private var friendProfileImages: [String: UIImage] {
@@ -861,6 +866,7 @@ struct ProfileFriendDetailView: View {
     let friend: InsigniaFriend
     let profile: XBLiveFriendProfile?
     let customProfileImage: UIImage?
+    let supportedGames: [InsigniaSupportedGame]
     let changeProfileImage: () -> Void
 
     var body: some View {
@@ -893,12 +899,27 @@ struct ProfileFriendDetailView: View {
                 if let score = profile?.achievementScore {
                     ProfileInfoRow(title: "Gamerscore", value: "\(score)", systemImage: "trophy")
                 }
-                if let count = profile?.achievementCount {
-                    ProfileInfoRow(title: "Achievements", value: "\(count)", systemImage: "medal")
+
+                NavigationLink {
+                    ProfileAchievementsView(
+                        snapshot: profile?.achievements,
+                        profileScore: profile?.achievementScore,
+                        profileCount: profile?.achievementCount,
+                        supportedGames: supportedGames
+                    )
+                } label: {
+                    ProfileInfoRow(title: "Achievements", value: achievementsSummaryText, systemImage: "medal")
                 }
-                if let minutes = profile?.totalMinutes {
-                    ProfileInfoRow(title: "Play Time", value: playTimeText(minutes), systemImage: "timer")
+
+                NavigationLink {
+                    ProfilePlaytimeView(
+                        totalMinutes: profile?.totalMinutes,
+                        games: profile?.gamesPlayed ?? []
+                    )
+                } label: {
+                    ProfileInfoRow(title: "Play Time", value: playtimeSummaryText, systemImage: "timer")
                 }
+
                 if let lastPlayed = profile?.lastPlayedGame {
                     ProfileInfoRow(title: "Last Played", value: lastPlayed, systemImage: "clock")
                 }
@@ -928,6 +949,25 @@ struct ProfileFriendDetailView: View {
 
     private var initial: String {
         String(friend.gamertag.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1)).uppercased()
+    }
+
+    private var achievementsSummaryText: String {
+        profile?.achievements?.summaryText ??
+            profile?.achievementCount.map(String.init) ??
+            "Not Synced"
+    }
+
+    private var playtimeSummaryText: String {
+        if let minutes = profile?.totalMinutes {
+            return playTimeText(minutes)
+        }
+
+        let games = profile?.gamesPlayed ?? []
+        if !games.isEmpty {
+            return "\(games.count) Game\(games.count == 1 ? "" : "s")"
+        }
+
+        return "Not Synced"
     }
 
     private func playTimeText(_ minutes: Double) -> String {
