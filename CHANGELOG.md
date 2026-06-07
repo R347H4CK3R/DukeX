@@ -5,6 +5,55 @@ entries focus on user-visible behavior and port-specific runtime changes.
 
 ## Unreleased
 
+## v1.0.1 - Bringing Xbox Live Back to Your Pocket
+
+### Added
+
+- Added XB.Live profile integration as the foundation for DukeX's collaboration
+  with the XB.Live preservation team.
+- Added achievement tracking, friends list integration, message history
+  support, and multiplayer event tracking for Insignia-hosted and XB.Live-hosted
+  community events.
+- Added supported cloud sync for game saves and Xbox Live profile data between
+  DukeX and real Xbox hardware through XB.Live services.
+- Added `.manicskin` touch-control support, with `.deltaskin` and `.gammaskin`
+  compatibility for additional community skin formats.
+- Added a new default touch-control skin designed by `u/starvingartist12`.
+- Added AirPlay support for playing on compatible larger displays.
+- Added selectable themes and personalization options.
+- Added automatic cover art retrieval for supported titles.
+- Added native URL scheme support for external launch requests and Home Screen
+  game launch shortcuts.
+
+### Changed
+
+- Overhauled the Profile tab around XB.Live services so Xbox identity features
+  are no longer limited to a single device.
+- Improved graphics compatibility, rendering stability, and runtime handling
+  across a wider range of titles.
+- Refined rendering and presentation behavior behind the scenes for smoother
+  gameplay on supported hardware.
+- Experimentally lowered the minimum supported operating system to iOS 16.0.
+- Established the hardware floor at Apple A14 Bionic or Apple M1 hardware or
+  newer.
+
+### Notes
+
+- XB.Live account access is required for the new XB.Live profile, community,
+  and cloud-sync features.
+- DukeX continues to be distributed as a free, open-source project through
+  sideloading repositories, with StikStore and SideStore metadata maintained in
+  `altsource/source.json`.
+- iOS 16 support remains experimental, and users may encounter issues not
+  present on newer operating system versions.
+
+### Known Bugs
+
+- There is a known bug where certain touch controls stop functioning as
+  intended following device rotation. For this release, to make the best use of
+  touch controls, launch the game with the app already in the orientation you
+  wish to play in, i.e. portrait or landscape.
+
 ## v1.0.0 - Initial Public Release
 
 ### Added

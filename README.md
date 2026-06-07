@@ -4,7 +4,7 @@
     <strong>Original Xbox emulation for iOS, built from xemu with a native Swift interface.</strong>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/status-experimental-8f95c4?style=flat-square" alt="Status: experimental">
+    <img src="https://img.shields.io/badge/status-update%20v1.0.1-8f95c4?style=flat-square" alt="Status: update v1.0.1">
     <img src="https://img.shields.io/badge/platform-iOS%2016%2B%20arm64-111827?style=flat-square" alt="Platform: iOS 16+ arm64">
     <img src="https://img.shields.io/badge/renderer-MoltenVK%20%2B%20Metal-1f6feb?style=flat-square" alt="Renderer: MoltenVK and Metal">
     <img src="https://img.shields.io/badge/JIT-version%20aware-2f855a?style=flat-square" alt="JIT: version aware">
@@ -23,28 +23,30 @@ MoltenVK and a native `CAMetalLayer`.
 
 ## At a Glance
 
-- Latest release: `v1.0.0`.
+- Latest release: `v1.0.1`.
 - Device target: iPhoneOS arm64, install target iOS 16.0 or later.
 - Runtime: TCG with version-aware JIT setup; iOS 26 or later uses the
   StikDebug Universal.js flow.
 - Graphics: xemu Vulkan renderer through MoltenVK with a native Metal
-  presenter.
+  presenter and AirPlay display support.
 - Interface: native SwiftUI library, profile, and settings tabs.
-- Networking: Insignia-oriented NAT defaults with user-configurable settings.
-- Known work: rendering correctness, Metal HUD visibility, and title-by-title
-  tuning.
+- Networking: Insignia-oriented NAT defaults plus XB.Live profile, community,
+  and cloud-sync features.
+- Known work: rendering correctness, touch-control behavior after rotation,
+  Metal HUD visibility, and title-by-title tuning.
 
 ## Features
 
 | Category | Details |
 | --- | --- |
-| Game library | Cover artwork, game launch, dashboard launch, favorites/title/live/recent sorting, portrait and landscape column options, long-press actions, and Insignia live indicators for supported titles. |
+| Game library | Cover artwork, automatic cover art retrieval for supported titles, game launch, dashboard launch, favorites/title/live/recent sorting, portrait and landscape column options, long-press actions, native launch links, and Insignia live indicators for supported titles. |
 | File management | User-accessible `BIOS`, `ROMs`, `Covers`, `GameConfigs`, and `ShaderCaches` folders through iOS file sharing. |
 | JIT workflow | Optional automatic StikDebug handoff for the iOS 26+ Universal.js JIT flow. |
-| Display | MoltenVK-backed Metal presenter with portrait and landscape-aware sizing. |
-| Input | Controller support through iOS GameController APIs. |
-| Online setup | Insignia-focused NAT defaults plus editable network settings. |
-| Profile | App-side Insignia profile tab with cached public status and dashboard login handoff. |
+| Display | MoltenVK-backed Metal presenter with portrait and landscape-aware sizing, rendering stability work, and AirPlay support. |
+| Input | Controller support through iOS GameController APIs plus customizable touch controls through `.manicskin`, `.deltaskin`, and `.gammaskin` layouts. |
+| Online setup | Insignia-focused NAT defaults, editable network settings, XB.Live profile integration, friends, messages, community event tracking, and supported cloud sync. |
+| Profile | App-side profile tab with XB.Live identity, achievement, friends, message, event, and cloud-sync support. |
+| Themes | Selectable interface themes and personalization options. |
 | Per-game tuning | Custom config import and shader-cache clearing from each game menu. |
 | Diagnostics | Built-in FPS/system statistics HUD and app-owned launch logs for device-side testing. |
 | Advanced runtime | TCG translation block cache size controls for performance testing. |
@@ -55,8 +57,9 @@ Current DukeX builds are published through GitHub Releases for sideloading.
 The repository also includes canonical AltStore/SideStore metadata under
 [`altsource/source.json`](altsource/source.json) for public distribution.
 
-Compatibility and performance vary by title, device, iOS version, and JIT
-availability. DukeX should be treated as experimental software.
+Compatibility and performance vary by title, device, iOS version, JIT
+availability, and touch-control orientation state. DukeX should be treated as
+experimental software.
 
 <p align="center">
   <img src="docs/assets/branding/stikstore-badge.png" alt="Available on StikStore" width="170">
@@ -67,7 +70,8 @@ availability. DukeX should be treated as experimental software.
 
 ### Runtime
 
-- Supported iPhone or iPad hardware for device testing.
+- Supported iPhone or iPad hardware for device testing. DukeX requires an
+  Apple A14 Bionic or Apple M1 processor or newer.
 - iOS 16.0 or later. iOS 16 through 18 use W^X reprotection after JIT has
   been enabled for the process. iOS 26 or later requires StikDebug with
   Universal.js assigned to the DukeX bundle identifier.
