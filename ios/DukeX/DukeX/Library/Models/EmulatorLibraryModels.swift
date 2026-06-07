@@ -58,20 +58,45 @@ enum GameLaunchLink {
         return components.url
     }
 
+    static func externalGameURL(for game: LibraryFile) -> URL? {
+        guard let titleID = normalizedTitleID(game.titleID) else {
+            return nil
+        }
+
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = "game"
+        components.queryItems = [
+            URLQueryItem(name: "id", value: titleID)
+        ]
+        return components.url
+    }
+
     static func titleID(from url: URL) -> String? {
         guard url.scheme?.caseInsensitiveCompare(scheme) == .orderedSame else {
             return nil
         }
 
         let route = url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard route.caseInsensitiveCompare("launch") == .orderedSame else {
-            return nil
+        let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let titleID: String?
+
+        switch route.lowercased() {
+        case "launch":
+            titleID = queryItems
+                .first { $0.name.caseInsensitiveCompare("titleid") == .orderedSame }?
+                .value
+        case "game":
+            titleID = queryItems
+                .first {
+                    $0.name.caseInsensitiveCompare("id") == .orderedSame ||
+                        $0.name.caseInsensitiveCompare("titleid") == .orderedSame
+                }?
+                .value
+        default:
+            titleID = nil
         }
 
-        let titleID = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-            .queryItems?
-            .first { $0.name.caseInsensitiveCompare("titleid") == .orderedSame }?
-            .value
         return normalizedTitleID(titleID)
     }
 
@@ -87,6 +112,147 @@ enum GameLaunchLink {
             return nil
         }
         return titleID
+    }
+}
+
+enum GameLibraryExportLink {
+    struct Response {
+        let callbackURL: URL
+        let gameCount: Int
+    }
+
+    private static let callbackHost = "dukex"
+
+    static func callbackScheme(from url: URL) -> String? {
+        guard url.scheme?.caseInsensitiveCompare(GameLaunchLink.scheme) == .orderedSame else {
+            return nil
+        }
+
+        let route = url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard route.caseInsensitiveCompare("gameInfo") == .orderedSame else {
+            return nil
+        }
+
+        let scheme = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first { $0.name.caseInsensitiveCompare("scheme") == .orderedSame }?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let scheme, isValidCallbackScheme(scheme) else {
+            return nil
+        }
+
+        return scheme
+    }
+
+    static func response(
+        for games: [LibraryFile],
+        metadata: (LibraryFile) -> GameListMetadata?,
+        callbackScheme: String
+    ) -> Response? {
+        guard isValidCallbackScheme(callbackScheme) else {
+            return nil
+        }
+
+        let exportedGames = games.compactMap { exportedGame(from: $0, metadata: metadata($0)) }
+        guard let payload = encodedPayload(for: exportedGames) else {
+            return nil
+        }
+
+        var components = URLComponents()
+        components.scheme = callbackScheme
+        components.host = callbackHost
+        components.queryItems = [
+            URLQueryItem(name: "games", value: payload)
+        ]
+
+        guard let callbackURL = components.url else {
+            return nil
+        }
+
+        return Response(callbackURL: callbackURL, gameCount: exportedGames.count)
+    }
+
+    private static func exportedGame(from game: LibraryFile, metadata: GameListMetadata?) -> ExportedGame? {
+        guard let titleID = GameLaunchLink.normalizedTitleID(game.titleID),
+              let launchURL = GameLaunchLink.externalGameURL(for: game) else {
+            return nil
+        }
+
+        let metadataTitle = metadata?.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let titleName = metadataTitle?.isEmpty == false ? metadataTitle! : game.displayName
+
+        return ExportedGame(
+            titleName: titleName,
+            version: "1.0",
+            iconData: iconData(for: game),
+            titleId: titleID,
+            titleID: titleID,
+            id: titleID,
+            developer: metadata?.studio.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            launchURL: launchURL.absoluteString,
+            launchUrl: launchURL.absoluteString,
+            url: launchURL.absoluteString,
+            fileName: game.fileName,
+            platform: "Xbox"
+        )
+    }
+
+    private static func encodedPayload(for games: [ExportedGame]) -> String? {
+        guard let data = try? JSONEncoder().encode(games) else {
+            return nil
+        }
+
+        return data
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .trimmingTrailingBase64Padding()
+    }
+
+    private static func iconData(for game: LibraryFile) -> String {
+        guard let coverURL = game.coverURL,
+              let data = try? Data(contentsOf: coverURL) else {
+            return ""
+        }
+
+        return data.base64EncodedString()
+    }
+
+    private static func isValidCallbackScheme(_ scheme: String) -> Bool {
+        guard let first = scheme.unicodeScalars.first,
+              CharacterSet.letters.contains(first) else {
+            return false
+        }
+
+        let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-.")
+        return scheme.unicodeScalars.allSatisfy { allowedCharacters.contains($0) }
+    }
+
+    private struct ExportedGame: Encodable {
+        let titleName: String
+        let version: String
+        let iconData: String
+        let titleId: String
+        let titleID: String
+        let id: String
+        let developer: String
+        let launchURL: String
+        let launchUrl: String
+        let url: String
+        let fileName: String
+        let platform: String
+    }
+}
+
+private extension String {
+    func trimmingTrailingBase64Padding() -> String {
+        var value = self
+        while value.hasSuffix("=") {
+            value.removeLast()
+        }
+        return value
     }
 }
 

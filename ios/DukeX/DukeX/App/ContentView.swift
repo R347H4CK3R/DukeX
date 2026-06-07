@@ -276,7 +276,7 @@ struct ContentView: View {
                 selectedTab = .games
             }
             .onOpenURL { url in
-                handleLaunchLink(url)
+                handleIncomingURL(url)
             }
         }
         .environment(\.dukeXTheme, theme)
@@ -555,6 +555,44 @@ struct ContentView: View {
         }
 
         UIApplication.shared.open(url)
+    }
+
+    private func handleIncomingURL(_ url: URL) {
+        if let callbackScheme = GameLibraryExportLink.callbackScheme(from: url) {
+            handleGameLibraryExportRequest(callbackScheme: callbackScheme)
+            return
+        }
+
+        handleLaunchLink(url)
+    }
+
+    private func handleGameLibraryExportRequest(callbackScheme: String) {
+        Task { @MainActor in
+            await store.prepareAndRefresh()
+
+            guard let response = GameLibraryExportLink.response(
+                for: store.games,
+                metadata: { gameMetadataStore.metadata(for: $0) },
+                callbackScheme: callbackScheme
+            ) else {
+                store.message = UserMessage(
+                    title: "Library Export Failed",
+                    detail: "DukeX could not prepare a game library response for \(callbackScheme)."
+                )
+                return
+            }
+
+            UIApplication.shared.open(response.callbackURL) { success in
+                if !success {
+                    Task { @MainActor in
+                        store.message = UserMessage(
+                            title: "Library Export Failed",
+                            detail: "DukeX prepared \(response.gameCount) game\(response.gameCount == 1 ? "" : "s"), but could not open \(callbackScheme)."
+                        )
+                    }
+                }
+            }
+        }
     }
 
     private func handleLaunchLink(_ url: URL) {
