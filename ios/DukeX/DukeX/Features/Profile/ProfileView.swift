@@ -1,10 +1,21 @@
 import SwiftUI
 import UIKit
 
+enum DukeXDownloadCountState: Equatable {
+    case hidden
+    case loading
+    case loaded(Int)
+    case failed
+}
+
 struct ProfileView: View {
     @ObservedObject var profileStore: InsigniaProfileStore
     @AppStorage(ProfileFriendSortMode.defaultsKey) private var friendSortModeRawValue = ProfileFriendSortMode.favorites.rawValue
     @State private var favoriteFriendKeys = ProfileFriendFavorites.load()
+    @State private var maftyAvatarTapCount = 0
+    @State private var maftyDownloadCountUnlocked = false
+    @State private var maftyDownloadCountState = DukeXDownloadCountState.hidden
+    @State private var maftyDownloadCountTask: Task<Void, Never>?
 
     let signIn: () -> Void
     let signOut: () -> Void
@@ -34,6 +45,8 @@ struct ProfileView: View {
                 session: session,
                 snapshot: snapshot,
                 profileImage: profileStore.profileImage,
+                dukeXDownloadCountState: dukeXDownloadCountState(for: session),
+                avatarTapAction: { handleProfileAvatarTap(for: session) },
                 changeProfileImage: changeProfileImage,
                 clearProfileImage: profileStore.clearProfileImage
             )
@@ -274,6 +287,101 @@ struct ProfileView: View {
 
     private func pendingMessagesText(_ count: Int) -> String {
         count == 0 ? "None" : "\(count) Pending"
+    }
+
+    private func dukeXDownloadCountState(for session: InsigniaProfileSession) -> DukeXDownloadCountState {
+        guard maftyDownloadCountUnlocked,
+              session.gamertag.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("Mafty") == .orderedSame else {
+            return .hidden
+        }
+
+        return maftyDownloadCountState
+    }
+
+    private func handleProfileAvatarTap(for session: InsigniaProfileSession) {
+        guard session.gamertag.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("Mafty") == .orderedSame else {
+            maftyAvatarTapCount = 0
+            return
+        }
+
+        maftyAvatarTapCount += 1
+
+        guard maftyAvatarTapCount >= 3 else {
+            return
+        }
+
+        maftyAvatarTapCount = 0
+        maftyDownloadCountUnlocked = true
+        refreshMaftyDownloadCount()
+    }
+
+    private func refreshMaftyDownloadCount() {
+        maftyDownloadCountTask?.cancel()
+        maftyDownloadCountState = .loading
+        maftyDownloadCountTask = Task {
+            do {
+                let totalDownloads = try await DukeXReleaseStatsService.fetchTotalDownloads()
+                guard !Task.isCancelled else {
+                    return
+                }
+
+                await MainActor.run {
+                    maftyDownloadCountState = .loaded(totalDownloads)
+                }
+            } catch {
+                guard !Task.isCancelled else {
+                    return
+                }
+
+                await MainActor.run {
+                    maftyDownloadCountState = .failed
+                }
+            }
+        }
+    }
+}
+
+enum DukeXReleaseStatsService {
+    private static let releasesURL = URL(string: "https://api.github.com/repos/MaftyManicEMU/DukeX/releases")!
+
+    static func fetchTotalDownloads() async throws -> Int {
+        var request = URLRequest(url: releasesURL)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("DukeX", forHTTPHeaderField: "User-Agent")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw ServiceError.unavailable
+        }
+
+        return try JSONDecoder()
+            .decode([GitHubRelease].self, from: data)
+            .reduce(0) { releaseTotal, release in
+                releaseTotal + release.assets.reduce(0) { assetTotal, asset in
+                    assetTotal + asset.downloadCount
+                }
+            }
+    }
+
+    private struct GitHubRelease: Decodable {
+        let assets: [GitHubReleaseAsset]
+    }
+
+    private struct GitHubReleaseAsset: Decodable {
+        let downloadCount: Int
+
+        enum CodingKeys: String, CodingKey {
+            case downloadCount = "download_count"
+        }
+    }
+
+    enum ServiceError: LocalizedError {
+        case unavailable
+
+        var errorDescription: String? {
+            "DukeX release download stats are unavailable."
+        }
     }
 }
 

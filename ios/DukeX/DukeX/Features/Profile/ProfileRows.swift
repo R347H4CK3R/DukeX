@@ -44,12 +44,16 @@ struct ProfileHeaderRow: View {
     let session: InsigniaProfileSession
     let snapshot: InsigniaAuthenticatedSnapshot?
     let profileImage: UIImage?
+    let dukeXDownloadCountState: DukeXDownloadCountState
+    let avatarTapAction: () -> Void
     let changeProfileImage: () -> Void
     let clearProfileImage: () -> Void
 
     var body: some View {
         HStack(spacing: 14) {
             avatar
+                .contentShape(Circle())
+                .onTapGesture(perform: avatarTapAction)
                 .contextMenu {
                     Button(action: changeProfileImage) {
                         Label("Change Profile Picture", systemImage: "photo")
@@ -85,6 +89,17 @@ struct ProfileHeaderRow: View {
                         Image(systemName: "trophy")
                             .imageScale(.small)
                         Text("\(gamerscore) Gamerscore")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+
+                if dukeXDownloadCountState != .hidden {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down.circle")
+                            .imageScale(.small)
+                        Text(dukeXDownloadCountText)
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -145,6 +160,19 @@ struct ProfileHeaderRow: View {
 
     private var initial: String {
         String(session.gamertag.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1)).uppercased()
+    }
+
+    private var dukeXDownloadCountText: String {
+        switch dukeXDownloadCountState {
+        case .hidden:
+            return ""
+        case .loading:
+            return "Loading DukeX downloads..."
+        case .loaded(let count):
+            return "\(count.formatted(.number)) DukeX Downloads"
+        case .failed:
+            return "DukeX downloads unavailable"
+        }
     }
 }
 
