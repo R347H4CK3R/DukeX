@@ -70,14 +70,22 @@ struct SettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Display Sync", systemImage: "display")
+                    Text("Default Accurate. Controls display synchronization and frame presentation timing; Accurate uses FIFO with display sync for the most compatible output. Changes apply on the next launch.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Picker(selection: $store.presentPacingMode) {
                     ForEach(PresentPacingMode.allCases) { mode in
                         Text(mode.title).tag(mode)
                     }
                 } label: {
-                    Label("Present Pacing", systemImage: "speedometer")
+                    Text("Display Sync")
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
 
                 Text(store.presentPacingMode.detail)
                     .font(.footnote)
@@ -111,7 +119,27 @@ struct SettingsView: View {
             }
             .dukeXThemedListRowBackground()
 
-            Section("Skins") {
+            Section("Touch Controls") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Haptic Feedback", systemImage: "hand.tap")
+                    Text("Default Medium. Adjusts haptic feedback intensity to preference.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Picker(selection: $store.touchHapticFeedbackLevel) {
+                    ForEach(TouchHapticFeedbackLevel.allCases) { level in
+                        Text(level.title).tag(level)
+                    }
+                } label: {
+                    Text("Haptic Feedback")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .onChange(of: store.touchHapticFeedbackLevel) { level in
+                    TouchHapticFeedbackPerformer.shared.play(level: level)
+                }
+
                 NavigationLink {
                     SkinAssignmentView(store: store)
                 } label: {

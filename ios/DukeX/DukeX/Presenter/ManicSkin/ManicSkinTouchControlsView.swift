@@ -1,3 +1,4 @@
+import CoreHaptics
 import GameController
 import QuartzCore
 import UIKit
@@ -23,6 +24,7 @@ final class ManicSkinTouchControlsView: UIView {
     private let previewMode: Bool
     private let previewOrientation: ManicSkinPreviewOrientation?
     private let controllerBridge: ManicSkinVirtualControllerBridge
+    private let hapticFeedbackPerformer = TouchHapticFeedbackPerformer.shared
     private let backgroundImageView = UIImageView()
     private var itemImageViews: [Int: UIImageView] = [:]
     private var resolvedRepresentation: ManicSkinResolvedRepresentation?
@@ -531,12 +533,14 @@ final class ManicSkinTouchControlsView: UIView {
             for input in inputs {
                 controllerBridge.setButtonInput(input, pressed: true)
             }
+            playTouchHaptic()
             setItemPressed(item.id, pressed: true)
         case .directionalPad:
             activeTouches[key] = activeTouch
             updateDirectionalPad(item: item, key: key, point: point)
         case .thumbstick(let element):
             activeTouches[key] = activeTouch
+            playTouchHaptic()
             updateThumbstick(item: item, element: element, point: point)
         }
         return true
@@ -670,12 +674,17 @@ final class ManicSkinTouchControlsView: UIView {
         let nextInputs = directionalPadInputs(for: item, point: point)
         activeTouches[key] = ActiveTouch(item: item, directionalInputs: nextInputs)
 
-        for input in nextInputs.subtracting(previousInputs) {
+        let newlyPressedInputs = nextInputs.subtracting(previousInputs)
+        for input in newlyPressedInputs {
             controllerBridge.setButtonInput(input, pressed: true)
         }
 
         for input in previousInputs.subtracting(nextInputs) where !isInputStillActive(input) {
             controllerBridge.setButtonInput(input, pressed: false)
+        }
+
+        if !newlyPressedInputs.isEmpty {
+            playTouchHaptic()
         }
 
         setItemPressed(item.id, pressed: !nextInputs.isEmpty)
@@ -712,6 +721,10 @@ final class ManicSkinTouchControlsView: UIView {
             }
         }
         return activeInputs
+    }
+
+    private func playTouchHaptic() {
+        hapticFeedbackPerformer.play()
     }
 
     private func updateThumbstick(item: ManicSkinResolvedItem, element: String, point: CGPoint) {
@@ -870,4 +883,124 @@ struct ManicSkinFallbackTarget {
 private enum TouchTrackingKey: Hashable {
     case ui(ObjectIdentifier)
     case bridged(Int64)
+}
+
+final class TouchHapticFeedbackPerformer {
+    static let shared = TouchHapticFeedbackPerformer()
+
+    private var hapticEngine: CHHapticEngine?
+    private var impactGenerator: UIImpactFeedbackGenerator?
+    private var impactGeneratorLevel: TouchHapticFeedbackLevel = .off
+    private let supportsCoreHaptics = CHHapticEngine.capabilitiesForHardware().supportsHaptics
+
+    private init() {}
+
+    func play() {
+        play(level: .current)
+    }
+
+    func play(level: TouchHapticFeedbackLevel) {
+        guard level != .off else {
+            impactGenerator = nil
+            impactGeneratorLevel = .off
+            return
+        }
+
+        if supportsCoreHaptics {
+            do {
+                try playCoreHaptic(level: level)
+                return
+            } catch {
+                NSLog("DukeX touch haptic Core Haptics fallback: %@", error.localizedDescription)
+            }
+        }
+
+        playUIKitImpact(level: level)
+    }
+
+    private func playCoreHaptic(level: TouchHapticFeedbackLevel) throws {
+        let engine = try coreHapticEngine()
+        let event = CHHapticEvent(
+            eventType: .hapticTransient,
+            parameters: [
+                CHHapticEventParameter(parameterID: .hapticIntensity, value: level.hapticIntensity),
+                CHHapticEventParameter(parameterID: .hapticSharpness, value: level.hapticSharpness)
+            ],
+            relativeTime: 0
+        )
+        let pattern = try CHHapticPattern(events: [event], parameters: [])
+        let player = try engine.makePlayer(with: pattern)
+        try player.start(atTime: CHHapticTimeImmediate)
+    }
+
+    private func coreHapticEngine() throws -> CHHapticEngine {
+        if let hapticEngine {
+            return hapticEngine
+        }
+
+        let engine = try CHHapticEngine()
+        engine.stoppedHandler = { [weak self] _ in
+            self?.hapticEngine = nil
+        }
+        engine.resetHandler = { [weak self] in
+            do {
+                try self?.hapticEngine?.start()
+            } catch {
+                self?.hapticEngine = nil
+            }
+        }
+        try engine.start()
+        hapticEngine = engine
+        return engine
+    }
+
+    private func playUIKitImpact(level: TouchHapticFeedbackLevel) {
+        if impactGenerator == nil || impactGeneratorLevel != level {
+            impactGenerator = UIImpactFeedbackGenerator(style: level.feedbackStyle)
+            impactGeneratorLevel = level
+            impactGenerator?.prepare()
+        }
+
+        impactGenerator?.impactOccurred()
+        impactGenerator?.prepare()
+    }
+}
+
+private extension TouchHapticFeedbackLevel {
+    var feedbackStyle: UIImpactFeedbackGenerator.FeedbackStyle {
+        switch self {
+        case .off, .low:
+            return .light
+        case .medium:
+            return .medium
+        case .high:
+            return .heavy
+        }
+    }
+
+    var hapticIntensity: Float {
+        switch self {
+        case .off:
+            return 0
+        case .low:
+            return 0.35
+        case .medium:
+            return 0.7
+        case .high:
+            return 1
+        }
+    }
+
+    var hapticSharpness: Float {
+        switch self {
+        case .off:
+            return 0
+        case .low:
+            return 0.35
+        case .medium:
+            return 0.65
+        case .high:
+            return 0.95
+        }
+    }
 }

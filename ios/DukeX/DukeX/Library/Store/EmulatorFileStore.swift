@@ -110,6 +110,11 @@ final class EmulatorFileStore: ObservableObject {
             UserDefaults.standard.set(gameLibraryListViewEnabled, forKey: Self.gameLibraryListViewEnabledKey)
         }
     }
+    @Published var touchHapticFeedbackLevel: TouchHapticFeedbackLevel {
+        didSet {
+            UserDefaults.standard.set(touchHapticFeedbackLevel.rawValue, forKey: TouchHapticFeedbackLevel.defaultsKey)
+        }
+    }
     @Published private(set) var alwaysRememberedThemeUnlocked: Bool {
         didSet {
             UserDefaults.standard.set(alwaysRememberedThemeUnlocked, forKey: Self.alwaysRememberedThemeUnlockedKey)
@@ -342,6 +347,7 @@ final class EmulatorFileStore: ObservableObject {
         portraitGameLibraryColumnCount = GameLibraryColumnCount.currentPortrait
         landscapeGameLibraryColumnCount = GameLibraryColumnCount.currentLandscape
         gameLibraryListViewEnabled = UserDefaults.standard.object(forKey: Self.gameLibraryListViewEnabledKey) as? Bool ?? false
+        touchHapticFeedbackLevel = TouchHapticFeedbackLevel.current
         alwaysRememberedThemeUnlocked =
             UserDefaults.standard.object(forKey: Self.alwaysRememberedThemeUnlockedKey) as? Bool ?? false
         livingOriginalThemeUnlocked =

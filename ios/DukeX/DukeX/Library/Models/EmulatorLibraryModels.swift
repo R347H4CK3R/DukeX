@@ -200,6 +200,35 @@ enum GameLibraryColumnCount: Int, CaseIterable, Identifiable {
     }
 }
 
+enum TouchHapticFeedbackLevel: String, CaseIterable, Identifiable {
+    case off
+    case low
+    case medium
+    case high
+
+    static let defaultsKey = "DukeXTouchHapticFeedbackLevel"
+
+    var id: String { rawValue }
+
+    static var current: TouchHapticFeedbackLevel {
+        let rawValue = UserDefaults.standard.string(forKey: defaultsKey) ?? TouchHapticFeedbackLevel.medium.rawValue
+        return TouchHapticFeedbackLevel(rawValue: rawValue) ?? .medium
+    }
+
+    var title: String {
+        switch self {
+        case .off:
+            return "Off"
+        case .low:
+            return "Low"
+        case .medium:
+            return "Medium"
+        case .high:
+            return "High"
+        }
+    }
+}
+
 struct UserMessage: Identifiable {
     let id = UUID()
     let title: String
