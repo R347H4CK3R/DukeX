@@ -24,5 +24,4 @@ Notes for maintainers:
 - Keep the app `downloadURL`, `version`, `buildVersion`, `size`, and release
   notes in sync with the latest GitHub Release.
 - Landscape marketing images are used for the source header and news cards.
-  App-detail screenshots are intentionally omitted until portrait-safe assets
-  are available for SideStore's screenshot carousel.
+  Portrait marketing images are used for SideStore's screenshot carousel.

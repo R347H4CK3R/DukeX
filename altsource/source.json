@@ -4,7 +4,7 @@
   "subtitle": "Xbox Emulation on iOS",
   "description": "DukeX is an experimental iOS-focused frontend for xemu. It embeds the xemu core in a native Swift shell, provides an iPhone-friendly library and settings experience, and presents the Vulkan renderer through MoltenVK and a native CAMetalLayer. DukeX does not include Xbox system files, game images, or signing certificates. Users and testers are required to provide their own legally obtained files. DukeX is intended solely for legitimate emulation and preservation purposes, and is not designed for use with pirated materials.",
   "iconURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/dukex-icon.png",
-  "headerURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/landscape-overview.png",
+  "headerURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/landscape-online.png",
   "website": "https://github.com/MaftyManicEMU/DukeX",
   "tintColor": "#8FCA39",
   "featuredApps": [
@@ -16,11 +16,21 @@
       "bundleIdentifier": "com.mafty.dukex",
       "developerName": "Manic EMU Development Team",
       "subtitle": "Original Xbox emulation for iOS",
-      "localizedDescription": "DukeX is an experimental iOS-focused frontend for xemu. It embeds the xemu core in a native Swift shell, provides an iPhone-friendly library and settings experience, and presents the Vulkan renderer through MoltenVK and a native CAMetalLayer.\n\nCurrent features include a native SwiftUI library, profile, and settings interface; user-accessible BIOS, ROMs, Covers, GameConfigs, and ShaderCaches folders; game launch and dashboard launch; game-library sorting by favorites, title, Live support, and recently played; portrait and landscape column controls; per-game cover art; custom config import; shader-cache clearing; Insignia-oriented NAT defaults; Insignia live indicators for supported titles; built-in FPS/system statistics; app-owned launch logs; and translation block cache size controls for performance testing.\n\nDukeX installs on iOS 16.0 or later. iOS 16 through 18 use W^X reprotection after JIT has been enabled for the process. iOS 26 or later requires StikDebug with Universal.js assigned to the DukeX bundle identifier.\n\nDukeX does not include Xbox system files, game images, or signing certificates. Users and testers are required to provide their own legally obtained files. DukeX is intended solely for legitimate emulation and preservation purposes, and is not designed for use with pirated materials.",
+      "localizedDescription": "DukeX is an experimental iOS-focused frontend for xemu. It embeds the xemu core in a native Swift shell, provides an iPhone-friendly library and settings experience, and presents the Vulkan renderer through MoltenVK and a native CAMetalLayer.\n\nDukeX v1.0.1 brings the Xbox experience itself back into focus with XB.Live profile integration, cloud sync groundwork, improved rendering stability, AirPlay support, customizable Touch Controls, themes, automatic cover art retrieval, and native URL scheme support for launch links and external library access.\n\nDukeX installs on iOS 16.0 or later. iOS 16 through 18 use W^X reprotection after JIT has been enabled for the process. iOS 26 or later requires StikDebug with Universal.js assigned to the DukeX bundle identifier. Supported hardware starts at Apple A14 Bionic or Apple M1 and newer.\n\nDukeX does not include Xbox system files, game images, or signing certificates. Users and testers are required to provide their own legally obtained files. DukeX is intended solely for legitimate emulation and preservation purposes, and is not designed for use with pirated materials.",
       "iconURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/dukex-icon.png",
       "tintColor": "#8FCA39",
       "category": "games",
       "versions": [
+        {
+          "version": "1.0.1",
+          "buildVersion": "101",
+          "marketingVersion": "DukeX v1.0.1",
+          "date": "2026-06-07",
+          "localizedDescription": "- Partnership with XB.Live introduces profile integration for achievements, friends, messages, community events, and cloud sync support.\n- Core rendering and performance handling have been improved for better stability across more titles.\n- Touch Controls now support .manicskin layouts, .deltaskin and .gammaskin imports, haptic feedback, and the official DukeX Default skin.\n- AirPlay support lets compatible devices send gameplay to larger displays.\n- Themes, automatic cover art retrieval, and DukeX URL scheme support expand personalization and launch-link workflows.\n- Minimum iOS support has been experimentally lowered to iOS 16 on A14/M1 or newer hardware.\n- Known issue: after device rotation, some touch controls may stop functioning as intended. For this release, launch games in the orientation you plan to play in.",
+          "downloadURL": "https://github.com/MaftyManicEMU/DukeX/releases/download/v1.0.1/DukeX.v1.0.1.ipa",
+          "size": 31683375,
+          "minOSVersion": "16.0"
+        },
         {
           "version": "1.0.0",
           "buildVersion": "100",
@@ -34,27 +44,41 @@
       ],
       "appPermissions": {
         "entitlements": [],
-        "privacy": {}
+        "privacy": {
+          "NSCameraUsageDescription": "DukeX can use the front camera to test Xbox Video Chat camera peripheral emulation.",
+          "NSMicrophoneUsageDescription": "DukeX can use the microphone to test Xbox Live Communicator support.",
+          "NSMotionUsageDescription": "DukeX can use device tilt to subtly move animated theme backgrounds."
+        }
       },
-      "headerURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/landscape-overview.png",
+      "headerURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/landscape-online.png",
       "screenshots": [
         {
-          "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/carousel-overview.png",
+          "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/carousel-v101-01.png",
+          "width": 2154,
+          "height": 3830
+        },
+        {
+          "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/carousel-v101-02.png",
+          "width": 2154,
+          "height": 3830
+        },
+        {
+          "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/carousel-v101-03.png",
+          "width": 2154,
+          "height": 3830
+        },
+        {
+          "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/carousel-v101-04.png",
           "width": 2158,
           "height": 3836
         },
         {
-          "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/carousel-screenshots.png",
-          "width": 2158,
-          "height": 3836
+          "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/carousel-v101-05.png",
+          "width": 2154,
+          "height": 3830
         },
         {
-          "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/carousel-online.png",
-          "width": 2158,
-          "height": 3836
-        },
-        {
-          "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/carousel-team.png",
+          "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/carousel-v101-06.png",
           "width": 2158,
           "height": 3836
         }
@@ -62,6 +86,16 @@
     }
   ],
   "news": [
+    {
+      "title": "DukeX v1.0.1",
+      "identifier": "dukex-1.0.1",
+      "caption": "XB.Live profile integration, cloud sync groundwork, Touch Controls, AirPlay, cover art, themes, URL scheme support, and rendering improvements arrive in v1.0.1.",
+      "date": "2026-06-07",
+      "tintColor": "#8FCA39",
+      "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/landscape-online.png",
+      "notify": false,
+      "appID": "com.mafty.dukex"
+    },
     {
       "title": "DukeX v1.0.0",
       "identifier": "dukex-1.0.0",
