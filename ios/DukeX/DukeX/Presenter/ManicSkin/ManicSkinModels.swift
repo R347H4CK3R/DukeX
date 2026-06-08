@@ -5,17 +5,18 @@ import UIKit
 
 struct ManicSkin {
     let name: String
+    let creatorName: String?
     let baseURL: URL
     let definition: ManicSkinDefinition
     private let resources: ManicSkinResourceProvider
 
-    static func bundledPS1() -> ManicSkin? {
+    static func bundledDefault() -> ManicSkin? {
         guard let baseURL = Bundle.main.url(
-            forResource: "PS1",
+            forResource: "DukeX Default",
             withExtension: "manicskin",
             subdirectory: "Skins"
         ) else {
-            NSLog("Manic skin resource not found: Skins/PS1.manicskin")
+            NSLog("Manic skin resource not found: Skins/DukeX Default.manicskin")
             return nil
         }
 
@@ -31,6 +32,7 @@ struct ManicSkin {
             }
             let definition = try JSONDecoder().decode(ManicSkinDefinition.self, from: data)
             self.name = definition.name
+            self.creatorName = definition.creatorName
             self.baseURL = baseURL
             self.definition = definition
             self.resources = resources
@@ -324,6 +326,7 @@ enum ManicSkinPreviewOrientation: String, CaseIterable, Identifiable {
 struct ManicSkinLibraryItem: Identifiable, Equatable {
     let url: URL
     let definitionName: String
+    let creatorName: String?
 
     var id: String { url.standardizedFileURL.path }
     var fileName: String { url.lastPathComponent }
@@ -336,6 +339,7 @@ struct ManicSkinLibraryItem: Identifiable, Equatable {
 
         self.url = url
         definitionName = skin.name
+        creatorName = skin.creatorName
     }
 
     func makeSkin() -> ManicSkin? {
@@ -348,6 +352,16 @@ struct ManicSkinDefinition: Decodable {
     let identifier: String
     let name: String
     let representations: [String: [String: [String: ManicSkinRepresentation]]]
+
+    var creatorName: String? {
+        let parts = identifier.split(separator: ".").map(String.init)
+        guard parts.count > 1 else {
+            return nil
+        }
+
+        let creator = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        return creator.isEmpty ? nil : creator
+    }
 }
 
 struct ManicSkinRepresentation: Decodable {

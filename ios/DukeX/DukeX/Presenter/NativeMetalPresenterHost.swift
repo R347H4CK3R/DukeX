@@ -153,7 +153,7 @@ final class NativeMetalPresenterHost {
 
         let portraitSkin = session.manicSkinPortraitURL.flatMap { ManicSkin(baseURL: $0) }
         let landscapeSkin = session.manicSkinLandscapeURL.flatMap { ManicSkin(baseURL: $0) }
-        let selectedSkin = portraitSkin ?? landscapeSkin ?? ManicSkin.bundledPS1()
+        let selectedSkin = portraitSkin ?? landscapeSkin ?? ManicSkin.bundledDefault()
         if let manicSkinControlsView = ManicSkinTouchControlsView(
             skin: selectedSkin,
             portraitSkin: portraitSkin,

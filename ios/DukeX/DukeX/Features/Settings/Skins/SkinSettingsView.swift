@@ -216,13 +216,23 @@ private struct SkinPreviewTile: View {
             }
 
             Button(action: assign) {
-                Text(item.displayName)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .lineSpacing(0)
-                    .frame(maxWidth: .infinity, minHeight: 28, alignment: .top)
+                VStack(spacing: 2) {
+                    Text(item.displayName)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .lineSpacing(0)
+
+                    if let creatorName = item.creatorName {
+                        Text(creatorName)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 36, alignment: .top)
             }
             .buttonStyle(.plain)
         }

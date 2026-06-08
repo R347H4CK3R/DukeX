@@ -197,7 +197,8 @@ final class EmulatorFileStore: ObservableObject {
     static let natGuestPortKey = "NATGuestPort"
     static let natPortProtocolKey = "NATPortProtocol"
     static let cloudSaveSyncEnabledKey = "DukeXCloudSaveSyncEnabled"
-    private static let bundledSkinFileNames: Set<String> = ["PS1.manicskin"]
+    private static let bundledSkinFileNames: Set<String> = ["DukeX Default.manicskin"]
+    private static let retiredBundledSkinFileNames: Set<String> = ["PS1.manicskin"]
 
     let documentsURL: URL
     let biosDirectoryURL: URL
@@ -743,28 +744,28 @@ final class EmulatorFileStore: ObservableObject {
     }
 
     private func installBundledSkinsIfNeeded() throws {
-        guard let bundledPS1URL = Bundle.main.url(
-            forResource: "PS1",
+        guard let bundledSkinURL = Bundle.main.url(
+            forResource: "DukeX Default",
             withExtension: "manicskin",
             subdirectory: "Skins"
         ) else {
             return
         }
 
-        guard !isBundledSkinRemoved(named: bundledPS1URL.lastPathComponent) else {
+        guard !isBundledSkinRemoved(named: bundledSkinURL.lastPathComponent) else {
             return
         }
 
-        let values = try bundledPS1URL.resourceValues(forKeys: [.isDirectoryKey])
-        let destination = skinsDirectoryURL.appendingPathComponent(bundledPS1URL.lastPathComponent)
+        let values = try bundledSkinURL.resourceValues(forKeys: [.isDirectoryKey])
+        let destination = skinsDirectoryURL.appendingPathComponent(bundledSkinURL.lastPathComponent)
         guard !FileManager.default.fileExists(atPath: destination.path) else {
             return
         }
 
         if values.isDirectory == true {
-            try DukeXZipArchive.createArchive(atPath: destination.path, fromDirectory: bundledPS1URL.path)
+            try DukeXZipArchive.createArchive(atPath: destination.path, fromDirectory: bundledSkinURL.path)
         } else {
-            try FileManager.default.copyItem(at: bundledPS1URL, to: destination)
+            try FileManager.default.copyItem(at: bundledSkinURL, to: destination)
         }
     }
 
@@ -776,6 +777,9 @@ final class EmulatorFileStore: ObservableObject {
             options: [.skipsHiddenFiles]
         ).compactMap { url in
             guard SkinPackageFormat.isSupportedPackage(url) else {
+                return nil
+            }
+            guard !Self.retiredBundledSkinFileNames.contains(url.lastPathComponent) else {
                 return nil
             }
 

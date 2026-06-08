@@ -34,7 +34,7 @@ final class ManicSkinTouchControlsView: UIView {
     private var touchControlsActive = false
 
     init?(
-        skin: ManicSkin? = ManicSkin.bundledPS1(),
+        skin: ManicSkin? = ManicSkin.bundledDefault(),
         portraitSkin: ManicSkin? = nil,
         landscapeSkin: ManicSkin? = nil,
         previewMode: Bool = false,
@@ -54,7 +54,7 @@ final class ManicSkinTouchControlsView: UIView {
     }
 
     required init?(coder: NSCoder) {
-        guard let skin = ManicSkin.bundledPS1() else {
+        guard let skin = ManicSkin.bundledDefault() else {
             return nil
         }
         self.skin = skin
@@ -408,7 +408,13 @@ final class ManicSkinTouchControlsView: UIView {
         let interfaceOrientation = previewOrientation?.interfaceOrientation ?? window?.windowScene?.interfaceOrientation
         let orientationValue = interfaceOrientation?.rawValue ?? 0
         let activeSkin = skin(for: interfaceOrientation)
-        let signature = "\(activeSkin.baseURL.path)-\(Int(bounds.width.rounded()))x\(Int(bounds.height.rounded()))-\(safeAreaInsets)-\(traitCollection.userInterfaceIdiom.rawValue)-\(orientationValue)"
+        let styleReferenceBounds = previewMode ? (window?.screen.bounds ?? UIScreen.main.bounds) : nil
+        let styleReferenceSafeAreaInsets = previewMode ? (window?.safeAreaInsets ?? .zero) : nil
+        let styleReferenceSignature = [
+            styleReferenceBounds.map { "\(Int($0.width.rounded()))x\(Int($0.height.rounded()))" } ?? "runtime",
+            styleReferenceSafeAreaInsets.map(NativeMetalDiagnostics.insets) ?? "runtime"
+        ].joined(separator: "-")
+        let signature = "\(activeSkin.baseURL.path)-\(Int(bounds.width.rounded()))x\(Int(bounds.height.rounded()))-\(safeAreaInsets)-\(traitCollection.userInterfaceIdiom.rawValue)-\(orientationValue)-\(styleReferenceSignature)"
         guard signature != lastLayoutSignature else {
             return
         }
@@ -423,8 +429,8 @@ final class ManicSkinTouchControlsView: UIView {
             safeAreaInsets: safeAreaInsets,
             traitCollection: traitCollection,
             interfaceOrientation: interfaceOrientation,
-            styleReferenceBounds: previewMode ? window?.screen.bounds : nil,
-            styleReferenceSafeAreaInsets: previewMode ? window?.safeAreaInsets : nil
+            styleReferenceBounds: styleReferenceBounds,
+            styleReferenceSafeAreaInsets: styleReferenceSafeAreaInsets
         ) else {
             self.resolvedRepresentation = nil
             backgroundImageView.image = nil
