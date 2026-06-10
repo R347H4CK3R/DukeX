@@ -41,7 +41,7 @@
 #define R51X_SYS_SNAP 0x52
 #define R51X_SYS_INIT 0x53
 #define R51X_SYS_CUST_ID 0x5f
-#define R511_I2C_CTL 0x40
+#define OV519_R40_I2C_TIMEOUT 0x40
 #define R51X_I2C_W_SID 0x41
 #define R51X_I2C_SADDR_3 0x42
 #define R51X_I2C_SADDR_2 0x43
@@ -68,50 +68,40 @@ typedef size_t (*XboxCameraFrameProvider)(uint8_t *dst, size_t dst_size,
 
 static XboxCameraFrameProvider camera_frame_provider;
 
-void xemu_ios_set_xbox_camera_frame_provider(XboxCameraFrameProvider provider)
-{
-    camera_frame_provider = provider;
-}
+typedef enum XboxCameraFrameLoadResult {
+    XBOX_CAMERA_FRAME_LOAD_READY,
+    XBOX_CAMERA_FRAME_LOAD_IDLE,
+    XBOX_CAMERA_FRAME_LOAD_UNAVAILABLE,
+} XboxCameraFrameLoadResult;
 
 typedef struct USBXboxCameraState {
     USBDevice dev;
     uint8_t regs[256];
     uint8_t *frame_data;
     size_t frame_size;
+    size_t frame_reported_size;
     size_t frame_offset;
     uint32_t frame_width;
     uint32_t frame_height;
     uint32_t frame_counter;
     uint32_t control_log_count;
     uint32_t iso_log_count;
+    uint32_t empty_alt_log_count;
+    uint32_t frame_provider_log_count;
+    uint32_t frame_load_log_count;
+    uint32_t duplicate_frame_log_count;
     uint64_t frame_sequence;
+    uint64_t last_delivered_sequence;
     uint8_t current_alt;
     uint8_t sensor_regs[256];
     uint8_t i2c_read_reg;
     uint8_t i2c_data_latch;
     uint8_t i2c_ctl_status;
     uint8_t sensor_bank;
-    uint8_t sensor_probe_attempt;
-    bool sensor_bank_identity_mode;
     bool eof_pending;
     bool streaming_requested;
+    bool have_delivered_sequence;
 } USBXboxCameraState;
-
-typedef struct XboxCameraSensorCandidate {
-    const char *name;
-    uint8_t product_high;
-    uint8_t product_low;
-    uint8_t com_i;
-} XboxCameraSensorCandidate;
-
-static const XboxCameraSensorCandidate xbox_camera_sensor_candidates[] = {
-    { "OV7648", 0x76, 0x48, 0x00 },
-    { "OV7660", 0x76, 0x60, 0x00 },
-    { "OV7670", 0x76, 0x73, 0x03 },
-    { "OV7645", 0x76, 0x40, 0x00 },
-    { "OV7620", 0x75, 0xa2, 0x02 },
-    { "OV manufacturer", 0x7f, 0xa2, 0x00 },
-};
 
 enum {
     STR_MANUFACTURER = 1,
@@ -127,22 +117,99 @@ static const USBDescStrings desc_strings = {
 
 static bool xbox_camera_debug_enabled(void)
 {
-    static int cached = -1;
+    const char *value = getenv("XEMU_IOS_CAMERA_DEBUG");
 
-    if (cached < 0) {
-        const char *value = getenv("XEMU_IOS_CAMERA_DEBUG");
-        cached = value && value[0] && value[0] != '0';
-    }
-
-    return cached != 0;
+    return value && value[0] && value[0] != '0';
 }
 
-#define CAMERA_DPRINTF(fmt, ...)                                      \
-    do {                                                              \
-        if (xbox_camera_debug_enabled()) {                            \
-            fprintf(stderr, "[XboxCamera] " fmt "\n", ##__VA_ARGS__); \
-        }                                                             \
+static FILE *xbox_camera_log_file;
+
+static FILE *xbox_camera_get_log_file(void)
+{
+    if (!xbox_camera_log_file) {
+        const char *path = getenv("XEMU_IOS_CAMERA_LOG_PATH");
+
+        if (path && path[0]) {
+            xbox_camera_log_file = fopen(path, "a");
+        }
+    }
+
+    return xbox_camera_log_file;
+}
+
+static void xbox_camera_debug_log(const char *fmt, ...)
+{
+    va_list ap;
+    va_list file_ap;
+    FILE *file;
+
+    if (!xbox_camera_debug_enabled()) {
+        return;
+    }
+
+    va_start(ap, fmt);
+    va_copy(file_ap, ap);
+    fprintf(stderr, "[XboxCamera] ");
+    vfprintf(stderr, fmt, ap);
+    fprintf(stderr, "\n");
+    fflush(stderr);
+
+    file = xbox_camera_get_log_file();
+    if (file) {
+        fprintf(file, "[CoreCamera] ");
+        vfprintf(file, fmt, file_ap);
+        fprintf(file, "\n");
+        fflush(file);
+    }
+
+    va_end(file_ap);
+    va_end(ap);
+}
+
+#define CAMERA_DPRINTF(fmt, ...)                  \
+    do {                                          \
+        xbox_camera_debug_log(fmt, ##__VA_ARGS__); \
     } while (0)
+
+static void xbox_camera_close_log_file(void)
+{
+    if (xbox_camera_log_file) {
+        fclose(xbox_camera_log_file);
+        xbox_camera_log_file = NULL;
+    }
+}
+
+void xemu_ios_set_xbox_camera_frame_provider(XboxCameraFrameProvider provider)
+{
+    if (provider) {
+        xbox_camera_close_log_file();
+    }
+
+    camera_frame_provider = provider;
+    CAMERA_DPRINTF("frame provider set available=%d", provider != NULL);
+
+    if (!provider) {
+        xbox_camera_close_log_file();
+    }
+}
+
+static const char *xbox_camera_usb_request_name(int request)
+{
+    switch (request & 0xff) {
+    case USB_REQ_GET_DESCRIPTOR:
+        return "GET_DESCRIPTOR";
+    case USB_REQ_SET_CONFIGURATION:
+        return "SET_CONFIGURATION";
+    case USB_REQ_GET_CONFIGURATION:
+        return "GET_CONFIGURATION";
+    case USB_REQ_GET_INTERFACE:
+        return "GET_INTERFACE";
+    case USB_REQ_SET_INTERFACE:
+        return "SET_INTERFACE";
+    default:
+        return "USB_REQUEST";
+    }
+}
 
 #define CAMERA_ISOC_ENDPOINT(packet_size)                                      \
     (USBDescEndpoint[])                                                        \
@@ -204,6 +271,11 @@ static const USBDescIface desc_iface[] = {
 };
 
 static const USBDescDevice desc_device = {
+    /*
+     * The Xbox Video Chat title accepts the OV519/OV530 video-only descriptor
+     * personality: one USB device, one vendor-specific video interface, and
+     * alternate settings 0-4 for isochronous bandwidth selection.
+     */
     .bcdUSB = 0x0110,
     .bDeviceClass = 0x00,
     .bDeviceSubClass = 0x00,
@@ -239,10 +311,13 @@ static const USBDesc desc_xbox_camera = {
 static void xbox_camera_reset_stream(USBXboxCameraState *s)
 {
     s->frame_size = 0;
+    s->frame_reported_size = 0;
     s->frame_offset = 0;
     s->frame_width = 0;
     s->frame_height = 0;
     s->eof_pending = false;
+    s->last_delivered_sequence = 0;
+    s->have_delivered_sequence = false;
 }
 
 static void xbox_camera_seed_sensor(USBXboxCameraState *s)
@@ -250,10 +325,9 @@ static void xbox_camera_seed_sensor(USBXboxCameraState *s)
     memset(s->sensor_regs, 0, sizeof(s->sensor_regs));
 
     /*
-     * Keep the baseline as a normal OV7648-like sensor. The Xbox Video Chat
-     * title loops on a page-select probe when the identity is not accepted, so
-     * the read path below can cycle nearby OmniVision identities during that
-     * loop without requiring one build per candidate.
+     * Model the first-party camera as an OV7648-class sensor behind an
+     * OV519/OV530-compatible bridge. The Video Chat path checks the OmniVision
+     * manufacturer ID and the 0x76/0x48 PID pair during bring-up.
      */
     s->sensor_regs[OV_SENSOR_PIDH] = 0x76;
     s->sensor_regs[OV_SENSOR_PIDL] = 0x48;
@@ -266,40 +340,18 @@ static void xbox_camera_seed_sensor(USBXboxCameraState *s)
     s->i2c_data_latch = 0x00;
     s->i2c_ctl_status = XBOX_CAMERA_I2C_COMPLETE;
     s->sensor_bank = 0x00;
-    s->sensor_bank_identity_mode = false;
-}
-
-static const XboxCameraSensorCandidate *
-xbox_camera_current_sensor_candidate(USBXboxCameraState *s)
-{
-    size_t candidate = s->sensor_probe_attempt;
-
-    if (candidate >= ARRAY_SIZE(xbox_camera_sensor_candidates)) {
-        candidate = ARRAY_SIZE(xbox_camera_sensor_candidates) - 1;
-    }
-
-    return &xbox_camera_sensor_candidates[candidate];
 }
 
 static uint8_t xbox_camera_read_sensor_register(USBXboxCameraState *s,
                                                 uint8_t reg)
 {
-    const XboxCameraSensorCandidate *candidate =
-        xbox_camera_current_sensor_candidate(s);
-
     switch (reg) {
     case OV_SENSOR_PIDH:
-        if (s->sensor_bank_identity_mode) {
-            return 0x7f;
-        }
-        return candidate->product_high;
+        return 0x76;
     case OV_SENSOR_PIDL:
-        if (s->sensor_bank_identity_mode) {
-            return 0xa2;
-        }
-        return candidate->product_low;
+        return 0x48;
     case OV_SENSOR_COM_I:
-        return candidate->com_i;
+        return 0x00;
     case OV_SENSOR_MANUFACTURER_HIGH:
         return 0x7f;
     case OV_SENSOR_MANUFACTURER_LOW:
@@ -323,11 +375,7 @@ static void xbox_camera_handle_i2c_ctl(USBXboxCameraState *s, uint8_t value)
         } else if (reg == OV_SENSOR_BANK_SELECT) {
             s->sensor_bank = data;
             s->sensor_regs[reg] = data;
-            s->sensor_bank_identity_mode = data == 0x00;
-            CAMERA_DPRINTF("sensor bank select value=0x%02x id_mode=%d probe=%u candidate=%s",
-                           data, s->sensor_bank_identity_mode,
-                           s->sensor_probe_attempt,
-                           xbox_camera_current_sensor_candidate(s)->name);
+            CAMERA_DPRINTF("sensor bank select value=0x%02x", data);
         } else {
             s->sensor_regs[reg] = data;
         }
@@ -345,12 +393,12 @@ static void xbox_camera_handle_i2c_ctl(USBXboxCameraState *s, uint8_t value)
             xbox_camera_read_sensor_register(s, s->i2c_read_reg);
         if (s->i2c_read_reg == OV_SENSOR_PIDH ||
             s->i2c_read_reg == OV_SENSOR_PIDL ||
-            s->i2c_read_reg == OV_SENSOR_COM_I) {
-            CAMERA_DPRINTF("sensor read reg=0x%02x value=0x%02x probe=%u candidate=%s bank=0x%02x id_mode=%d",
+            s->i2c_read_reg == OV_SENSOR_COM_I ||
+            s->i2c_read_reg == OV_SENSOR_MANUFACTURER_HIGH ||
+            s->i2c_read_reg == OV_SENSOR_MANUFACTURER_LOW) {
+            CAMERA_DPRINTF("sensor read reg=0x%02x value=0x%02x bank=0x%02x",
                            s->i2c_read_reg, s->i2c_data_latch,
-                           s->sensor_probe_attempt,
-                           xbox_camera_current_sensor_candidate(s)->name,
-                           s->sensor_bank, s->sensor_bank_identity_mode);
+                           s->sensor_bank);
         } else {
             CAMERA_DPRINTF("sensor read reg=0x%02x value=0x%02x",
                            s->i2c_read_reg, s->i2c_data_latch);
@@ -362,11 +410,10 @@ static void xbox_camera_handle_i2c_ctl(USBXboxCameraState *s, uint8_t value)
 
     /*
      * The host bridge completes synchronously in this emulated device. Some
-     * guests poll the OV518 I2C control register after issuing commands, so
+     * guests poll the OV519 I2C control register after issuing commands, so
      * expose an idle/completed status instead of echoing the last command byte.
      */
     s->i2c_ctl_status = XBOX_CAMERA_I2C_COMPLETE;
-    s->regs[R511_I2C_CTL] = XBOX_CAMERA_I2C_COMPLETE;
     s->regs[R518_I2C_CTL] = XBOX_CAMERA_I2C_COMPLETE;
 }
 
@@ -378,7 +425,6 @@ static uint8_t xbox_camera_read_register(USBXboxCameraState *s, uint8_t reg)
     case R51X_I2C_STATUS_1:
     case R51X_I2C_STATUS_2:
         return value ? value : 0x01;
-    case R511_I2C_CTL:
     case R518_I2C_CTL:
         return s->i2c_ctl_status ? s->i2c_ctl_status
                                  : XBOX_CAMERA_I2C_COMPLETE;
@@ -398,6 +444,8 @@ static uint8_t xbox_camera_read_register(USBXboxCameraState *s, uint8_t reg)
         return value ? value : 0x38;
     case 0x22:
         return value ? value : 0x1d;
+    case OV519_R40_I2C_TIMEOUT:
+        return value ? value : 0xff;
     case OV519_R54_EN_CLK1:
         return value ? value : 0x0f;
     case 0x46:
@@ -446,9 +494,6 @@ static void xbox_camera_note_register_write(USBXboxCameraState *s, uint8_t reg,
         s->streaming_requested = value != 0;
         xbox_camera_reset_stream(s);
         break;
-    case R511_I2C_CTL:
-        xbox_camera_handle_i2c_ctl(s, value);
-        break;
     case R518_I2C_CTL:
         xbox_camera_handle_i2c_ctl(s, value);
         break;
@@ -464,11 +509,13 @@ static void xbox_camera_handle_reset(USBDevice *dev)
     s->frame_counter = 0;
     s->control_log_count = 0;
     s->iso_log_count = 0;
+    s->empty_alt_log_count = 0;
+    s->frame_provider_log_count = 0;
+    s->frame_load_log_count = 0;
+    s->duplicate_frame_log_count = 0;
     s->current_alt = 0;
     s->streaming_requested = false;
     s->sensor_bank = 0;
-    s->sensor_probe_attempt = 0;
-    s->sensor_bank_identity_mode = false;
     memset(s->regs, 0, sizeof(s->regs));
     xbox_camera_seed_sensor(s);
     xbox_camera_reset_stream(s);
@@ -505,6 +552,8 @@ static bool xbox_camera_is_vendor_out(int request)
            (request_type & USB_DIR_IN) == 0;
 }
 
+static size_t xbox_camera_packet_size_for_alt(uint8_t alt, size_t requested);
+
 static void xbox_camera_handle_control(USBDevice *dev, USBPacket *p,
                                        int request, int value, int index,
                                        int length, uint8_t *data)
@@ -516,10 +565,15 @@ static void xbox_camera_handle_control(USBDevice *dev, USBPacket *p,
         if ((request & 0xff) == USB_REQ_SET_INTERFACE) {
             s->current_alt = value & 0xff;
             xbox_camera_reset_stream(s);
-            CAMERA_DPRINTF("set interface alt=%u", s->current_alt);
+            CAMERA_DPRINTF("set interface alt=%u packet_max=%zu",
+                           s->current_alt,
+                           xbox_camera_packet_size_for_alt(s->current_alt,
+                                                           XBOX_CAMERA_MAX_PACKET));
         }
-        CAMERA_DPRINTF("descriptor control req=0x%x value=0x%x index=0x%x len=%d",
-                       request, value, index, length);
+        CAMERA_DPRINTF("control %s req=0x%x type=0x%02x value=0x%x index=0x%x len=%d actual=%d",
+                       xbox_camera_usb_request_name(request), request,
+                       (request >> 8) & 0xff, value, index, length,
+                       p->actual_length);
         return;
     }
 
@@ -529,8 +583,8 @@ static void xbox_camera_handle_control(USBDevice *dev, USBPacket *p,
         return;
     }
 
-    CAMERA_DPRINTF("vendor control req=0x%x value=0x%x index=0x%x len=%d",
-                   request, value, index, length);
+    CAMERA_DPRINTF("vendor control req=0x%x type=0x%02x value=0x%x index=0x%x len=%d",
+                   request, (request >> 8) & 0xff, value, index, length);
 
     if (xbox_camera_is_vendor_out(request)) {
         if (length > 0 && data) {
@@ -566,18 +620,19 @@ static void xbox_camera_handle_control(USBDevice *dev, USBPacket *p,
     if (xbox_camera_is_vendor_in(request) && length > 0) {
         /*
          * The Xbox driver issues 8-byte control reads while probing single
-         * OV519 bridge registers. Treat the request as a one-register read and
-         * zero-fill the transfer tail. Returning adjacent emulated registers in
-         * the extra bytes makes the sensor probe see status bytes where a real
-         * single-register transaction would be quiet.
+         * OV519 bridge registers. Treat the request as a one-register read.
+         * For the I2C data latch, mirror the byte across the short transfer so
+         * guests that inspect a later byte still see the completed sensor read.
          */
-        data[0] = xbox_camera_read_register(s, index & 0xff);
+        uint8_t reg = index & 0xff;
+        data[0] = xbox_camera_read_register(s, reg);
         if (length > 1) {
-            memset(data + 1, 0, length - 1);
+            memset(data + 1, reg == R51X_I2C_DATA ? data[0] : 0, length - 1);
         }
         if (s->control_log_count < XBOX_CAMERA_CONTROL_LOG_LIMIT) {
-            CAMERA_DPRINTF("vendor in reg=0x%02x value=0x%02x len=%d tail_zero=%d",
-                           index & 0xff, data[0], length, length > 1);
+            CAMERA_DPRINTF("vendor in reg=0x%02x value=0x%02x len=%d tail_fill=0x%02x",
+                           reg, data[0], length,
+                           length > 1 ? data[1] : 0);
             s->control_log_count++;
         }
         p->actual_length = length;
@@ -585,15 +640,19 @@ static void xbox_camera_handle_control(USBDevice *dev, USBPacket *p,
     }
 
     if ((request & (USB_DIR_IN << 8)) && length > 0) {
+        CAMERA_DPRINTF("fallback control in req=0x%x value=0x%x index=0x%x len=%d",
+                       request, value, index, length);
         memset(data, 0, length);
         p->actual_length = length;
         return;
     }
 
+    CAMERA_DPRINTF("fallback control zero-length req=0x%x value=0x%x index=0x%x",
+                   request, value, index);
     p->actual_length = 0;
 }
 
-static bool xbox_camera_load_frame(USBXboxCameraState *s)
+static XboxCameraFrameLoadResult xbox_camera_load_frame(USBXboxCameraState *s)
 {
     uint64_t sequence = 0;
     uint32_t width = 0;
@@ -601,29 +660,70 @@ static bool xbox_camera_load_frame(USBXboxCameraState *s)
     size_t frame_size;
 
     if (!camera_frame_provider || !s->frame_data) {
-        CAMERA_DPRINTF("host frame provider unavailable");
-        return false;
+        if (s->frame_provider_log_count < 16 ||
+            (s->frame_provider_log_count % 300) == 0) {
+            CAMERA_DPRINTF("host frame provider unavailable provider=%d frame_buffer=%d",
+                           camera_frame_provider != NULL,
+                           s->frame_data != NULL);
+        }
+        s->frame_provider_log_count++;
+        return XBOX_CAMERA_FRAME_LOAD_UNAVAILABLE;
     }
 
     frame_size = camera_frame_provider(s->frame_data, XBOX_CAMERA_MAX_FRAME,
                                        &width, &height, &sequence);
     if (frame_size < 4 || frame_size > XBOX_CAMERA_MAX_FRAME) {
-        CAMERA_DPRINTF("host frame unavailable size=%zu", frame_size);
-        return false;
+        if (s->frame_provider_log_count < 16 ||
+            (s->frame_provider_log_count % 300) == 0) {
+            CAMERA_DPRINTF("host frame unavailable size=%zu", frame_size);
+        }
+        s->frame_provider_log_count++;
+        return XBOX_CAMERA_FRAME_LOAD_UNAVAILABLE;
+    }
+
+    if (s->have_delivered_sequence && sequence == s->last_delivered_sequence) {
+        if (s->duplicate_frame_log_count < 8 ||
+            (s->duplicate_frame_log_count % 120) == 0) {
+            CAMERA_DPRINTF("host frame unchanged seq=%llu; pacing stream",
+                           (unsigned long long)sequence);
+        }
+        s->duplicate_frame_log_count++;
+        return XBOX_CAMERA_FRAME_LOAD_IDLE;
     }
 
     if (s->frame_data[0] != 0xff || s->frame_data[1] != 0xd8) {
         CAMERA_DPRINTF("rejecting non-jpeg host frame size=%zu", frame_size);
-        return false;
+        return XBOX_CAMERA_FRAME_LOAD_UNAVAILABLE;
+    }
+
+    size_t original_frame_size = frame_size;
+    size_t reported_frame_size = (frame_size + 7) & ~(size_t)7;
+    size_t packet_size = xbox_camera_packet_size_for_alt(s->current_alt,
+                                                         XBOX_CAMERA_MAX_PACKET);
+    if (reported_frame_size > frame_size &&
+        reported_frame_size <= XBOX_CAMERA_MAX_FRAME) {
+        memset(s->frame_data + frame_size, 0,
+               reported_frame_size - frame_size);
+        frame_size = reported_frame_size;
     }
 
     s->frame_size = frame_size;
+    s->frame_reported_size = reported_frame_size;
     s->frame_offset = 0;
     s->frame_width = width;
     s->frame_height = height;
     s->frame_sequence = sequence;
+    s->last_delivered_sequence = sequence;
+    s->have_delivered_sequence = true;
     s->eof_pending = false;
-    return true;
+    if (s->frame_load_log_count < 8 || (s->frame_load_log_count % 120) == 0) {
+        CAMERA_DPRINTF("host frame loaded bytes=%zu reported=%zu transport=align8-full-eof packet=%zu size=%ux%u seq=%llu",
+                       original_frame_size, reported_frame_size, packet_size,
+                       width, height,
+                       (unsigned long long)sequence);
+    }
+    s->frame_load_log_count++;
+    return XBOX_CAMERA_FRAME_LOAD_READY;
 }
 
 static void xbox_camera_write_ov519_header(uint8_t *packet, uint8_t type,
@@ -669,20 +769,59 @@ static void xbox_camera_handle_data(USBDevice *dev, USBPacket *p)
         size_t actual = 0;
 
         if (packet_size == 0) {
+            if (s->empty_alt_log_count < 16 ||
+                (s->empty_alt_log_count % 300) == 0) {
+                CAMERA_DPRINTF("iso nak no packet bandwidth alt=%u requested=%zu",
+                               s->current_alt, p->iov.size);
+            }
+            s->empty_alt_log_count++;
             p->status = USB_RET_NAK;
             return;
         }
 
         memset(packet, 0, packet_size);
         if (s->eof_pending) {
-            xbox_camera_write_ov519_header(packet, 0x51, s->frame_size);
-            actual = MIN(packet_size, (size_t)XBOX_CAMERA_OV519_HEADER_SIZE);
+            xbox_camera_write_ov519_header(packet, 0x51,
+                                           s->frame_reported_size);
+            actual = packet_size;
             s->eof_pending = false;
             s->frame_size = 0;
+            s->frame_reported_size = 0;
             s->frame_offset = 0;
             s->frame_counter++;
         } else {
-            if (s->frame_size == 0 && !xbox_camera_load_frame(s)) {
+            if (s->frame_size == 0) {
+                XboxCameraFrameLoadResult load_result =
+                    xbox_camera_load_frame(s);
+
+                if (load_result == XBOX_CAMERA_FRAME_LOAD_IDLE) {
+                    usb_packet_copy(p, packet, 0);
+                    if (s->iso_log_count < 24 ||
+                        (s->iso_log_count % 300) == 0) {
+                        CAMERA_DPRINTF("iso idle no new frame alt=%u packet=%zu actual=0",
+                                       s->current_alt, packet_size);
+                    }
+                    s->iso_log_count++;
+                    return;
+                }
+
+                if (load_result != XBOX_CAMERA_FRAME_LOAD_READY) {
+                    if (s->frame_provider_log_count < 16 ||
+                        (s->frame_provider_log_count % 300) == 0) {
+                        CAMERA_DPRINTF("iso nak no host frame alt=%u packet=%zu",
+                                       s->current_alt, packet_size);
+                    }
+                    p->status = USB_RET_NAK;
+                    return;
+                }
+            }
+
+            if (s->frame_size == 0) {
+                if (s->iso_log_count < 24 ||
+                    (s->iso_log_count % 300) == 0) {
+                    CAMERA_DPRINTF("iso nak no host frame alt=%u packet=%zu",
+                                   s->current_alt, packet_size);
+                }
                 p->status = USB_RET_NAK;
                 return;
             }
@@ -742,11 +881,18 @@ static void xbox_camera_realize(USBDevice *dev, Error **errp)
     s->frame_counter = 0;
     s->control_log_count = 0;
     s->iso_log_count = 0;
+    s->empty_alt_log_count = 0;
+    s->frame_provider_log_count = 0;
+    s->frame_load_log_count = 0;
+    s->duplicate_frame_log_count = 0;
     s->current_alt = 0;
     s->streaming_requested = false;
     memset(s->regs, 0, sizeof(s->regs));
     xbox_camera_seed_sensor(s);
     xbox_camera_reset_stream(s);
+    CAMERA_DPRINTF("realize vid=0x%04x pid=0x%04x max_frame=%u max_packet=%u",
+                   XBOX_CAMERA_VENDOR_ID, XBOX_CAMERA_PRODUCT_ID,
+                   XBOX_CAMERA_MAX_FRAME, XBOX_CAMERA_MAX_PACKET);
     warn_report("Xbox Video Chat camera device attached; waiting for host "
                 "JPEG frames");
 }
@@ -755,6 +901,9 @@ static void xbox_camera_unrealize(USBDevice *dev)
 {
     USBXboxCameraState *s = USB_XBOX_CAMERA(dev);
 
+    CAMERA_DPRINTF("unrealize frames=%u last_seq=%llu",
+                   s->frame_counter,
+                   (unsigned long long)s->frame_sequence);
     g_clear_pointer(&s->frame_data, g_free);
 }
 

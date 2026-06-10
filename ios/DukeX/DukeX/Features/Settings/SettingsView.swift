@@ -107,10 +107,9 @@ struct SettingsView: View {
                 }
                 .disabled(true)
 
-                Text("Coming soon. Attaches an Xbox Video Chat camera on launch and routes the iPhone face camera through it.")
+                Text("Experimental. Attaches an Xbox Video Chat camera on launch and routes the iPhone face camera through it.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .disabled(true)
             }
             .dukeXThemedListRowBackground()
 

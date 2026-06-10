@@ -115,7 +115,7 @@ struct XemuLaunchPlan: Identifiable {
 
         if xboxCameraEnabled {
             arguments.append(contentsOf: [
-                "-device", "usb-xbox-camera,port=1.1"
+                "-device", "usb-xbox-camera,port=1.4"
             ])
         }
 

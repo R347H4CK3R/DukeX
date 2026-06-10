@@ -372,6 +372,171 @@ static uint8_t *convert_texture_data__CR8YB8CB8YA8(uint8_t *data_out,
     return data_out;
 }
 
+#ifdef CONFIG_IOS
+static void trace_pvideo_source_sample(PvideoState state, const uint8_t *data)
+{
+    static uint64_t pvideo_source_sample_count;
+    uint64_t log_count;
+    uint64_t total_bytes;
+    uint64_t nonzero_count = 0;
+    uint64_t y_total = 0;
+    uint64_t cb_total = 0;
+    uint64_t cr_total = 0;
+    uint64_t sample_count = 0;
+    uint8_t min_y = 255;
+    uint8_t max_y = 0;
+    const uint8_t *center;
+
+    if (!ios_pvideo_trace_enabled()) {
+        return;
+    }
+
+    log_count = ++pvideo_source_sample_count;
+    if (log_count > 16 && (log_count % 120) != 0) {
+        return;
+    }
+
+    total_bytes = (uint64_t)state.pitch * (uint64_t)state.in_height;
+    for (uint64_t byte_index = 0; byte_index < total_bytes; byte_index++) {
+        if (data[byte_index] != 0) {
+            nonzero_count++;
+        }
+    }
+
+    for (int y = 0; y < state.in_height; y += 8) {
+        const uint8_t *line = data + (uint64_t)y * (uint64_t)state.pitch;
+
+        for (int x = 0; x < state.in_width; x += 8) {
+            uint8_t luma = line[x * 2];
+            uint8_t cb = line[x * 2 + 1];
+            uint8_t cr = (x + 1 < state.in_width) ? line[x * 2 + 3] : cb;
+
+            if (luma < min_y) {
+                min_y = luma;
+            }
+            if (luma > max_y) {
+                max_y = luma;
+            }
+
+            y_total += luma;
+            cb_total += cb;
+            cr_total += cr;
+            sample_count++;
+        }
+    }
+
+    center = data
+        + (uint64_t)(state.in_height / 2) * (uint64_t)state.pitch
+        + (uint64_t)(state.in_width / 2) * 2;
+
+    IOS_PVIDEO_LOG(
+        "source sample #%llu base=0x%08" HWADDR_PRIx
+        " offset=0x%08" HWADDR_PRIx " pitch=%d in=%dx%d"
+        " nonzero=%" PRIu64 "/%" PRIu64
+        " y=%u-%u/%" PRIu64 " cbAvg=%" PRIu64 " crAvg=%" PRIu64
+        " first=%02x %02x %02x %02x %02x %02x %02x %02x"
+        " center=%02x %02x %02x %02x %02x %02x %02x %02x",
+        (unsigned long long)log_count, state.base, state.offset, state.pitch,
+        state.in_width, state.in_height, nonzero_count, total_bytes, min_y,
+        max_y, sample_count ? y_total / sample_count : 0,
+        sample_count ? cb_total / sample_count : 0,
+        sample_count ? cr_total / sample_count : 0,
+        data[0], data[1], data[2], data[3], data[4], data[5], data[6],
+        data[7], center[0], center[1], center[2], center[3], center[4],
+        center[5], center[6], center[7]);
+}
+
+static const char *ios_pvideo_dump_path(void)
+{
+    const char *path = getenv("XEMU_IOS_PVIDEO_DUMP_PATH");
+    return path && path[0] ? path : NULL;
+}
+
+static void ios_write_le16(FILE *file, uint16_t value)
+{
+    fputc(value & 0xff, file);
+    fputc((value >> 8) & 0xff, file);
+}
+
+static void ios_write_le32(FILE *file, uint32_t value)
+{
+    fputc(value & 0xff, file);
+    fputc((value >> 8) & 0xff, file);
+    fputc((value >> 16) & 0xff, file);
+    fputc((value >> 24) & 0xff, file);
+}
+
+static void dump_pvideo_rgba_frame(const uint8_t *rgba, unsigned int width,
+                                   unsigned int height)
+{
+    static uint64_t pvideo_dump_count;
+    const char *path = ios_pvideo_dump_path();
+    uint64_t dump_count;
+    uint32_t row_stride;
+    uint32_t image_size;
+    uint32_t file_size;
+    FILE *file;
+
+    if (!path || !width || !height) {
+        return;
+    }
+
+    dump_count = ++pvideo_dump_count;
+    if (dump_count > 16 && (dump_count % 60) != 0) {
+        return;
+    }
+
+    row_stride = (width * 3u + 3u) & ~3u;
+    image_size = row_stride * height;
+    file_size = 14u + 40u + image_size;
+
+    file = fopen(path, "wb");
+    if (!file) {
+        IOS_PVIDEO_LOG("dump open failed path=%s", path);
+        return;
+    }
+
+    fputc('B', file);
+    fputc('M', file);
+    ios_write_le32(file, file_size);
+    ios_write_le16(file, 0);
+    ios_write_le16(file, 0);
+    ios_write_le32(file, 14u + 40u);
+
+    ios_write_le32(file, 40u);
+    ios_write_le32(file, width);
+    ios_write_le32(file, (uint32_t)(-(int32_t)height));
+    ios_write_le16(file, 1);
+    ios_write_le16(file, 24);
+    ios_write_le32(file, 0);
+    ios_write_le32(file, image_size);
+    ios_write_le32(file, 2835);
+    ios_write_le32(file, 2835);
+    ios_write_le32(file, 0);
+    ios_write_le32(file, 0);
+
+    for (unsigned int y = 0; y < height; y++) {
+        const uint8_t *row = rgba + (uint64_t)y * (uint64_t)width * 4u;
+        unsigned int padding = row_stride - width * 3u;
+
+        for (unsigned int x = 0; x < width; x++) {
+            const uint8_t *pixel = row + x * 4u;
+            fputc(pixel[2], file);
+            fputc(pixel[1], file);
+            fputc(pixel[0], file);
+        }
+
+        for (unsigned int pad = 0; pad < padding; pad++) {
+            fputc(0, file);
+        }
+    }
+
+    fclose(file);
+    IOS_PVIDEO_LOG("dump wrote #%llu path=%s width=%u height=%u",
+                   (unsigned long long)dump_count, path, width, height);
+}
+#endif
+
 static float pvideo_calculate_scale(unsigned int din_dout,
                                     unsigned int output_size)
 {
@@ -468,6 +633,7 @@ static void upload_pvideo_image(PGRAPHState *pg, PvideoState state)
     NV2AState *d = container_of(pg, NV2AState, pgraph);
     PGRAPHVkState *r = pg->vk_renderer_state;
     PGRAPHVkDisplayState *disp = &r->display;
+    const uint8_t *pvideo_data = d->vram_ptr + state.base + state.offset;
 
     create_pvideo_image(pg, state.in_width, state.in_height);
 
@@ -480,9 +646,17 @@ static void upload_pvideo_image(PGRAPHState *pg, PvideoState state)
                           r->storage_buffers[BUFFER_STAGING_SRC].allocation,
                           (void *)&mapped_memory_ptr));
 
+#ifdef CONFIG_IOS
+    trace_pvideo_source_sample(state, pvideo_data);
+#endif
+
     convert_texture_data__CR8YB8CB8YA8(
-        mapped_memory_ptr, d->vram_ptr + state.base + state.offset,
-        state.in_width, state.in_height, state.pitch);
+        mapped_memory_ptr, pvideo_data, state.in_width, state.in_height,
+        state.pitch);
+
+#ifdef CONFIG_IOS
+    dump_pvideo_rgba_frame(mapped_memory_ptr, state.in_width, state.in_height);
+#endif
 
     vmaFlushAllocation(r->allocator,
                        r->storage_buffers[BUFFER_STAGING_SRC].allocation, 0,
