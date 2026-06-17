@@ -10,6 +10,7 @@ enum DukeXDownloadCountState: Equatable {
 
 struct ProfileView: View {
     @ObservedObject var profileStore: InsigniaProfileStore
+    @ObservedObject var socialStore: XBLiveSocialStore
     @AppStorage(ProfileFriendSortMode.defaultsKey) private var friendSortModeRawValue = ProfileFriendSortMode.favorites.rawValue
     @State private var favoriteFriendKeys = ProfileFriendFavorites.load()
     @State private var maftyAvatarTapCount = 0
@@ -21,6 +22,10 @@ struct ProfileView: View {
     let signOut: () -> Void
     let changeProfileImage: () -> Void
     let changeFriendProfileImage: (InsigniaFriend) -> Void
+    let changeSocialFriendProfileImage: (XBLiveSocialFriend) -> Void
+    let installedGames: [LibraryFile]
+    let inviteEligibleGames: [LibraryFile]
+    let launchGameFromInvite: (LibraryFile) -> Void
 
     var body: some View {
         List {
@@ -34,6 +39,16 @@ struct ProfileView: View {
         }
         .listStyle(.insetGrouped)
         .dukeXThemedListBackground()
+        .task(id: profileStore.session?.gamertag) {
+            guard profileStore.session?.isAuthenticated == true else {
+                await MainActor.run {
+                    socialStore.clear()
+                }
+                return
+            }
+
+            await socialStore.refreshAll()
+        }
     }
 
     @ViewBuilder
@@ -67,7 +82,6 @@ struct ProfileView: View {
     ) -> some View {
         Section("Account") {
             let friends = snapshot?.friends ?? []
-            let messages = profileStore.unviewedMessages(from: snapshot?.messages ?? [])
 
             NavigationLink {
                 ProfileAchievementsView(
@@ -87,25 +101,41 @@ struct ProfileView: View {
             NavigationLink {
                 ProfileFriendsView(
                     profileStore: profileStore,
+                    socialStore: socialStore,
                     sortMode: friendSortModeBinding,
                     favoriteFriendKeys: favoriteFriendKeys,
                     toggleFavorite: toggleFavorite,
-                    changeFriendProfileImage: changeFriendProfileImage
+                    toggleSocialFavorite: toggleSocialFavorite,
+                    changeFriendProfileImage: changeFriendProfileImage,
+                    changeSocialFriendProfileImage: changeSocialFriendProfileImage,
+                    installedGames: installedGames,
+                    inviteEligibleGames: inviteEligibleGames,
+                    currentUserAchievements: snapshot?.achievements,
+                    launchGameFromInvite: launchGameFromInvite
                 )
             } label: {
                 ProfileInfoRow(title: "Friends",
-                               value: countText(friends.count),
+                               value: countText(mergedFriendsCount(insigniaFriends: friends)),
                                systemImage: "person.2")
             }
 
             NavigationLink {
-                ProfileMessagesView(
-                    profileStore: profileStore,
-                    messages: snapshot?.messages ?? []
+                ProfileSocialMessagesView(
+                    socialStore: socialStore,
+                    legacyMessages: snapshot?.messages ?? [],
+                    legacyUnreadMessages: profileStore.unviewedMessages(from: snapshot?.messages ?? []),
+                    friendProfileImages: profileStore.friendProfileImages,
+                    friendProfiles: snapshot?.friendProfiles ?? [:],
+                    socialFriends: socialStore.messageableFriends,
+                    markLegacyMessageViewed: profileStore.markMessageViewed,
+                    installedGames: installedGames,
+                    inviteEligibleGames: inviteEligibleGames,
+                    currentUserAchievements: snapshot?.achievements,
+                    launchGameFromInvite: launchGameFromInvite
                 )
             } label: {
                 ProfileInfoRow(title: "Messages",
-                               value: pendingMessagesText(messages.count),
+                               value: unreadMessagesText(legacyMessages: snapshot?.messages ?? []),
                                systemImage: "envelope")
             }
 
@@ -281,8 +311,39 @@ struct ProfileView: View {
         ProfileFriendFavorites.save(favoriteFriendKeys)
     }
 
+    private func toggleSocialFavorite(_ friend: XBLiveSocialFriend) {
+        let key = ProfileFriendFavorites.key(for: friend)
+        if favoriteFriendKeys.contains(key) {
+            favoriteFriendKeys.remove(key)
+        } else {
+            favoriteFriendKeys.insert(key)
+        }
+        ProfileFriendFavorites.save(favoriteFriendKeys)
+    }
+
     private func countText(_ count: Int) -> String {
         count == 0 ? "None" : "\(count)"
+    }
+
+    private func mergedFriendsCount(insigniaFriends: [InsigniaFriend]) -> Int {
+        let insigniaKeys = Set(insigniaFriends.map(\.key))
+        let xbLiveOnlyCount = socialStore.messageableFriends.filter { friend in
+            let keys = [
+                friend.username,
+                friend.displayName ?? ""
+            ]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+
+            return keys.allSatisfy { !insigniaKeys.contains($0) }
+        }.count
+
+        return insigniaFriends.count + xbLiveOnlyCount
+    }
+
+    private func unreadMessagesText(legacyMessages: [InsigniaMessage]) -> String {
+        let count = socialStore.unreadCount + profileStore.unviewedMessages(from: legacyMessages).count
+        return "\(count) Unread"
     }
 
     private func pendingMessagesText(_ count: Int) -> String {

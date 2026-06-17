@@ -10,12 +10,18 @@ private enum MainTab: Hashable {
     case settings
 }
 
+private struct FriendProfileImageSelectionTarget {
+    let key: String
+    let title: String
+}
+
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var store: EmulatorFileStore
     @StateObject private var runtime = EmulatorCoreRuntime()
     @StateObject private var autoJIT = StikDebugAutoJITCoordinator()
     @StateObject private var profileStore = InsigniaProfileStore()
+    @StateObject private var socialStore = XBLiveSocialStore()
     @StateObject private var liveStatusStore = InsigniaLiveStatusStore()
     @StateObject private var gameMetadataStore = GameMetadataStore()
     @StateObject private var controllerBatteryMonitor = ControllerBatteryMonitor()
@@ -26,7 +32,7 @@ struct ContentView: View {
     @State private var isCoverPickerPresented = false
     @State private var selectedProfileImageItem: PhotosPickerItem?
     @State private var isProfileImagePickerPresented = false
-    @State private var friendProfileImageTarget: InsigniaFriend?
+    @State private var friendProfileImageTarget: FriendProfileImageSelectionTarget?
     @State private var selectedFriendProfileImageItem: PhotosPickerItem?
     @State private var isFriendProfileImagePickerPresented = false
     @State private var configImportTarget: LibraryFile?
@@ -91,10 +97,18 @@ struct ContentView: View {
                 NavigationStack {
                     ProfileView(
                         profileStore: profileStore,
+                        socialStore: socialStore,
                         signIn: { isProfileLoginPresented = true },
-                        signOut: profileStore.signOut,
+                        signOut: {
+                            socialStore.clear()
+                            profileStore.signOut()
+                        },
                         changeProfileImage: beginProfileImageSelection,
-                        changeFriendProfileImage: beginFriendProfileImageSelection
+                        changeFriendProfileImage: beginFriendProfileImageSelection,
+                        changeSocialFriendProfileImage: beginSocialFriendProfileImageSelection,
+                        installedGames: store.games,
+                        inviteEligibleGames: gameInviteEligibleGames,
+                        launchGameFromInvite: launchGame
                     )
                     .navigationTitle("DukeX")
                     .navigationBarTitleDisplayMode(.inline)
@@ -243,6 +257,7 @@ struct ContentView: View {
             }
             .task {
                 profileStore.refresh()
+                await refreshProfileSocialNowIfAuthenticated()
                 await refreshGamesNow()
                 await pullCloudSavesAutomaticallyIfNeeded(reason: "launch")
                 if environmentRequestsAutoLaunch && !autoLaunchAttempted {
@@ -312,6 +327,17 @@ struct ContentView: View {
 
     private var currentGameSortMode: GameLibrarySortMode {
         GameLibrarySortMode(rawValue: sortModeRawValue) ?? .title
+    }
+
+    private var gameInviteEligibleGames: [LibraryFile] {
+        store.games
+            .filter { game in
+                GameLaunchLink.url(for: game) != nil &&
+                    liveStatusStore.status(for: game)?.isSupported == true
+            }
+            .sorted {
+                $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+            }
     }
 
     @ViewBuilder
@@ -440,6 +466,7 @@ struct ContentView: View {
     private func refreshGamesAndProfile() {
         refreshGamesTab()
         profileStore.refresh()
+        refreshProfileSocialIfAuthenticated()
     }
 
     private func refreshOpenTab() {
@@ -451,6 +478,60 @@ struct ContentView: View {
         case .settings:
             break
         }
+        refreshProfileSocialIfAuthenticated()
+    }
+
+    private func refreshProfileSocialIfAuthenticated() {
+        Task { @MainActor in
+            await refreshProfileSocialNowIfAuthenticated()
+        }
+    }
+
+    @MainActor
+    private func refreshProfileSocialNowIfAuthenticated() async {
+        guard profileStore.session?.isAuthenticated == true else {
+            socialStore.clear()
+            return
+        }
+
+        configureSocialNotifications()
+        await socialStore.refreshAll()
+    }
+
+    @MainActor
+    private func configureSocialNotifications() {
+        socialStore.configureLocalNotifications(
+            customAvatarImage: { username in
+                let key = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if let image = profileStore.friendProfileImages[key] {
+                    return image
+                }
+
+                if let friend = socialStore.messageableFriends.first(where: {
+                    $0.key == key || $0.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == key
+                }) {
+                    return profileStore.friendProfileImages[friend.key]
+                }
+
+                return nil
+            },
+            gameTitle: { titleID, embeddedTitle in
+                if let normalizedTitleID = GameLaunchLink.normalizedTitleID(titleID),
+                   let game = store.game(matchingTitleID: normalizedTitleID) {
+                    return game.displayName
+                }
+
+                let title = embeddedTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+                return title?.isEmpty == false ? title! : "Title \(titleID)"
+            },
+            gameLocalCoverURL: { titleID in
+                guard let normalizedTitleID = GameLaunchLink.normalizedTitleID(titleID) else {
+                    return nil
+                }
+
+                return store.game(matchingTitleID: normalizedTitleID)?.coverURL
+            }
+        )
     }
 
     private func refreshGamesTab() {
@@ -621,7 +702,13 @@ struct ContentView: View {
     }
 
     private func beginFriendProfileImageSelection(for friend: InsigniaFriend) {
-        friendProfileImageTarget = friend
+        friendProfileImageTarget = FriendProfileImageSelectionTarget(key: friend.key, title: friend.gamertag)
+        selectedFriendProfileImageItem = nil
+        isFriendProfileImagePickerPresented = true
+    }
+
+    private func beginSocialFriendProfileImageSelection(for friend: XBLiveSocialFriend) {
+        friendProfileImageTarget = FriendProfileImageSelectionTarget(key: friend.key, title: friend.title)
         selectedFriendProfileImageItem = nil
         isFriendProfileImagePickerPresented = true
     }
@@ -790,7 +877,7 @@ struct ContentView: View {
     }
 
     private func handleSelectedFriendProfileImage(_ item: PhotosPickerItem?) {
-        guard let item, let friend = friendProfileImageTarget else {
+        guard let item, let target = friendProfileImageTarget else {
             return
         }
 
@@ -804,9 +891,9 @@ struct ContentView: View {
                 guard let data = try await item.loadTransferable(type: Data.self) else {
                     throw CoverSelectionError.emptySelection
                 }
-                try profileStore.assignFriendProfileImage(data, to: friend)
+                try profileStore.assignFriendProfileImage(data, key: target.key)
             } catch {
-                store.message = UserMessage(title: "Friend Picture Not Added", detail: error.localizedDescription)
+                store.message = UserMessage(title: "\(target.title) Picture Not Added", detail: error.localizedDescription)
             }
         }
     }

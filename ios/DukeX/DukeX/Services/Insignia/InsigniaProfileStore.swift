@@ -1504,15 +1504,20 @@ final class InsigniaProfileStore: ObservableObject {
     }
 
     func assignFriendProfileImage(_ data: Data, to friend: InsigniaFriend) throws {
+        try assignFriendProfileImage(data, key: friend.key)
+    }
+
+    func assignFriendProfileImage(_ data: Data, key: String) throws {
         let image = UIImage(data: data)
         let imageData = image?.jpegData(compressionQuality: 0.9) ?? data
+        let normalizedKey = key.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         try FileManager.default.createDirectory(
             at: friendProfileImagesDirectoryURL,
             withIntermediateDirectories: true,
             attributes: nil
         )
-        try imageData.write(to: friendProfileImageURL(for: friend.key), options: .atomic)
-        friendProfileImages[friend.key] = UIImage(data: imageData)
+        try imageData.write(to: friendProfileImageURL(for: normalizedKey), options: .atomic)
+        friendProfileImages[normalizedKey] = UIImage(data: imageData)
     }
 
     func clearProfileImage() {

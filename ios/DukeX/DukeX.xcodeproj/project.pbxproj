@@ -64,6 +64,8 @@
 		I50000000000000000000003 /* DukeXZipArchive.m in Sources */ = {isa = PBXBuildFile; fileRef = I50000000000000000000014 /* DukeXZipArchive.m */; };
 		I50000000000000000000004 /* miniz.c in Sources */ = {isa = PBXBuildFile; fileRef = I50000000000000000000017 /* miniz.c */; };
 		I50000000000000000000005 /* XboxEEPROMIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = I50000000000000000000018 /* XboxEEPROMIdentity.swift */; };
+		J60000000000000000000001 /* XBLiveSocialService.swift in Sources */ = {isa = PBXBuildFile; fileRef = J60000000000000000000011 /* XBLiveSocialService.swift */; };
+		J60000000000000000000002 /* ProfileSocialRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = J60000000000000000000012 /* ProfileSocialRows.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -130,6 +132,8 @@
 		I50000000000000000000016 /* miniz.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = miniz.h; sourceTree = "<group>"; };
 		I50000000000000000000017 /* miniz.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = miniz.c; sourceTree = "<group>"; };
 		I50000000000000000000018 /* XboxEEPROMIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XboxEEPROMIdentity.swift; sourceTree = "<group>"; };
+		J60000000000000000000011 /* XBLiveSocialService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XBLiveSocialService.swift; sourceTree = "<group>"; };
+		J60000000000000000000012 /* ProfileSocialRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileSocialRows.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -256,6 +260,7 @@
 				B10000000000000000000012 /* ProfileView.swift */,
 				C10000000000000000000016 /* ProfileLoginView.swift */,
 				C10000000000000000000017 /* ProfileRows.swift */,
+				J60000000000000000000012 /* ProfileSocialRows.swift */,
 			);
 			path = Profile;
 			sourceTree = "<group>";
@@ -432,6 +437,7 @@
 				B1000000000000000000001A /* InsigniaProfileStore.swift */,
 				E10000000000000000000012 /* InsigniaLiveStatusStore.swift */,
 				I50000000000000000000011 /* XBLCloudSaveService.swift */,
+				J60000000000000000000011 /* XBLiveSocialService.swift */,
 			);
 			path = Insignia;
 			sourceTree = "<group>";
@@ -604,6 +610,8 @@
 					B1000000000000000000000A /* InsigniaProfileStore.swift in Sources */,
 					E10000000000000000000002 /* InsigniaLiveStatusStore.swift in Sources */,
 					I50000000000000000000001 /* XBLCloudSaveService.swift in Sources */,
+					J60000000000000000000001 /* XBLiveSocialService.swift in Sources */,
+					J60000000000000000000002 /* ProfileSocialRows.swift in Sources */,
 					I50000000000000000000002 /* FATXHDDCloudSaveStore.swift in Sources */,
 					I50000000000000000000005 /* XboxEEPROMIdentity.swift in Sources */,
 					F20000000000000000000002 /* GameMetadataStore.swift in Sources */,

@@ -36,6 +36,10 @@ enum ProfileFriendFavorites {
     static func key(for friend: InsigniaFriend) -> String {
         friend.key
     }
+
+    static func key(for friend: XBLiveSocialFriend) -> String {
+        "xblive:\(friend.key)"
+    }
 }
 
 struct ProfileHeaderRow: View {
@@ -277,85 +281,270 @@ struct ProfileFriendRow: View {
     }
 }
 
+private enum ProfileFriendListEntry: Identifiable {
+    case insignia(InsigniaFriend)
+    case xbLive(XBLiveSocialFriend)
+
+    var id: String {
+        switch self {
+        case .insignia(let friend):
+            return "insignia-\(friend.key)"
+        case .xbLive(let friend):
+            return "xblive-\(friend.key)"
+        }
+    }
+}
+
 struct ProfileFriendsView: View {
     @ObservedObject var profileStore: InsigniaProfileStore
+    @ObservedObject var socialStore: XBLiveSocialStore
     @Binding var sortMode: ProfileFriendSortMode
     let favoriteFriendKeys: Set<String>
     let toggleFavorite: (InsigniaFriend) -> Void
+    let toggleSocialFavorite: (XBLiveSocialFriend) -> Void
     let changeFriendProfileImage: (InsigniaFriend) -> Void
+    let changeSocialFriendProfileImage: (XBLiveSocialFriend) -> Void
+    let installedGames: [LibraryFile]
+    let inviteEligibleGames: [LibraryFile]
+    let currentUserAchievements: XBLiveAchievementsSnapshot?
+    let launchGameFromInvite: (LibraryFile) -> Void
+
+    @State private var isAddFriendPresented = false
 
     var body: some View {
         List {
-            ProfileFriendSortPickerRow(selection: $sortMode)
-                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+            pendingRequestsSection
 
             Section("Friends") {
-                if sortedFriends.isEmpty {
-                    ProfileEmptyRow(title: emptyFriendsTitle, systemImage: emptyFriendsSystemImage)
+                ProfileFriendSortPickerRow(selection: $sortMode)
+                    .listRowSeparator(.hidden)
+
+                if friendEntries.isEmpty {
+                    if socialStore.isRefreshingFriends && friends.isEmpty {
+                        ProfileSocialLoadingRow(title: "Loading friends...")
+                    } else {
+                        ProfileEmptyRow(title: emptyFriendsTitle, systemImage: emptyFriendsSystemImage)
+                    }
                 } else {
-                    ForEach(sortedFriends) { friend in
-                        NavigationLink {
-                            ProfileFriendDetailView(
-                                friend: friend,
-                                profile: friendProfiles[friend.key],
-                                customProfileImage: friendProfileImages[friend.key],
-                                supportedGames: supportedGames,
-                                changeProfileImage: { changeFriendProfileImage(friend) }
-                            )
-                        } label: {
-                            ProfileFriendRow(
-                                friend: friend,
-                                profile: friendProfiles[friend.key],
-                                customProfileImage: friendProfileImages[friend.key]
-                            )
-                        }
-                        .swipeActions(edge: .trailing) {
-                            Button {
-                                changeFriendProfileImage(friend)
-                            } label: {
-                                Label("Set Picture", systemImage: "photo")
-                            }
-                            .tint(Color.accentColor)
-
-                            Button {
-                                toggleFavorite(friend)
-                            } label: {
-                                Label(isFavorite(friend) ? "Unfavorite" : "Favorite",
-                                      systemImage: isFavorite(friend) ? "star.slash" : "star")
-                            }
-                            .tint(.yellow)
-                        }
-                        .contextMenu {
-                            Button {
-                                changeFriendProfileImage(friend)
-                            } label: {
-                                Label("Set Picture", systemImage: "photo")
-                            }
-
-                            Button {
-                                toggleFavorite(friend)
-                            } label: {
-                                Label(isFavorite(friend) ? "Unfavorite" : "Favorite",
-                                      systemImage: isFavorite(friend) ? "star.slash" : "star")
-                            }
-                        }
+                    ForEach(friendEntries) { entry in
+                        friendEntryRow(entry)
                     }
                 }
             }
             .dukeXThemedListRowBackground()
+
+            if !socialStore.blockedUsers.isEmpty {
+                Section("Blocked") {
+                    ForEach(socialStore.blockedUsers, id: \.self) { username in
+                        HStack {
+                            Label(username, systemImage: "hand.raised")
+                            Spacer()
+                            Button("Unblock") {
+                                Task {
+                                    await socialStore.unblockUser(username)
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        .frame(minHeight: 44)
+                    }
+                }
+                .dukeXThemedListRowBackground()
+            }
         }
         .navigationTitle("Friends")
         .navigationBarTitleDisplayMode(.inline)
         .dukeXThemedListBackground(dimming: 0.18)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isAddFriendPresented = true
+                } label: {
+                    Image(systemName: "person.badge.plus")
+                }
+                .accessibilityLabel("Add Friend")
+            }
+        }
         .task {
             profileStore.refresh()
+            await socialStore.refreshFriends()
+        }
+        .refreshable {
+            profileStore.refresh()
+            await socialStore.refreshFriends()
+        }
+        .sheet(isPresented: $isAddFriendPresented) {
+            NavigationStack {
+                ProfileSocialFriendRequestComposer(socialStore: socialStore)
+            }
+        }
+        .alert(item: $socialStore.notice) { notice in
+            Alert(
+                title: Text(notice.title),
+                message: Text(notice.detail),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var pendingRequestsSection: some View {
+        Section("Pending Requests") {
+            if socialStore.incomingRequests.isEmpty && socialStore.outgoingRequests.isEmpty {
+                ProfileInfoRow(
+                    title: "Pending Friend Requests",
+                    value: "0",
+                    detail: "No pending XB.Live requests",
+                    systemImage: "person.crop.circle.badge.plus"
+                )
+            } else {
+                ForEach(socialStore.incomingRequests) { request in
+                    ProfileSocialFriendRequestRow(request: request, direction: .incoming) {
+                        Task {
+                            await socialStore.acceptFriendRequest(from: request.username)
+                        }
+                    } secondaryAction: {
+                        Task {
+                            await socialStore.declineFriendRequest(from: request.username)
+                        }
+                    }
+                }
+
+                ForEach(socialStore.outgoingRequests) { request in
+                    ProfileSocialFriendRequestRow(
+                        request: request,
+                        direction: .outgoing,
+                        primaryAction: {
+                            Task {
+                                await socialStore.cancelFriendRequest(to: request.username)
+                            }
+                        },
+                        secondaryAction: nil
+                    )
+                }
+            }
+        }
+        .dukeXThemedListRowBackground()
+    }
+
+    @ViewBuilder
+    private func friendEntryRow(_ entry: ProfileFriendListEntry) -> some View {
+        switch entry {
+        case .insignia(let friend):
+            NavigationLink {
+                ProfileFriendDetailView(
+                    friend: friend,
+                    profile: friendProfiles[friend.key],
+                    customProfileImage: friendProfileImages[friend.key],
+                    supportedGames: supportedGames,
+                    socialStore: socialStore,
+                    socialFriend: socialFriend(for: friend),
+                    legacyMessages: legacyMessages,
+                    markLegacyMessageViewed: profileStore.markMessageViewed,
+                    installedGames: installedGames,
+                    inviteEligibleGames: inviteEligibleGames,
+                    currentUserAchievements: currentUserAchievements,
+                    launchGameFromInvite: launchGameFromInvite,
+                    changeProfileImage: { changeFriendProfileImage(friend) }
+                )
+            } label: {
+                ProfileFriendRow(
+                    friend: friend,
+                    profile: friendProfiles[friend.key],
+                    customProfileImage: friendProfileImages[friend.key]
+                )
+            }
+            .swipeActions(edge: .trailing) {
+                Button {
+                    changeFriendProfileImage(friend)
+                } label: {
+                    Label("Set Picture", systemImage: "photo")
+                }
+                .tint(Color.accentColor)
+
+                Button {
+                    toggleFavorite(friend)
+                } label: {
+                    Label(isFavorite(friend) ? "Unfavorite" : "Favorite",
+                          systemImage: isFavorite(friend) ? "star.slash" : "star")
+                }
+                .tint(.yellow)
+            }
+            .contextMenu {
+                Button {
+                    changeFriendProfileImage(friend)
+                } label: {
+                    Label("Set Picture", systemImage: "photo")
+                }
+
+                Button {
+                    toggleFavorite(friend)
+                } label: {
+                    Label(isFavorite(friend) ? "Unfavorite" : "Favorite",
+                          systemImage: isFavorite(friend) ? "star.slash" : "star")
+                }
+            }
+
+        case .xbLive(let friend):
+            NavigationLink {
+                ProfileXBLiveFriendDetailView(
+                    socialStore: socialStore,
+                    friend: friend,
+                    customProfileImage: friendProfileImages[friend.key],
+                    legacyMessages: legacyMessages,
+                    markLegacyMessageViewed: profileStore.markMessageViewed,
+                    installedGames: installedGames,
+                    inviteEligibleGames: inviteEligibleGames,
+                    currentUserAchievements: currentUserAchievements,
+                    launchGameFromInvite: launchGameFromInvite,
+                    changeProfileImage: { changeSocialFriendProfileImage(friend) }
+                )
+            } label: {
+                ProfileSocialFriendRow(
+                    friend: friend,
+                    profile: socialFriendProfile(for: friend),
+                    customProfileImage: friendProfileImages[friend.key]
+                )
+            }
+            .swipeActions(edge: .trailing) {
+                Button {
+                    changeSocialFriendProfileImage(friend)
+                } label: {
+                    Label("Set Picture", systemImage: "photo")
+                }
+                .tint(Color.accentColor)
+
+                Button {
+                    toggleSocialFavorite(friend)
+                } label: {
+                    Label(isFavorite(friend) ? "Unfavorite" : "Favorite",
+                          systemImage: isFavorite(friend) ? "star.slash" : "star")
+                }
+                .tint(.yellow)
+            }
+            .contextMenu {
+                Button {
+                    changeSocialFriendProfileImage(friend)
+                } label: {
+                    Label("Set Picture", systemImage: "photo")
+                }
+
+                Button {
+                    toggleSocialFavorite(friend)
+                } label: {
+                    Label(isFavorite(friend) ? "Unfavorite" : "Favorite",
+                          systemImage: isFavorite(friend) ? "star.slash" : "star")
+                }
+            }
         }
     }
 
     private var friends: [InsigniaFriend] {
         profileStore.authenticatedSnapshot?.friends ?? []
+    }
+
+    private var legacyMessages: [InsigniaMessage] {
+        profileStore.authenticatedSnapshot?.messages ?? []
     }
 
     private var friendProfiles: [String: XBLiveFriendProfile] {
@@ -370,30 +559,38 @@ struct ProfileFriendsView: View {
         profileStore.friendProfileImages
     }
 
-    private var sortedFriends: [InsigniaFriend] {
+    private var friendEntries: [ProfileFriendListEntry] {
         switch sortMode {
         case .favorites:
-            return friends
+            return allFriendEntries
                 .filter(isFavorite)
-                .sorted(by: friendNameSort)
+                .sorted(by: activityThenNameSort)
         case .alphabetical:
-            return friends.sorted(by: friendNameSort)
+            return allFriendEntries.sorted(by: entryNameSort)
         case .recentActivity:
-            return friends.sorted { lhs, rhs in
-                let lhsActivity = activitySortValue(for: lhs)
-                let rhsActivity = activitySortValue(for: rhs)
-                if lhsActivity != rhsActivity {
-                    return lhsActivity > rhsActivity
-                }
-                return friendNameSort(lhs, rhs)
-            }
+            return allFriendEntries.sorted(by: activityThenNameSort)
         }
+    }
+
+    private var allFriendEntries: [ProfileFriendListEntry] {
+        friends.map(ProfileFriendListEntry.insignia) +
+            socialOnlyFriends.map(ProfileFriendListEntry.xbLive)
+    }
+
+    private var socialOnlyFriends: [XBLiveSocialFriend] {
+        socialStore.messageableFriends.filter { socialFriend in
+            socialMatchingKeys(for: socialFriend).allSatisfy { !insigniaFriendKeys.contains($0) }
+        }
+    }
+
+    private var insigniaFriendKeys: Set<String> {
+        Set(friends.map(\.key))
     }
 
     private var emptyFriendsTitle: String {
         switch sortMode {
         case .favorites:
-            return "No favorite friends"
+            return "No favorite or XB.Live-only friends"
         case .alphabetical, .recentActivity:
             return "No friends synced"
         }
@@ -412,8 +609,38 @@ struct ProfileFriendsView: View {
         favoriteFriendKeys.contains(ProfileFriendFavorites.key(for: friend))
     }
 
+    private func isFavorite(_ friend: XBLiveSocialFriend) -> Bool {
+        favoriteFriendKeys.contains(ProfileFriendFavorites.key(for: friend))
+    }
+
+    private func isFavorite(_ entry: ProfileFriendListEntry) -> Bool {
+        switch entry {
+        case .insignia(let friend):
+            return isFavorite(friend)
+        case .xbLive(let friend):
+            return isFavorite(friend)
+        }
+    }
+
     private func friendNameSort(_ lhs: InsigniaFriend, _ rhs: InsigniaFriend) -> Bool {
         lhs.gamertag.localizedStandardCompare(rhs.gamertag) == .orderedAscending
+    }
+
+    private func socialFriendNameSort(_ lhs: XBLiveSocialFriend, _ rhs: XBLiveSocialFriend) -> Bool {
+        lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+    }
+
+    private func entryNameSort(_ lhs: ProfileFriendListEntry, _ rhs: ProfileFriendListEntry) -> Bool {
+        entryName(lhs).localizedStandardCompare(entryName(rhs)) == .orderedAscending
+    }
+
+    private func activityThenNameSort(_ lhs: ProfileFriendListEntry, _ rhs: ProfileFriendListEntry) -> Bool {
+        let lhsActivity = activitySortValue(for: lhs)
+        let rhsActivity = activitySortValue(for: rhs)
+        if lhsActivity != rhsActivity {
+            return lhsActivity > rhsActivity
+        }
+        return entryNameSort(lhs, rhs)
     }
 
     private func activitySortValue(for friend: InsigniaFriend) -> Double {
@@ -426,20 +653,60 @@ struct ProfileFriendsView: View {
         }
         return friend.lastSeenAt ?? 0
     }
+
+    private func activitySortValue(for entry: ProfileFriendListEntry) -> Double {
+        switch entry {
+        case .insignia(let friend):
+            return activitySortValue(for: friend)
+        case .xbLive(let friend):
+            let profile = socialFriendProfile(for: friend)
+            if profile?.isOnline == true ||
+                profile?.currentGame?.nilIfEmpty != nil ||
+                friend.isOnline == true ||
+                friend.currentGame?.nilIfEmpty != nil {
+                return .greatestFiniteMagnitude
+            }
+            return profile?.lastOnlineAt ?? friend.lastOnlineAt ?? 0
+        }
+    }
+
+    private func entryName(_ entry: ProfileFriendListEntry) -> String {
+        switch entry {
+        case .insignia(let friend):
+            return friend.gamertag
+        case .xbLive(let friend):
+            return friend.title
+        }
+    }
+
+    private func socialFriend(for friend: InsigniaFriend) -> XBLiveSocialFriend? {
+        socialStore.messageableFriends.first { socialFriend in
+            socialMatchingKeys(for: socialFriend).contains(friend.key)
+        }
+    }
+
+    private func socialFriendProfile(for friend: XBLiveSocialFriend) -> XBLiveFriendProfile? {
+        socialStore.messageableFriendProfiles[friend.key]
+    }
+
+    private func socialMatchingKeys(for friend: XBLiveSocialFriend) -> Set<String> {
+        Set([
+            friend.username,
+            friend.displayName ?? ""
+        ]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty })
+    }
 }
 
 private struct ProfileFriendSortPickerRow: View {
     @Binding var selection: ProfileFriendSortMode
 
     var body: some View {
-        GeometryReader { proxy in
-            ProfileFriendSortPicker(selection: $selection)
-                .frame(width: max(0, proxy.size.width - 40))
-                .padding(.horizontal, 20)
-                .padding(.top, 4)
-                .padding(.bottom, 8)
-        }
-        .frame(height: GameLibraryGridMetrics.compactControlHeight + 12)
+        ProfileFriendSortPicker(selection: $selection)
+            .padding(.top, 4)
+            .padding(.bottom, 8)
+            .frame(height: GameLibraryGridMetrics.compactControlHeight + 12)
     }
 }
 
@@ -867,7 +1134,20 @@ struct ProfileFriendDetailView: View {
     let profile: XBLiveFriendProfile?
     let customProfileImage: UIImage?
     let supportedGames: [InsigniaSupportedGame]
+    @ObservedObject var socialStore: XBLiveSocialStore
+    let socialFriend: XBLiveSocialFriend?
+    let legacyMessages: [InsigniaMessage]
+    let markLegacyMessageViewed: (InsigniaMessage) -> Void
+    let installedGames: [LibraryFile]
+    let inviteEligibleGames: [LibraryFile]
+    let currentUserAchievements: XBLiveAchievementsSnapshot?
+    let launchGameFromInvite: (LibraryFile) -> Void
     let changeProfileImage: () -> Void
+
+    @State private var isComposePresented = false
+    @State private var isRemoveConfirmationPresented = false
+    @State private var isBlockConfirmationPresented = false
+    @State private var reportTarget: ProfileSocialReportTarget?
 
     var body: some View {
         List {
@@ -925,6 +1205,56 @@ struct ProfileFriendDetailView: View {
                 }
             }
             .dukeXThemedListRowBackground()
+
+            if let socialFriend {
+                Section("XB.Live") {
+                    NavigationLink {
+                        ProfileSocialThreadView(
+                            socialStore: socialStore,
+                            username: socialFriend.username,
+                            legacyMessages: legacyMessages,
+                            friendProfileImages: threadProfileImages,
+                            friendProfiles: threadFriendProfiles,
+                            socialFriends: threadSocialFriends,
+                            markLegacyMessageViewed: markLegacyMessageViewed,
+                            installedGames: installedGames,
+                            inviteEligibleGames: inviteEligibleGames,
+                            currentUserAchievements: currentUserAchievements,
+                            launchGameFromInvite: launchGameFromInvite
+                        )
+                    } label: {
+                        ProfileInfoRow(title: "Messages", value: "Open", systemImage: "bubble.left.and.bubble.right")
+                    }
+
+                    Button {
+                        isComposePresented = true
+                    } label: {
+                        Label("New Message", systemImage: "square.and.pencil")
+                    }
+                }
+                .dukeXThemedListRowBackground()
+
+                Section("Moderation") {
+                    Button {
+                        reportTarget = ProfileSocialReportTarget(username: socialFriend.username)
+                    } label: {
+                        Label("Report User", systemImage: "flag")
+                    }
+
+                    Button(role: .destructive) {
+                        isBlockConfirmationPresented = true
+                    } label: {
+                        Label("Block User", systemImage: "hand.raised")
+                    }
+
+                    Button(role: .destructive) {
+                        isRemoveConfirmationPresented = true
+                    } label: {
+                        Label("Remove XB.Live Friend", systemImage: "person.crop.circle.badge.minus")
+                    }
+                }
+                .dukeXThemedListRowBackground()
+            }
         }
         .navigationTitle(friend.gamertag)
         .navigationBarTitleDisplayMode(.inline)
@@ -936,6 +1266,66 @@ struct ProfileFriendDetailView: View {
                 }
                 .accessibilityLabel("Set Profile Picture")
             }
+        }
+        .sheet(isPresented: $isComposePresented) {
+            NavigationStack {
+                ProfileSocialComposeView(
+                    socialStore: socialStore,
+                    initialRecipient: socialFriend?.username ?? friend.gamertag
+                )
+            }
+        }
+        .sheet(item: $reportTarget) { target in
+            NavigationStack {
+                ProfileSocialReportView(target: target) { reason in
+                    Task {
+                        await socialStore.reportUser(target.username, reason: reason)
+                    }
+                }
+            }
+        }
+        .confirmationDialog(
+            "Remove \(socialFriend?.title ?? friend.gamertag)?",
+            isPresented: $isRemoveConfirmationPresented,
+            titleVisibility: .visible
+        ) {
+            if let socialFriend {
+                Button("Remove Friend", role: .destructive) {
+                    Task {
+                        await socialStore.removeFriend(socialFriend.username)
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                isRemoveConfirmationPresented = false
+            }
+        } message: {
+            Text("This removes the XB.Live friendship and does not affect Insignia friends.")
+        }
+        .confirmationDialog(
+            "Block \(socialFriend?.title ?? friend.gamertag)?",
+            isPresented: $isBlockConfirmationPresented,
+            titleVisibility: .visible
+        ) {
+            if let socialFriend {
+                Button("Block User", role: .destructive) {
+                    Task {
+                        await socialStore.blockUser(socialFriend.username)
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                isBlockConfirmationPresented = false
+            }
+        } message: {
+            Text("Blocked users can no longer message you on XB.Live.")
+        }
+        .alert(item: $socialStore.notice) { notice in
+            Alert(
+                title: Text(notice.title),
+                message: Text(notice.detail),
+                dismissButton: .default(Text("OK"))
+            )
         }
     }
 
@@ -949,6 +1339,34 @@ struct ProfileFriendDetailView: View {
 
     private var initial: String {
         String(friend.gamertag.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1)).uppercased()
+    }
+
+    private var threadProfileImages: [String: UIImage] {
+        guard let customProfileImage else {
+            return [:]
+        }
+
+        var images = [friend.key: customProfileImage]
+        if let socialFriend {
+            images[socialFriend.key] = customProfileImage
+        }
+        return images
+    }
+
+    private var threadFriendProfiles: [String: XBLiveFriendProfile] {
+        guard let profile else {
+            return [:]
+        }
+
+        var profiles = [friend.key: profile]
+        if let socialFriend {
+            profiles[socialFriend.key] = profile
+        }
+        return profiles
+    }
+
+    private var threadSocialFriends: [XBLiveSocialFriend] {
+        socialFriend.map { [$0] } ?? []
     }
 
     private var achievementsSummaryText: String {

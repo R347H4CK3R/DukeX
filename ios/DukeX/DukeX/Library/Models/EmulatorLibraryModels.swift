@@ -53,7 +53,8 @@ enum GameLaunchLink {
         components.scheme = scheme
         components.host = "launch"
         components.queryItems = [
-            URLQueryItem(name: "titleid", value: titleID)
+            URLQueryItem(name: "titleid", value: titleID),
+            URLQueryItem(name: "title", value: game.displayName)
         ]
         return components.url
     }
@@ -98,6 +99,22 @@ enum GameLaunchLink {
         }
 
         return normalizedTitleID(titleID)
+    }
+
+    static func titleName(from url: URL) -> String? {
+        guard url.scheme?.caseInsensitiveCompare(scheme) == .orderedSame else {
+            return nil
+        }
+
+        let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let title = queryItems
+            .first {
+                $0.name.caseInsensitiveCompare("title") == .orderedSame ||
+                    $0.name.caseInsensitiveCompare("name") == .orderedSame
+            }?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return title?.isEmpty == false ? title : nil
     }
 
     static func normalizedTitleID(_ value: String?) -> String? {
