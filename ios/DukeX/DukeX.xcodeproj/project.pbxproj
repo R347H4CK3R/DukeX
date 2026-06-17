@@ -28,6 +28,7 @@
 		C10000000000000000000001 /* AppNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000011 /* AppNotifications.swift */; };
 		C10000000000000000000002 /* GameControllerBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000012 /* GameControllerBootstrap.swift */; };
 		C10000000000000000000003 /* MetalDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000013 /* MetalDiagnostics.swift */; };
+		C10000000000000000000021 /* ControllerBatteryMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000022 /* ControllerBatteryMonitor.swift */; };
 		C10000000000000000000004 /* GameCoverTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000014 /* GameCoverTile.swift */; };
 		C10000000000000000000005 /* GamesEmptyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000015 /* GamesEmptyState.swift */; };
 		C10000000000000000000006 /* ProfileLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000016 /* ProfileLoginView.swift */; };
@@ -90,6 +91,7 @@
 		C10000000000000000000011 /* AppNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppNotifications.swift; sourceTree = "<group>"; };
 		C10000000000000000000012 /* GameControllerBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameControllerBootstrap.swift; sourceTree = "<group>"; };
 		C10000000000000000000013 /* MetalDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalDiagnostics.swift; sourceTree = "<group>"; };
+		C10000000000000000000022 /* ControllerBatteryMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControllerBatteryMonitor.swift; sourceTree = "<group>"; };
 		C10000000000000000000014 /* GameCoverTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameCoverTile.swift; sourceTree = "<group>"; };
 		C10000000000000000000015 /* GamesEmptyState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GamesEmptyState.swift; sourceTree = "<group>"; };
 		C10000000000000000000016 /* ProfileLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileLoginView.swift; sourceTree = "<group>"; };
@@ -182,6 +184,7 @@
 				I50000000000000000000015 /* DukeX-Bridging-Header.h */,
 				C10000000000000000000011 /* AppNotifications.swift */,
 				C10000000000000000000012 /* GameControllerBootstrap.swift */,
+				C10000000000000000000022 /* ControllerBatteryMonitor.swift */,
 				C10000000000000000000013 /* MetalDiagnostics.swift */,
 			);
 			path = App;
@@ -584,6 +587,7 @@
 				D20000000000000000000002 /* NostalgicDotBackgroundView.swift in Sources */,
 				C10000000000000000000001 /* AppNotifications.swift in Sources */,
 				C10000000000000000000002 /* GameControllerBootstrap.swift in Sources */,
+				C10000000000000000000021 /* ControllerBatteryMonitor.swift in Sources */,
 				C10000000000000000000003 /* MetalDiagnostics.swift in Sources */,
 				B10000000000000000000001 /* GamesLibraryView.swift in Sources */,
 					C10000000000000000000004 /* GameCoverTile.swift in Sources */,

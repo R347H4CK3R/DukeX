@@ -72,7 +72,14 @@ final class GameControllerBootstrap {
         let vendor = controller.vendorName ?? "unknown"
         let profileText = profiles.isEmpty ? "no-gamepad-profile" : profiles.joined(separator: ",")
         let attached = controller.isAttachedToDevice ? "attached" : "external"
-        return "\(vendor) category=\(controller.productCategory) \(attached) profiles=\(profileText)"
+        let batteryText: String
+        if let battery = controller.battery {
+            let level = Int((min(max(battery.batteryLevel, 0), 1) * 100).rounded())
+            batteryText = "battery=\(level)% state=\(battery.batteryState.rawValue)"
+        } else {
+            batteryText = "battery=unavailable"
+        }
+        return "\(vendor) category=\(controller.productCategory) \(attached) profiles=\(profileText) \(batteryText)"
     }
 
     private func log(_ message: String) {

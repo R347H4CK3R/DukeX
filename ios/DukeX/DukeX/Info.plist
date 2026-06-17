@@ -43,6 +43,10 @@
 	<true/>
 	<key>GCSupportsGameMode</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>DukeX uses Bluetooth to read connected game controller battery information.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>DukeX uses Bluetooth to read connected game controller battery information.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>DukeX can use the front camera to test Xbox Video Chat camera peripheral emulation.</string>
 	<key>NSMicrophoneUsageDescription</key>

@@ -1,6 +1,74 @@
 import SwiftUI
 import UIKit
 
+enum GameCoverTilePresentation {
+    case standard
+    case controllerLandscapePage
+
+    var outerPadding: CGFloat {
+        switch self {
+        case .standard:
+            return 10
+        case .controllerLandscapePage:
+            return 8
+        }
+    }
+
+    var verticalSpacing: CGFloat {
+        switch self {
+        case .standard:
+            return 6
+        case .controllerLandscapePage:
+            return 5
+        }
+    }
+
+    var titleFontSize: CGFloat {
+        switch self {
+        case .standard:
+            return 11
+        case .controllerLandscapePage:
+            return 10
+        }
+    }
+
+    var titleMinHeight: CGFloat {
+        switch self {
+        case .standard:
+            return 28
+        case .controllerLandscapePage:
+            return 24
+        }
+    }
+
+    var tileCornerRadius: CGFloat {
+        switch self {
+        case .standard:
+            return 16
+        case .controllerLandscapePage:
+            return 14
+        }
+    }
+
+    var coverCornerRadius: CGFloat {
+        switch self {
+        case .standard:
+            return 10
+        case .controllerLandscapePage:
+            return 9
+        }
+    }
+
+    var liveStatusPadding: CGFloat {
+        switch self {
+        case .standard:
+            return 7
+        case .controllerLandscapePage:
+            return 6
+        }
+    }
+}
+
 struct GameCoverTile: View {
     @Environment(\.dukeXTheme) private var theme
 
@@ -8,6 +76,8 @@ struct GameCoverTile: View {
     let canLaunch: Bool
     let liveStatus: GameLiveStatus?
     let isFavorite: Bool
+    var isHighlighted = false
+    var presentation: GameCoverTilePresentation = .standard
     let launch: () -> Void
     let addCover: () -> Void
     let copyLaunchLink: () -> Void
@@ -17,7 +87,7 @@ struct GameCoverTile: View {
     let requestRemoveGame: () -> Void
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: presentation.verticalSpacing) {
             Button(action: launch) {
                 coverWithLiveStatus
             }
@@ -26,26 +96,33 @@ struct GameCoverTile: View {
 
             Button(action: launch) {
                 Text(game.displayName)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: presentation.titleFontSize, weight: .semibold))
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .lineSpacing(0)
-                    .frame(maxWidth: .infinity, minHeight: 28, alignment: .top)
+                    .frame(maxWidth: .infinity, minHeight: presentation.titleMinHeight, alignment: .top)
             }
             .buttonStyle(.plain)
             .disabled(!canLaunch)
         }
-        .padding(10)
+        .padding(presentation.outerPadding)
         .frame(maxWidth: .infinity)
         .background(theme.surfaceColor,
-                    in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: presentation.tileCornerRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(theme.borderColor, lineWidth: 1)
+            RoundedRectangle(cornerRadius: presentation.tileCornerRadius, style: .continuous)
+                .strokeBorder(isHighlighted ? Color.accentColor : theme.borderColor,
+                              lineWidth: isHighlighted ? 2 : 1)
         }
         .contentShape(Rectangle())
         .opacity(canLaunch ? 1 : 0.55)
+        .shadow(color: isHighlighted ? Color.accentColor.opacity(0.35) : .clear,
+                radius: isHighlighted ? 10 : 0,
+                x: 0,
+                y: 0)
+        .scaleEffect(isHighlighted ? 1.025 : 1)
+        .animation(.easeInOut(duration: 0.14), value: isHighlighted)
         .contextMenu {
             Button(action: addCover) {
                 Label("Add Cover", systemImage: "photo")
@@ -85,14 +162,14 @@ struct GameCoverTile: View {
 
             if let liveStatus {
                 LiveStatusBadge(status: liveStatus)
-                    .padding(7)
+                    .padding(presentation.liveStatusPadding)
                     .allowsHitTesting(false)
             }
         }
         .aspectRatio(0.70, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: presentation.coverCornerRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: presentation.coverCornerRadius, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
         }
     }

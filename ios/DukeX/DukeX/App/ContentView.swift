@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
 import PhotosUI
+import GameController
 
 private enum MainTab: Hashable {
     case games
@@ -17,6 +18,7 @@ struct ContentView: View {
     @StateObject private var profileStore = InsigniaProfileStore()
     @StateObject private var liveStatusStore = InsigniaLiveStatusStore()
     @StateObject private var gameMetadataStore = GameMetadataStore()
+    @StateObject private var controllerBatteryMonitor = ControllerBatteryMonitor()
     @State private var importTarget: ImportTarget?
     @State private var autoLaunchAttempted = false
     @State private var coverSelectionTarget: LibraryFile?
@@ -36,8 +38,11 @@ struct ContentView: View {
     @State private var isAutomaticCloudSaveSyncRunning = false
     @State private var activeRuntimeWasGame = false
     @State private var lastObservedRuntimeState: EmulatorCoreRuntime.RunState?
+    @State private var hasPhysicalControllerConnected = false
+    @AppStorage(GameLibrarySortMode.defaultsKey) private var sortModeRawValue = GameLibrarySortMode.title.rawValue
 
     private let tabRefreshTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+    private let controllerBatteryRefreshTimer = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
 
     var body: some View {
         let theme = DukeXTheme(mode: store.themeMode)
@@ -67,7 +72,10 @@ struct ContentView: View {
                         editGameData: { gameMetadataTarget = $0 },
                         requestRemoveGame: { removalConfirmationTarget = $0 },
                         launchManicEmu: store.themeMode == .manicFeelings ? openManicEmu : nil,
-                        openXBLive: store.themeMode == .livingOriginal ? openXBLive : nil
+                        openXBLive: store.themeMode == .livingOriginal ? openXBLive : nil,
+                        hasPhysicalControllerConnected: hasPhysicalControllerConnected,
+                        controllerBatteryPercent: controllerBatteryMonitor.batteryPercent,
+                        isActiveTab: selectedTab == .games
                     )
                     .navigationTitle("DukeX")
                     .navigationBarTitleDisplayMode(.inline)
@@ -228,6 +236,7 @@ struct ContentView: View {
             }
             .onAppear {
                 lastObservedRuntimeState = runtime.state
+                refreshControllerStatus()
                 if !environmentRequestsAutoLaunch {
                     resumePendingAutoJITLaunchIfNeeded()
                 }
@@ -275,9 +284,20 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .dukeXReturnToGamesRequested)) { _ in
                 selectedTab = .games
             }
+            .onReceive(NotificationCenter.default.publisher(for: .GCControllerDidConnect)) { _ in
+                refreshControllerStatus()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .GCControllerDidDisconnect)) { _ in
+                refreshControllerStatus()
+            }
+            .onReceive(controllerBatteryRefreshTimer) { _ in
+                refreshControllerStatus()
+            }
             .onOpenURL { url in
                 handleIncomingURL(url)
             }
+
+            controllerLandscapeFooterOverlay
         }
         .environment(\.dukeXTheme, theme)
         .tint(theme.accentColor)
@@ -290,10 +310,101 @@ struct ContentView: View {
         }
     }
 
+    private var currentGameSortMode: GameLibrarySortMode {
+        GameLibrarySortMode(rawValue: sortModeRawValue) ?? .title
+    }
+
+    @ViewBuilder
+    private var controllerLandscapeFooterOverlay: some View {
+        GeometryReader { geometry in
+            if shouldShowControllerLandscapeFooter(in: geometry.size) {
+                ControllerLandscapeFooterHelpers(sortTitle: currentGameSortMode.title)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
+
+    private func shouldShowControllerLandscapeFooter(in size: CGSize) -> Bool {
+        selectedTab == .games &&
+            hasPhysicalControllerConnected &&
+            size.width > size.height
+    }
+
     private var environmentRequestsAutoLaunch: Bool {
         let environment = ProcessInfo.processInfo.environment
         return environment["XEMU_IOS_AUTO_LAUNCH_GAME"] == "1" ||
             environment["XEMU_IOS_AUTO_LAUNCH_DASHBOARD"] == "1"
+    }
+
+    private func refreshControllerStatus() {
+        guard let controller = Self.connectedPhysicalController() else {
+            hasPhysicalControllerConnected = false
+            controllerBatteryMonitor.clear()
+            logControllerIndicatorStatus(selectedController: nil, batteryPercent: nil)
+            return
+        }
+
+        hasPhysicalControllerConnected = true
+        controllerBatteryMonitor.refresh(controllerNameHints: Self.controllerNameHints())
+        logControllerIndicatorStatus(selectedController: controller, batteryPercent: controllerBatteryMonitor.batteryPercent)
+    }
+
+    private static func connectedPhysicalController() -> GCController? {
+        let controllers = GCController.controllers().filter(isPhysicalGameController)
+        return controllers.first { !$0.isAttachedToDevice } ??
+            controllers.first
+    }
+
+    private static func controllerNameHints() -> [String] {
+        GCController.controllers()
+            .filter(isPhysicalGameController)
+            .flatMap { controller in
+                [controller.vendorName, controller.productCategory].compactMap { value in
+                    let trimmed = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? nil : trimmed
+                }
+            }
+    }
+
+    private static func gameControllerBatteryPercent(for controller: GCController) -> Int? {
+        guard let battery = controller.battery,
+              battery.batteryState != .unknown else {
+            return nil
+        }
+
+        let batteryLevel = min(max(battery.batteryLevel, 0), 1)
+        return Int((batteryLevel * 100).rounded())
+    }
+
+    private static func isPhysicalGameController(_ controller: GCController) -> Bool {
+        guard !isVirtualController(controller) else {
+            return false
+        }
+        return controller.extendedGamepad != nil || controller.microGamepad != nil
+    }
+
+    private static func isVirtualController(_ controller: GCController) -> Bool {
+        let vendorName = controller.vendorName ?? ""
+        return vendorName.localizedCaseInsensitiveContains("virtual") ||
+            controller.productCategory.localizedCaseInsensitiveContains("virtual")
+    }
+
+    private func logControllerIndicatorStatus(selectedController: GCController?, batteryPercent: Int?) {
+        let selectedText: String
+        if let selectedController {
+            let vendorName = selectedController.vendorName ?? "unknown"
+            let attached = selectedController.isAttachedToDevice ? "attached" : "external"
+            let gameControllerPercent = Self.gameControllerBatteryPercent(for: selectedController)
+                .map { "\($0)%" } ?? "unavailable"
+            selectedText = "\(vendorName) category=\(selectedController.productCategory) \(attached) gameControllerBattery=\(gameControllerPercent)"
+        } else {
+            selectedText = "none"
+        }
+
+        let percentText = batteryPercent.map { "\($0)%" } ?? "unavailable"
+        NSLog("xemu_ios: controller_indicator: selected=%@ bluetoothBattery=%@", selectedText, percentText)
     }
 
     private var removalConfirmationPresented: Binding<Bool> {
@@ -781,5 +892,86 @@ struct ContentView: View {
             autoJIT.forcePendingLaunchReady()
             resumePendingAutoJITLaunchIfNeeded()
         }
+    }
+}
+
+private struct ControllerLandscapeFooterHelpers: View {
+    let sortTitle: String
+
+    var body: some View {
+        HStack(alignment: .center) {
+            sortHelper
+
+            Spacer(minLength: 16)
+
+            actionHelpers
+        }
+        .padding(.horizontal, 52)
+        .padding(.bottom, 33)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .foregroundStyle(.primary)
+        .accessibilityHidden(true)
+    }
+
+    private var sortHelper: some View {
+        HStack(spacing: 6) {
+            ControllerLandscapeButtonGlyph("X")
+            Text("Sort")
+                .font(.system(size: 12, weight: .semibold))
+            Text("|")
+                .font(.system(size: 12, weight: .regular))
+                .foregroundStyle(.secondary)
+            Text(sortTitle)
+                .font(.system(size: 12, weight: .regular))
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+    }
+
+    private var actionHelpers: some View {
+        HStack(spacing: 16) {
+            HStack(spacing: 6) {
+                ControllerLandscapeButtonGlyph("A")
+                Text("Select")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+
+            HStack(spacing: 5) {
+                ControllerLandscapeButtonGlyph("LT", style: .wide)
+                Text("/")
+                    .font(.system(size: 12, weight: .semibold))
+                ControllerLandscapeButtonGlyph("RT", style: .wide)
+                Text("Page")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+    }
+}
+
+private struct ControllerLandscapeButtonGlyph: View {
+    enum Style {
+        case round
+        case wide
+    }
+
+    let label: String
+    var style: Style
+
+    init(_ label: String, style: Style = .round) {
+        self.label = label
+        self.style = style
+    }
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: style == .round ? 10 : 9, weight: .bold))
+            .foregroundStyle(Color.black.opacity(0.88))
+            .frame(width: style == .round ? 18 : 27,
+                   height: 18,
+                   alignment: .center)
+            .background(.white.opacity(0.92),
+                        in: Capsule(style: .continuous))
     }
 }
