@@ -1086,16 +1086,6 @@ private struct ProfileSocialGameInvite {
         ProfileSocialGameInvite(titleID: titleID, title: title, url: url)
     }
 
-    static func mobCatIconURL(for titleID: String) -> URL? {
-        guard let normalizedTitleID = GameLaunchLink.normalizedTitleID(titleID),
-              normalizedTitleID.count >= 4 else {
-            return nil
-        }
-
-        let prefix = String(normalizedTitleID.prefix(4))
-        return URL(string: "https://raw.githubusercontent.com/MobCat/MobCats-original-xbox-game-list/main/icon/\(prefix)/\(normalizedTitleID).png")
-    }
-
     private static func launchURLCandidate(in body: String) -> String {
         if body.lowercased().hasPrefix("\(GameLaunchLink.scheme)://") {
             return body
@@ -1171,7 +1161,7 @@ private struct ProfileSocialGameInviteCard: View {
         } label: {
             HStack(spacing: 12) {
                 ProfileSocialGameInviteIcon(
-                    iconURL: ProfileSocialGameInvite.mobCatIconURL(for: context.invite.titleID),
+                    iconURL: XboxTitleIconCatalog.mobCatIconURL(for: context.invite.titleID),
                     localCoverURL: context.installedGame?.coverURL
                 )
                 .frame(width: 58, height: 58)
@@ -1399,7 +1389,7 @@ private struct ProfileSocialGameInvitePreviewRow: View {
     var body: some View {
         HStack(spacing: 12) {
             ProfileSocialGameInviteIcon(
-                iconURL: game.titleID.flatMap(ProfileSocialGameInvite.mobCatIconURL(for:)),
+                iconURL: XboxTitleIconCatalog.mobCatIconURL(for: game.titleID),
                 localCoverURL: game.coverURL
             )
             .frame(width: 42, height: 42)
@@ -1572,6 +1562,7 @@ struct ProfileXBLiveFriendsView: View {
                                 socialStore: socialStore,
                                 friend: friend,
                                 customProfileImage: nil,
+                                supportedGames: [],
                                 legacyMessages: [],
                                 markLegacyMessageViewed: { _ in },
                                 installedGames: [],
@@ -1818,6 +1809,7 @@ struct ProfileXBLiveFriendDetailView: View {
     @ObservedObject var socialStore: XBLiveSocialStore
     let friend: XBLiveSocialFriend
     let customProfileImage: UIImage?
+    let supportedGames: [InsigniaSupportedGame]
     let legacyMessages: [InsigniaMessage]
     let markLegacyMessageViewed: (InsigniaMessage) -> Void
     let installedGames: [LibraryFile]
@@ -1838,7 +1830,7 @@ struct ProfileXBLiveFriendDetailView: View {
         List {
             Section {
                 VStack(spacing: 10) {
-                    ProfileSocialAvatar(image: customProfileImage, url: profile?.avatarURL ?? friend.avatarURL, initial: initial)
+                    ProfileSocialAvatar(image: customProfileImage, url: effectiveProfile?.avatarURL ?? friend.avatarURL, initial: initial)
                         .frame(width: 74, height: 74)
                         .contextMenu {
                             Button(action: changeProfileImage) {
@@ -1852,7 +1844,7 @@ struct ProfileXBLiveFriendDetailView: View {
                             .multilineTextAlignment(.center)
                         Text(statusLine)
                             .font(.subheadline)
-                            .foregroundStyle(friend.isOnline == true ? .green : .secondary)
+                            .foregroundStyle(isOnline ? .green : .secondary)
                             .multilineTextAlignment(.center)
                     }
                 }
@@ -1862,7 +1854,7 @@ struct ProfileXBLiveFriendDetailView: View {
             .dukeXThemedListRowBackground()
 
             Section("Profile") {
-                if let profile {
+                if let profile = effectiveProfile {
                     if let score = profile.achievementScore {
                         ProfileInfoRow(title: "Gamerscore", value: "\(score)", systemImage: "trophy")
                     }
@@ -1872,7 +1864,7 @@ struct ProfileXBLiveFriendDetailView: View {
                             snapshot: profile.achievements,
                             profileScore: profile.achievementScore,
                             profileCount: profile.achievementCount,
-                            supportedGames: []
+                            supportedGames: supportedGames
                         )
                     } label: {
                         ProfileInfoRow(title: "Achievements", value: achievementsSummaryText, systemImage: "medal")
@@ -2026,19 +2018,30 @@ struct ProfileXBLiveFriendDetailView: View {
     }
 
     private var statusLine: String {
-        if let currentGame = profile?.currentGame?.trimmedNonEmpty ?? friend.currentGame?.trimmedNonEmpty {
+        if let currentGame = effectiveProfile?.currentGame?.trimmedNonEmpty ?? friend.currentGame?.trimmedNonEmpty {
             return "Online in \(currentGame)"
         }
-        if profile?.isOnline == true || friend.isOnline == true {
+        if effectiveProfile?.isOnline == true || friend.isOnline == true {
             return "Online"
         }
-        let state = profile?.lastState?.trimmedNonEmpty ?? friend.status?.trimmedNonEmpty
+        if let lastOnlineAt = effectiveProfile?.lastOnlineAt ?? friend.lastOnlineAt,
+           let relativeText = ProfileSocialFriendOnlineText.relativeLastOnlineText(from: lastOnlineAt) {
+            return "Last Online: \(relativeText)"
+        }
+        let state = effectiveProfile?.lastState?.trimmedNonEmpty ?? friend.status?.trimmedNonEmpty
         guard let state,
               state.caseInsensitiveCompare("offline") != .orderedSame,
               state.caseInsensitiveCompare("unknown") != .orderedSame else {
             return "Last Online: Unknown"
         }
         return state
+    }
+
+    private var isOnline: Bool {
+        effectiveProfile?.isOnline == true ||
+            effectiveProfile?.currentGame?.trimmedNonEmpty != nil ||
+            friend.isOnline == true ||
+            friend.currentGame?.trimmedNonEmpty != nil
     }
 
     private var threadProfileImages: [String: UIImage] {
@@ -2050,7 +2053,7 @@ struct ProfileXBLiveFriendDetailView: View {
     }
 
     private var threadFriendProfiles: [String: XBLiveFriendProfile] {
-        guard let profile else {
+        guard let profile = effectiveProfile else {
             return [:]
         }
 
@@ -2058,17 +2061,17 @@ struct ProfileXBLiveFriendDetailView: View {
     }
 
     private var achievementsSummaryText: String {
-        profile?.achievements?.summaryText ??
-            profile?.achievementCount.map(String.init) ??
+        effectiveProfile?.achievements?.summaryText ??
+            effectiveProfile?.achievementCount.map(String.init) ??
             "Not Synced"
     }
 
     private var playtimeSummaryText: String {
-        if let minutes = profile?.totalMinutes {
+        if let minutes = effectiveProfile?.totalMinutes {
             return playTimeText(minutes)
         }
 
-        let games = profile?.gamesPlayed ?? []
+        let games = effectiveProfile?.gamesPlayed ?? []
         if !games.isEmpty {
             return "\(games.count) Game\(games.count == 1 ? "" : "s")"
         }
@@ -2079,6 +2082,10 @@ struct ProfileXBLiveFriendDetailView: View {
     private func loadProfile() async {
         guard !isLoadingProfile else {
             return
+        }
+
+        if profile == nil {
+            profile = socialStore.messageableFriendProfiles[friend.key]
         }
 
         isLoadingProfile = true
@@ -2138,6 +2145,10 @@ struct ProfileXBLiveFriendDetailView: View {
             return "\(Int(hours.rounded())) hr"
         }
         return String(format: "%.1f hr", hours)
+    }
+
+    private var effectiveProfile: XBLiveFriendProfile? {
+        profile ?? socialStore.messageableFriendProfiles[friend.key]
     }
 }
 

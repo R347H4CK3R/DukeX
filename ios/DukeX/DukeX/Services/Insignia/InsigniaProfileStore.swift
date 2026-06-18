@@ -278,7 +278,22 @@ struct XBLiveFriendProfile: Codable, Equatable {
     let achievements: XBLiveAchievementsSnapshot?
 
     var avatarURL: URL? { avatarURLString.flatMap(URL.init(string:)) }
-    var lastPlayedImageURL: URL? { lastPlayedImageURLString.flatMap(URL.init(string:)) }
+    var lastPlayedImageURL: URL? {
+        if let lastPlayedGame {
+            let matchingGame = gamesPlayed?.first {
+                $0.gameName.localizedCaseInsensitiveCompare(lastPlayedGame) == .orderedSame
+            }
+            if let iconURL = matchingGame?.imageURL {
+                return iconURL
+            }
+        }
+
+        if let iconURL = gamesPlayed?.first?.imageURL {
+            return iconURL
+        }
+
+        return lastPlayedImageURLString.flatMap(URL.init(string:))
+    }
 }
 
 struct XBLiveGamePlayed: Codable, Identifiable, Equatable {
@@ -292,7 +307,10 @@ struct XBLiveGamePlayed: Codable, Identifiable, Equatable {
         (titleId ?? gameName).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
-    var imageURL: URL? { imageUrl.flatMap(URL.init(string:)) }
+    var imageURL: URL? {
+        XboxTitleIconCatalog.mobCatIconURL(for: titleId) ??
+            imageUrl.flatMap(URL.init(string:))
+    }
 
     init(
         gameName: String,

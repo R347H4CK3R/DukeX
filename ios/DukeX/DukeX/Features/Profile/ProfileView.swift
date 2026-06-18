@@ -343,7 +343,7 @@ struct ProfileView: View {
 
     private func unreadMessagesText(legacyMessages: [InsigniaMessage]) -> String {
         let count = socialStore.unreadCount + profileStore.unviewedMessages(from: legacyMessages).count
-        return "\(count) Unread"
+        return "\(count)"
     }
 
     private func pendingMessagesText(_ count: Int) -> String {

@@ -491,6 +491,7 @@ struct ProfileFriendsView: View {
                     socialStore: socialStore,
                     friend: friend,
                     customProfileImage: friendProfileImages[friend.key],
+                    supportedGames: supportedGames,
                     legacyMessages: legacyMessages,
                     markLegacyMessageViewed: profileStore.markMessageViewed,
                     installedGames: installedGames,
@@ -1148,12 +1149,14 @@ struct ProfileFriendDetailView: View {
     @State private var isRemoveConfirmationPresented = false
     @State private var isBlockConfirmationPresented = false
     @State private var reportTarget: ProfileSocialReportTarget?
+    @State private var liveProfile: XBLiveFriendProfile?
+    @State private var isLoadingLiveProfile = false
 
     var body: some View {
         List {
             Section {
                 VStack(spacing: 10) {
-                    ProfileCircleImage(image: customProfileImage, url: profile?.avatarURL, fallbackInitial: initial)
+                    ProfileCircleImage(image: customProfileImage, url: effectiveProfile?.avatarURL, fallbackInitial: initial)
                         .frame(width: 74, height: 74)
                         .contextMenu {
                             Button(action: changeProfileImage) {
@@ -1176,15 +1179,15 @@ struct ProfileFriendDetailView: View {
             .dukeXThemedListRowBackground()
 
             Section("Profile") {
-                if let score = profile?.achievementScore {
+                if let score = effectiveProfile?.achievementScore {
                     ProfileInfoRow(title: "Gamerscore", value: "\(score)", systemImage: "trophy")
                 }
 
                 NavigationLink {
                     ProfileAchievementsView(
-                        snapshot: profile?.achievements,
-                        profileScore: profile?.achievementScore,
-                        profileCount: profile?.achievementCount,
+                        snapshot: effectiveProfile?.achievements,
+                        profileScore: effectiveProfile?.achievementScore,
+                        profileCount: effectiveProfile?.achievementCount,
                         supportedGames: supportedGames
                     )
                 } label: {
@@ -1193,14 +1196,14 @@ struct ProfileFriendDetailView: View {
 
                 NavigationLink {
                     ProfilePlaytimeView(
-                        totalMinutes: profile?.totalMinutes,
-                        games: profile?.gamesPlayed ?? []
+                        totalMinutes: effectiveProfile?.totalMinutes,
+                        games: effectiveProfile?.gamesPlayed ?? []
                     )
                 } label: {
                     ProfileInfoRow(title: "Play Time", value: playtimeSummaryText, systemImage: "timer")
                 }
 
-                if let lastPlayed = profile?.lastPlayedGame {
+                if let lastPlayed = effectiveProfile?.lastPlayedGame {
                     ProfileInfoRow(title: "Last Played", value: lastPlayed, systemImage: "clock")
                 }
             }
@@ -1250,7 +1253,7 @@ struct ProfileFriendDetailView: View {
                     Button(role: .destructive) {
                         isRemoveConfirmationPresented = true
                     } label: {
-                        Label("Remove XB.Live Friend", systemImage: "person.crop.circle.badge.minus")
+                        Label("Remove Friend", systemImage: "person.crop.circle.badge.minus")
                     }
                 }
                 .dukeXThemedListRowBackground()
@@ -1320,6 +1323,9 @@ struct ProfileFriendDetailView: View {
         } message: {
             Text("Blocked users can no longer message you on XB.Live.")
         }
+        .task(id: friend.gamertag) {
+            await loadLiveProfile()
+        }
         .alert(item: $socialStore.notice) { notice in
             Alert(
                 title: Text(notice.title),
@@ -1330,11 +1336,11 @@ struct ProfileFriendDetailView: View {
     }
 
     private var statusLine: String {
-        ProfileFriendOnlineText.statusLine(friend: friend, profile: profile)
+        ProfileFriendOnlineText.statusLine(friend: friend, profile: effectiveProfile)
     }
 
     private var isOnline: Bool {
-        ProfileFriendOnlineText.isOnline(friend: friend, profile: profile)
+        ProfileFriendOnlineText.isOnline(friend: friend, profile: effectiveProfile)
     }
 
     private var initial: String {
@@ -1354,7 +1360,7 @@ struct ProfileFriendDetailView: View {
     }
 
     private var threadFriendProfiles: [String: XBLiveFriendProfile] {
-        guard let profile else {
+        guard let profile = effectiveProfile else {
             return [:]
         }
 
@@ -1370,17 +1376,17 @@ struct ProfileFriendDetailView: View {
     }
 
     private var achievementsSummaryText: String {
-        profile?.achievements?.summaryText ??
-            profile?.achievementCount.map(String.init) ??
+        effectiveProfile?.achievements?.summaryText ??
+            effectiveProfile?.achievementCount.map(String.init) ??
             "Not Synced"
     }
 
     private var playtimeSummaryText: String {
-        if let minutes = profile?.totalMinutes {
+        if let minutes = effectiveProfile?.totalMinutes {
             return playTimeText(minutes)
         }
 
-        let games = profile?.gamesPlayed ?? []
+        let games = effectiveProfile?.gamesPlayed ?? []
         if !games.isEmpty {
             return "\(games.count) Game\(games.count == 1 ? "" : "s")"
         }
@@ -1394,6 +1400,68 @@ struct ProfileFriendDetailView: View {
             return "\(Int(hours.rounded())) hr"
         }
         return String(format: "%.1f hr", hours)
+    }
+
+    private var effectiveProfile: XBLiveFriendProfile? {
+        liveProfile ?? profile
+    }
+
+    private func loadLiveProfile() async {
+        guard !isLoadingLiveProfile else {
+            return
+        }
+
+        isLoadingLiveProfile = true
+        defer {
+            isLoadingLiveProfile = false
+        }
+
+        let username = socialFriend?.username ?? friend.gamertag
+        guard let xbProfile = try? await XBLiveService.fetchProfile(username: username) else {
+            return
+        }
+
+        let existingProfile = effectiveProfile
+        let games = (try? await XBLiveService.fetchGamesPlayed(username: username)) ??
+            existingProfile?.gamesPlayed ??
+            []
+        let achievements = (try? await XBLiveService.fetchAchievements(username: username)) ??
+            existingProfile?.achievements
+        let lastGame = games.first { $0.gameName == xbProfile.lastPlayedGame } ?? games.first
+        let isOnline = xbProfile.isOnline || friend.isOnline || friend.game?.nilIfEmpty != nil
+
+        liveProfile = XBLiveFriendProfile(
+            gamertag: friend.gamertag,
+            avatarURLString: xbProfile.avatarURLString ?? existingProfile?.avatarURLString,
+            isOnline: isOnline,
+            lastState: xbProfile.lastState ?? friend.status,
+            currentGame: xbProfile.currentGame ?? (isOnline ? friend.game : nil),
+            lastPlayedGame: xbProfile.lastPlayedGame ?? lastGame?.gameName,
+            lastPlayedAt: xbProfile.lastPlayedAt,
+            lastOnlineAt: lastOnlineTimestamp(isOnline: isOnline, profile: xbProfile),
+            lastCheckedAt: xbProfile.lastCheckedAt,
+            achievementScore: xbProfile.achievementScore,
+            achievementCount: xbProfile.achievementCount,
+            totalMinutes: xbProfile.totalMinutes ?? totalMinutes(from: games),
+            lastPlayedImageURLString: lastGame?.imageUrl ?? existingProfile?.lastPlayedImageURLString,
+            gamesPlayed: games,
+            achievements: achievements
+        )
+    }
+
+    private func lastOnlineTimestamp(isOnline: Bool, profile: XBLiveProfileSnapshot) -> Double? {
+        if isOnline {
+            return profile.lastCheckedAt ?? profile.lastOnlineAt ?? friend.lastSeenAt ?? Date().timeIntervalSince1970
+        }
+        return profile.lastOnlineAt ?? profile.lastPlayedAt ?? friend.lastSeenAt
+    }
+
+    private func totalMinutes(from games: [XBLiveGamePlayed]) -> Double? {
+        let minutes = games.compactMap(\.totalMinutes)
+        guard !minutes.isEmpty else {
+            return nil
+        }
+        return minutes.reduce(0, +)
     }
 }
 
@@ -1490,7 +1558,8 @@ struct ProfileAchievementsView: View {
                 return ProfileAchievementGameGroup(
                     id: supportedGame?.titleID ?? first.gameTitleID ?? first.groupID ?? Self.groupKey(for: first),
                     title: supportedGame?.title ?? first.gameTitle?.nilIfEmpty ?? "Unknown Game",
-                    iconURL: supportedGame?.iconURL ?? first.gameIconURL,
+                    iconURL: XboxTitleIconCatalog.mobCatIconURL(for: supportedGame?.titleID ?? first.gameTitleID) ??
+                        first.gameIconURL,
                     iconAssetName: Self.iconAssetName(for: sortedAchievements),
                     achievements: sortedAchievements
                 )

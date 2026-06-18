@@ -8,6 +8,21 @@ struct XBLiveSocialNotice: Identifiable, Equatable {
     let detail: String
 }
 
+private struct XBLiveSocialCachedSnapshot: Codable {
+    let currentUsername: String?
+    let conversations: [XBLiveSocialConversation]
+    let inboxMessages: [XBLiveSocialMessage]
+    let messageableFriends: [XBLiveSocialFriend]
+    let incomingRequests: [XBLiveFriendRequest]
+    let outgoingRequests: [XBLiveFriendRequest]
+    let blockedUsers: [String]
+    let relationshipStatuses: [String: XBLiveFriendRelationshipStatus]
+    let threadMessagesByUser: [String: [XBLiveSocialMessage]]
+    let messageableFriendProfiles: [String: XBLiveFriendProfile]
+    let unreadCount: Int
+    let savedAt: Date
+}
+
 enum XBLiveFriendRelationshipStatus: String, Codable, Equatable {
     case none
     case friends
@@ -1079,10 +1094,12 @@ final class XBLiveSocialStore: ObservableObject {
     private static let sentMessageIDsKey = "XBLiveSocialStore.sentMessageIDs"
     private static let locallyReadMessageIDsKey = "XBLiveSocialStore.locallyReadMessageIDs"
     private static let observedNotificationMessageKeysKey = "XBLiveSocialStore.observedNotificationMessageKeys"
+    private static let cachedSnapshotKey = "XBLiveSocialStore.cachedSnapshot"
     private static let maxObservedNotificationMessageKeys = 500
 
     init() {
         loadMessageIdentityCache()
+        loadCachedSnapshot()
         XBLiveSocialLocalNotificationPresenter.shared.activateForegroundPresentation()
     }
 
@@ -1121,6 +1138,7 @@ final class XBLiveSocialStore: ObservableObject {
         isRefreshingMessages = false
         isRefreshingFriends = false
         notice = nil
+        UserDefaults.standard.removeObject(forKey: Self.cachedSnapshotKey)
     }
 
     func configureLocalNotifications(
@@ -1193,6 +1211,7 @@ final class XBLiveSocialStore: ObservableObject {
                 let friends = friendsResponse.friends.sorted(by: friendSort)
                 messageableFriends = friends
             }
+            saveCachedSnapshot()
         } catch {
             handle(error, title: "Messages Not Synced")
         }
@@ -1231,6 +1250,7 @@ final class XBLiveSocialStore: ObservableObject {
             if let blocksResponse {
                 blockedUsers = blocksResponse.blocked.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
             }
+            saveCachedSnapshot()
         } catch {
             handle(error, title: "Friends Not Synced")
         }
@@ -1277,6 +1297,7 @@ final class XBLiveSocialStore: ObservableObject {
             locallyReadMessageIDs.formUnion(incomingMessages.map(\.id))
             rememberObservedNotificationMessages(messages)
             saveMessageIdentityCache()
+            saveCachedSnapshot()
 
             let readIDs = incomingMessages.compactMap(\.numericID)
             for id in readIDs {
@@ -1744,6 +1765,49 @@ final class XBLiveSocialStore: ObservableObject {
         UserDefaults.standard.set(Array(observedNotificationMessageKeys).sorted(), forKey: Self.observedNotificationMessageKeysKey)
     }
 
+    private func loadCachedSnapshot() {
+        guard let data = UserDefaults.standard.data(forKey: Self.cachedSnapshotKey),
+              let snapshot = try? JSONDecoder().decode(XBLiveSocialCachedSnapshot.self, from: data) else {
+            return
+        }
+
+        currentUsername = snapshot.currentUsername
+        conversations = snapshot.conversations.filter(isKnownConversation).sorted(by: conversationSort)
+        inboxMessages = snapshot.inboxMessages
+            .filter { isKnownMessage($0, currentUser: snapshot.currentUsername) }
+            .sorted(by: XBLiveSocialMessage.chronologicalSort)
+        messageableFriends = snapshot.messageableFriends.sorted(by: friendSort)
+        incomingRequests = snapshot.incomingRequests
+        outgoingRequests = snapshot.outgoingRequests
+        blockedUsers = snapshot.blockedUsers
+        relationshipStatuses = snapshot.relationshipStatuses
+        threadMessagesByUser = snapshot.threadMessagesByUser
+        messageableFriendProfiles = snapshot.messageableFriendProfiles
+        unreadCount = snapshot.unreadCount
+    }
+
+    private func saveCachedSnapshot() {
+        let snapshot = XBLiveSocialCachedSnapshot(
+            currentUsername: currentUsername,
+            conversations: conversations,
+            inboxMessages: inboxMessages,
+            messageableFriends: messageableFriends,
+            incomingRequests: incomingRequests,
+            outgoingRequests: outgoingRequests,
+            blockedUsers: blockedUsers,
+            relationshipStatuses: relationshipStatuses,
+            threadMessagesByUser: threadMessagesByUser,
+            messageableFriendProfiles: messageableFriendProfiles,
+            unreadCount: unreadCount,
+            savedAt: Date()
+        )
+
+        guard let data = try? JSONEncoder().encode(snapshot) else {
+            return
+        }
+        UserDefaults.standard.set(data, forKey: Self.cachedSnapshotKey)
+    }
+
     private func notifyForNewIncomingMessages(_ messages: [XBLiveSocialMessage]) {
         let incomingMessages = messages.filter { !$0.isFromCurrentUser(currentUsername) }
         let currentKeys = Set(incomingMessages.map { notificationKey(for: $0) })
@@ -1819,7 +1883,7 @@ final class XBLiveSocialStore: ObservableObject {
                 titleID: invite.titleID,
                 embeddedTitle: invite.title
             )
-            let iconURL = Self.mobCatIconURL(for: invite.titleID)
+            let iconURL = XboxTitleIconCatalog.mobCatIconURL(for: invite.titleID)
             let localImageURL = notificationGameLocalCoverURL?(invite.titleID)
             Task {
                 await XBLiveSocialLocalNotificationPresenter.shared.schedule(
@@ -1930,16 +1994,6 @@ final class XBLiveSocialStore: ObservableObject {
         activeThreadKey == username.socialNormalizedKey
     }
 
-    private static func mobCatIconURL(for titleID: String) -> URL? {
-        guard let normalizedTitleID = GameLaunchLink.normalizedTitleID(titleID),
-              normalizedTitleID.count >= 4 else {
-            return nil
-        }
-
-        let prefix = String(normalizedTitleID.prefix(4))
-        return URL(string: "https://raw.githubusercontent.com/MobCat/MobCats-original-xbox-game-list/main/icon/\(prefix)/\(normalizedTitleID).png")
-    }
-
     private func fetchMessageableFriendProfiles(
         for friends: [XBLiveSocialFriend],
         existingProfiles: [String: XBLiveFriendProfile]
@@ -1958,6 +2012,8 @@ final class XBLiveSocialStore: ObservableObject {
                     let games = (try? await XBLiveService.fetchGamesPlayed(username: friend.username)) ??
                         existingProfile?.gamesPlayed ??
                         []
+                    let achievements = (try? await XBLiveService.fetchAchievements(username: friend.username)) ??
+                        existingProfile?.achievements
                     let lastGame = games.first { $0.gameName == xbProfile.lastPlayedGame } ?? games.first
                     let isOnline = xbProfile.isOnline || friend.isOnline == true || friend.currentGame?.nilIfBlank != nil
                     let totalMinutes = xbProfile.totalMinutes ?? Self.totalMinutes(from: games)
@@ -1981,7 +2037,7 @@ final class XBLiveSocialStore: ObservableObject {
                         totalMinutes: totalMinutes,
                         lastPlayedImageURLString: lastGame?.imageUrl,
                         gamesPlayed: games,
-                        achievements: existingProfile?.achievements
+                        achievements: achievements
                     )
                     return (friend.key, profile)
                 }
@@ -2027,6 +2083,10 @@ final class XBLiveSocialStore: ObservableObject {
     }
 
     private func handle(_ error: Error, title: String) {
+        guard !isCancellation(error) else {
+            return
+        }
+
         if let socialError = error as? XBLiveSocialServiceError,
            socialError == .unauthorized {
             clear()
@@ -2036,6 +2096,20 @@ final class XBLiveSocialStore: ObservableObject {
             title: title,
             detail: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         )
+    }
+
+    private func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return true
+        }
+
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            return true
+        }
+
+        return error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            .localizedCaseInsensitiveCompare("cancelled") == .orderedSame
     }
 
     private func conversationSort(_ lhs: XBLiveSocialConversation, _ rhs: XBLiveSocialConversation) -> Bool {

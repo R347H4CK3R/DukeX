@@ -132,6 +132,18 @@ enum GameLaunchLink {
     }
 }
 
+enum XboxTitleIconCatalog {
+    static func mobCatIconURL(for titleID: String?) -> URL? {
+        guard let normalizedTitleID = GameLaunchLink.normalizedTitleID(titleID),
+              normalizedTitleID.count >= 4 else {
+            return nil
+        }
+
+        let prefix = String(normalizedTitleID.prefix(4))
+        return URL(string: "https://raw.githubusercontent.com/MobCat/MobCats-original-xbox-game-list/main/icon/\(prefix)/\(normalizedTitleID).png")
+    }
+}
+
 enum GameLibraryExportLink {
     struct Response {
         let callbackURL: URL
