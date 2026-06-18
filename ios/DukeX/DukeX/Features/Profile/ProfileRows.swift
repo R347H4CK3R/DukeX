@@ -879,7 +879,7 @@ struct ProfileActiveGameRow: View {
                 Text(game.detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(1)
             }
 
             Spacer(minLength: 8)
@@ -1188,7 +1188,8 @@ struct ProfileFriendDetailView: View {
                         snapshot: effectiveProfile?.achievements,
                         profileScore: effectiveProfile?.achievementScore,
                         profileCount: effectiveProfile?.achievementCount,
-                        supportedGames: supportedGames
+                        supportedGames: supportedGames,
+                        gamesPlayed: effectiveProfile?.gamesPlayed ?? []
                     )
                 } label: {
                     ProfileInfoRow(title: "Achievements", value: achievementsSummaryText, systemImage: "medal")
@@ -1511,6 +1512,7 @@ struct ProfileAchievementsView: View {
     let profileScore: Int?
     let profileCount: Int?
     let supportedGames: [InsigniaSupportedGame]
+    let gamesPlayed: [XBLiveGamePlayed]
 
     var body: some View {
         List {
@@ -1525,10 +1527,13 @@ struct ProfileAchievementsView: View {
             .dukeXThemedListRowBackground()
 
             Section("Games") {
-                if achievementGroups.isEmpty {
-                    ProfileEmptyRow(title: "No achievements synced", systemImage: "medal")
+                if gameAchievementGroups.isEmpty {
+                    ProfileEmptyRow(
+                        title: achievementGroups.isEmpty ? "No achievements synced" : "No game achievements synced",
+                        systemImage: "medal"
+                    )
                 } else {
-                    ForEach(achievementGroups) { group in
+                    ForEach(gameAchievementGroups) { group in
                         NavigationLink {
                             ProfileAchievementGameView(group: group)
                         } label: {
@@ -1538,6 +1543,19 @@ struct ProfileAchievementsView: View {
                 }
             }
             .dukeXThemedListRowBackground()
+
+            if !xblCoreAchievementGroups.isEmpty {
+                Section("Cores") {
+                    ForEach(xblCoreAchievementGroups) { group in
+                        NavigationLink {
+                            ProfileAchievementGameView(group: group)
+                        } label: {
+                            ProfileAchievementGameRow(group: group)
+                        }
+                    }
+                }
+                .dukeXThemedListRowBackground()
+            }
         }
         .navigationTitle("Achievements")
         .navigationBarTitleDisplayMode(.inline)
@@ -1555,18 +1573,29 @@ struct ProfileAchievementsView: View {
                 }
                 let first = sortedAchievements[0]
                 let supportedGame = supportedGame(for: sortedAchievements)
+                let isXBLCore = sortedAchievements.contains(where: Self.isXBLCoreAchievement)
                 return ProfileAchievementGameGroup(
-                    id: supportedGame?.titleID ?? first.gameTitleID ?? first.groupID ?? Self.groupKey(for: first),
-                    title: supportedGame?.title ?? first.gameTitle?.nilIfEmpty ?? "Unknown Game",
-                    iconURL: XboxTitleIconCatalog.mobCatIconURL(for: supportedGame?.titleID ?? first.gameTitleID) ??
+                    id: isXBLCore ? "xbl-core" : supportedGame?.titleID ?? first.gameTitleID ?? first.groupID ?? Self.groupKey(for: first),
+                    title: isXBLCore ? "XB.Live Core" : supportedGame?.title ?? first.gameTitle?.nilIfEmpty ?? "Unknown Game",
+                    iconURL: isXBLCore ? nil : XboxTitleIconCatalog.mobCatIconURL(for: supportedGame?.titleID ?? first.gameTitleID) ??
                         first.gameIconURL,
-                    iconAssetName: Self.iconAssetName(for: sortedAchievements),
-                    achievements: sortedAchievements
+                    iconAssetName: isXBLCore ? "XBLCoreAchievementIcon" : Self.iconAssetName(for: sortedAchievements),
+                    achievements: sortedAchievements,
+                    gamesPlayed: gamesPlayed,
+                    isXBLCore: isXBLCore
                 )
             }
             .sorted { lhs, rhs in
                 lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
             }
+    }
+
+    private var gameAchievementGroups: [ProfileAchievementGameGroup] {
+        achievementGroups.filter { !$0.isXBLCore }
+    }
+
+    private var xblCoreAchievementGroups: [ProfileAchievementGameGroup] {
+        achievementGroups.filter(\.isXBLCore)
     }
 
     private func supportedGame(for achievements: [XBLiveAchievement]) -> InsigniaSupportedGame? {
@@ -1583,6 +1612,9 @@ struct ProfileAchievementsView: View {
     }
 
     private static func groupKey(for achievement: XBLiveAchievement) -> String {
+        if isXBLCoreAchievement(achievement) {
+            return "xbl_core"
+        }
         if let groupID = achievement.groupID?.nilIfEmpty {
             return groupID.lowercased()
         }
@@ -1615,21 +1647,56 @@ private struct ProfileAchievementGameGroup: Identifiable {
     let iconURL: URL?
     let iconAssetName: String?
     let achievements: [XBLiveAchievement]
+    let gamesPlayed: [XBLiveGamePlayed]
+    let isXBLCore: Bool
 
     var unlockedAchievements: [XBLiveAchievement] {
         achievements
-            .filter { $0.isUnlocked != false }
+            .filter(isEffectivelyUnlocked)
             .sorted(by: Self.unlockedAchievementSort)
     }
 
     var lockedAchievements: [XBLiveAchievement] {
         achievements
-            .filter { $0.isUnlocked == false }
-            .sorted(by: Self.titleSort)
+            .filter { !isEffectivelyUnlocked($0) }
+            .sorted(by: lockedAchievementSort)
     }
 
     var score: Int {
         unlockedAchievements.compactMap(\.score).reduce(0, +)
+    }
+
+    func progress(for achievement: XBLiveAchievement) -> ProfileAchievementProgress? {
+        ProfileAchievementProgressResolver.visibleProgress(for: achievement, gamesPlayed: gamesPlayed)
+    }
+
+    private func isEffectivelyUnlocked(_ achievement: XBLiveAchievement) -> Bool {
+        if achievement.isUnlocked != false {
+            return true
+        }
+        return ProfileAchievementProgressResolver.resolvedProgress(
+            for: achievement,
+            gamesPlayed: gamesPlayed
+        )?.fractionComplete == 1
+    }
+
+    private func lockedAchievementSort(_ lhs: XBLiveAchievement, _ rhs: XBLiveAchievement) -> Bool {
+        let lhsProgress = progress(for: lhs)?.fractionComplete
+        let rhsProgress = progress(for: rhs)?.fractionComplete
+
+        switch (lhsProgress, rhsProgress) {
+        case let (lhsProgress?, rhsProgress?):
+            if lhsProgress != rhsProgress {
+                return lhsProgress > rhsProgress
+            }
+            return Self.titleSort(lhs, rhs)
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        case (nil, nil):
+            return Self.titleSort(lhs, rhs)
+        }
     }
 
     private static func unlockedAchievementSort(_ lhs: XBLiveAchievement, _ rhs: XBLiveAchievement) -> Bool {
@@ -1691,6 +1758,158 @@ private struct ProfileAchievementGameGroup: Identifiable {
         }
 
         return nil
+    }
+}
+
+private struct ProfileAchievementProgress: Equatable {
+    let fractionComplete: Double
+    let label: String?
+
+    var displayPercent: Int {
+        min(max(Int((fractionComplete * 100).rounded()), 1), 99)
+    }
+}
+
+private enum ProfileAchievementProgressResolver {
+    static func resolvedProgress(
+        for achievement: XBLiveAchievement,
+        gamesPlayed: [XBLiveGamePlayed]
+    ) -> ProfileAchievementProgress? {
+        apiProgress(for: achievement) ??
+            playtimeProgress(for: achievement, gamesPlayed: gamesPlayed) ??
+            gameCountProgress(for: achievement, gamesPlayed: gamesPlayed)
+    }
+
+    static func visibleProgress(
+        for achievement: XBLiveAchievement,
+        gamesPlayed: [XBLiveGamePlayed]
+    ) -> ProfileAchievementProgress? {
+        guard achievement.isUnlocked == false,
+              let progress = resolvedProgress(for: achievement, gamesPlayed: gamesPlayed),
+              progress.fractionComplete > 0,
+              progress.fractionComplete < 1 else {
+            return nil
+        }
+        return progress
+    }
+
+    private static func apiProgress(for achievement: XBLiveAchievement) -> ProfileAchievementProgress? {
+        guard let apiProgress = achievement.progress,
+              let fraction = apiProgress.fractionComplete else {
+            return nil
+        }
+        return ProfileAchievementProgress(
+            fractionComplete: clampedFraction(fraction),
+            label: apiProgress.label ?? achievement.progressHint
+        )
+    }
+
+    private static func playtimeProgress(
+        for achievement: XBLiveAchievement,
+        gamesPlayed: [XBLiveGamePlayed]
+    ) -> ProfileAchievementProgress? {
+        guard let description = achievement.description?.nilIfEmpty,
+              description.localizedCaseInsensitiveContains("play"),
+              description.localizedCaseInsensitiveContains("time"),
+              let targetMinutes = targetMinutes(from: description),
+              targetMinutes > 0 else {
+            return nil
+        }
+
+        let currentMinutes = currentPlaytimeMinutes(for: achievement, gamesPlayed: gamesPlayed)
+        return ProfileAchievementProgress(
+            fractionComplete: clampedFraction(currentMinutes / targetMinutes),
+            label: nil
+        )
+    }
+
+    private static func gameCountProgress(
+        for achievement: XBLiveAchievement,
+        gamesPlayed: [XBLiveGamePlayed]
+    ) -> ProfileAchievementProgress? {
+        guard let description = achievement.description?.nilIfEmpty else {
+            return nil
+        }
+
+        let normalizedDescription = description.lowercased()
+        guard normalizedDescription.contains("game"),
+              normalizedDescription.contains("insignia"),
+              normalizedDescription.contains("play"),
+              let targetCount = targetGameCount(from: description),
+              targetCount > 0 else {
+            return nil
+        }
+
+        let currentCount = gamesPlayed.filter { game in
+            (game.totalMinutes ?? 0) > 0 || game.lastPlayedAt != nil
+        }.count
+        return ProfileAchievementProgress(
+            fractionComplete: clampedFraction(Double(currentCount) / Double(targetCount)),
+            label: nil
+        )
+    }
+
+    private static func currentPlaytimeMinutes(
+        for achievement: XBLiveAchievement,
+        gamesPlayed: [XBLiveGamePlayed]
+    ) -> Double {
+        if let titleID = achievement.gameTitleID?.nilIfEmpty {
+            let normalizedTitleID = titleID.uppercased()
+            return gamesPlayed
+                .first { $0.titleId?.uppercased() == normalizedTitleID }?
+                .totalMinutes ?? 0
+        }
+
+        if let gameTitle = achievement.gameTitle?.nilIfEmpty,
+           gameTitle.localizedCaseInsensitiveCompare("XBL Core") != .orderedSame,
+           let game = gamesPlayed.first(where: {
+               normalizedTitle($0.gameName) == normalizedTitle(gameTitle)
+           }) {
+            return game.totalMinutes ?? 0
+        }
+
+        return gamesPlayed.compactMap(\.totalMinutes).reduce(0, +)
+    }
+
+    private static func targetMinutes(from text: String) -> Double? {
+        if let hours = firstNumber(in: text, before: #"hours?|hrs?"#) {
+            return hours * 60
+        }
+        if let minutes = firstNumber(in: text, before: #"minutes?|mins?"#) {
+            return minutes
+        }
+        return nil
+    }
+
+    private static func targetGameCount(from text: String) -> Int? {
+        if let count = firstNumber(in: text, before: #"different\s+games|games"#) {
+            return max(1, Int(count.rounded()))
+        }
+        return nil
+    }
+
+    private static func firstNumber(in text: String, before unitPattern: String) -> Double? {
+        let pattern = #"([0-9]+(?:\.[0-9]+)?)\s+"# + unitPattern
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: range),
+              match.numberOfRanges >= 2,
+              let valueRange = Range(match.range(at: 1), in: text) else {
+            return nil
+        }
+        return Double(text[valueRange])
+    }
+
+    private static func normalizedTitle(_ title: String) -> String {
+        title
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "", options: .regularExpression)
+    }
+
+    private static func clampedFraction(_ fraction: Double) -> Double {
+        min(max(fraction, 0), 1)
     }
 }
 
@@ -1770,7 +1989,11 @@ private struct ProfileAchievementGameView: View {
             if !group.lockedAchievements.isEmpty {
                 Section("Not Yet Unlocked") {
                     ForEach(group.lockedAchievements) { achievement in
-                        ProfileAchievementRow(achievement: achievement, isLocked: true)
+                        ProfileAchievementRow(
+                            achievement: achievement,
+                            isLocked: true,
+                            progress: group.progress(for: achievement)
+                        )
                     }
                 }
                 .dukeXThemedListRowBackground()
@@ -1785,26 +2008,12 @@ private struct ProfileAchievementGameView: View {
 private struct ProfileAchievementRow: View {
     let achievement: XBLiveAchievement
     var isLocked = false
+    var progress: ProfileAchievementProgress? = nil
 
     var body: some View {
         HStack(spacing: 12) {
-            AsyncImage(url: achievement.iconURL) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                default:
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Color.secondary.opacity(0.18))
-                        Image(systemName: isLocked ? "lock" : "medal")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .frame(width: 42, height: 42)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            achievementIcon
+                .frame(width: 42, height: 42)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(achievement.title)
@@ -1834,6 +2043,60 @@ private struct ProfileAchievementRow: View {
         }
         .frame(minHeight: 54)
         .opacity(isLocked ? 0.48 : 1.0)
+    }
+
+    @ViewBuilder
+    private var achievementIcon: some View {
+        if let progress {
+            ProfileAchievementProgressBadge(progress: progress)
+        } else {
+            AsyncImage(url: achievement.iconURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                default:
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.secondary.opacity(0.18))
+                        Image(systemName: isLocked ? "lock" : "medal")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+    }
+}
+
+private struct ProfileAchievementProgressBadge: View {
+    let progress: ProfileAchievementProgress
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.secondary.opacity(0.18))
+
+            Circle()
+                .stroke(Color.accentColor.opacity(0.16), lineWidth: 3.5)
+                .frame(width: 30, height: 30)
+
+            Circle()
+                .trim(from: 0, to: progress.fractionComplete)
+                .stroke(
+                    Color.accentColor.opacity(0.92),
+                    style: StrokeStyle(lineWidth: 3.5, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .frame(width: 30, height: 30)
+
+            Text("\(progress.displayPercent)%")
+                .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .minimumScaleFactor(0.85)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 

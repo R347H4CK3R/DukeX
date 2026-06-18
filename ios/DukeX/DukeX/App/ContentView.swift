@@ -116,6 +116,9 @@ struct ContentView: View {
                         appToolbar
                     }
                 }
+                .onAppear {
+                    refreshProfileTab()
+                }
                 .tabItem {
                     Label("Profile", systemImage: "person.crop.circle")
                 }
@@ -280,7 +283,11 @@ struct ContentView: View {
                 }
             }
             .onChange(of: selectedTab) { newTab in
-                refreshGamesAndProfile()
+                if newTab == .profile {
+                    refreshProfileTab()
+                } else {
+                    refreshGamesAndProfile()
+                }
                 if newTab == .settings {
                     refreshLibraryForSettings()
                 }
@@ -465,6 +472,11 @@ struct ContentView: View {
 
     private func refreshGamesAndProfile() {
         refreshGamesTab()
+        profileStore.refresh()
+        refreshProfileSocialIfAuthenticated()
+    }
+
+    private func refreshProfileTab() {
         profileStore.refresh()
         refreshProfileSocialIfAuthenticated()
     }

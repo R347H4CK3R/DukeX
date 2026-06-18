@@ -489,6 +489,8 @@ struct XBLiveAchievement: Codable, Identifiable, Equatable {
     let gameIconURLString: String?
     let isUnlocked: Bool?
     let unlockedAt: String?
+    let progressHint: String?
+    let progress: XBLiveAchievementProgress?
 
     var iconURL: URL? { iconURLString.flatMap(URL.init(string:)) }
     var gameIconURL: URL? { gameIconURLString.flatMap(URL.init(string:)) }
@@ -513,6 +515,11 @@ struct XBLiveAchievement: Codable, Identifiable, Equatable {
             inheritedGameIconURLString
         isUnlocked = json.flexibleBool(for: ["unlocked", "earned", "achieved", "is_unlocked", "isUnlocked"])
         unlockedAt = json.flexibleString(for: ["unlocked_at", "unlockedAt", "earned_at", "earnedAt", "date"])
+        progressHint = json.flexibleString(for: ["progressHint", "progress_hint", "hint"])
+        progress = XBLiveAchievementProgress(
+            json: json.value(for: ["progress", "achievementProgress", "achievement_progress"]),
+            hint: progressHint
+        )
     }
 
     static func defaultTitle(forGroupID groupID: String?, category: String?) -> String? {
@@ -522,6 +529,238 @@ struct XBLiveAchievement: Codable, Identifiable, Equatable {
             return "XBL Core"
         }
         return nil
+    }
+}
+
+struct XBLiveAchievementProgress: Codable, Equatable {
+    let currentValue: Double?
+    let targetValue: Double?
+    let percentValue: Double?
+    let label: String?
+    let isLowerValueBetter: Bool
+
+    var fractionComplete: Double? {
+        if let currentValue,
+           let targetValue,
+           targetValue > 0 {
+            let fraction = isLowerValueBetter
+                ? targetValue / max(currentValue, 1)
+                : currentValue / targetValue
+            return Self.clampedFraction(fraction)
+        }
+
+        if let percentValue {
+            let fraction = percentValue > 1 ? percentValue / 100.0 : percentValue
+            return Self.clampedFraction(fraction)
+        }
+
+        return nil
+    }
+
+    init?(
+        currentValue: Double?,
+        targetValue: Double?,
+        percentValue: Double?,
+        label: String?,
+        isLowerValueBetter: Bool = false
+    ) {
+        self.currentValue = currentValue
+        self.targetValue = targetValue
+        self.percentValue = percentValue
+        self.label = label
+        self.isLowerValueBetter = isLowerValueBetter
+
+        guard fractionComplete != nil else {
+            return nil
+        }
+    }
+
+    init?(json: Any?, hint: String?) {
+        if let dictionary = json as? [String: Any] {
+            let keyNames = dictionary.keys.map { $0.lowercased() }
+            let isLowerValueBetter = keyNames.contains { $0.contains("rank") }
+            let current = dictionary.flexibleDouble(for: Self.currentKeys) ??
+                Self.firstMatchingDouble(in: dictionary, prefixes: ["current"], excluding: ["percent", "percentage"])
+            let target = dictionary.flexibleDouble(for: Self.targetKeys) ??
+                Self.firstMatchingDouble(in: dictionary, prefixes: ["target", "required", "goal"], excluding: ["percent", "percentage"])
+            let percent = dictionary.flexibleDouble(for: Self.percentKeys)
+            let label = dictionary.flexibleString(for: ["label", "text", "description", "hint"]) ?? hint
+            self.init(
+                currentValue: current,
+                targetValue: target,
+                percentValue: percent,
+                label: label,
+                isLowerValueBetter: isLowerValueBetter
+            )
+            return
+        }
+
+        if let number = json as? NSNumber {
+            self.init(currentValue: nil, targetValue: nil, percentValue: number.doubleValue, label: hint)
+            return
+        }
+
+        if let string = json as? String,
+           let progress = Self.progress(fromHint: string) {
+            self = progress
+            return
+        }
+
+        if let hintProgress = hint.flatMap(Self.progress(fromHint:)) {
+            self = hintProgress
+            return
+        }
+
+        return nil
+    }
+
+    private static let currentKeys = [
+        "current",
+        "currentValue",
+        "current_value",
+        "currentCount",
+        "current_count",
+        "count",
+        "value",
+        "progressValue",
+        "progress_value"
+    ]
+
+    private static let targetKeys = [
+        "target",
+        "targetValue",
+        "target_value",
+        "targetCount",
+        "target_count",
+        "required",
+        "requiredValue",
+        "required_value",
+        "goal",
+        "goalValue",
+        "goal_value",
+        "total",
+        "max",
+        "maximum"
+    ]
+
+    private static let percentKeys = [
+        "percent",
+        "percentage",
+        "progressPercent",
+        "progress_percent",
+        "percentComplete",
+        "percent_complete",
+        "completion",
+        "completionValue",
+        "completion_value"
+    ]
+
+    private static func progress(fromHint hint: String) -> XBLiveAchievementProgress? {
+        let trimmedHint = hint.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHint.isEmpty else {
+            return nil
+        }
+
+        if let fraction = firstFraction(in: trimmedHint) {
+            return XBLiveAchievementProgress(
+                currentValue: fraction.current,
+                targetValue: fraction.target,
+                percentValue: nil,
+                label: trimmedHint,
+                isLowerValueBetter: false
+            )
+        }
+
+        if let percent = firstPercent(in: trimmedHint) {
+            return XBLiveAchievementProgress(
+                currentValue: nil,
+                targetValue: nil,
+                percentValue: percent,
+                label: trimmedHint,
+                isLowerValueBetter: false
+            )
+        }
+
+        return nil
+    }
+
+    private static func firstFraction(in text: String) -> (current: Double, target: Double)? {
+        let pattern = #"([0-9]+(?:\.[0-9]+)?)\s*/\s*([0-9]+(?:\.[0-9]+)?)"#
+        guard let match = firstMatch(in: text, pattern: pattern),
+              match.numberOfRanges >= 3,
+              let current = double(from: text, range: match.range(at: 1)),
+              let target = double(from: text, range: match.range(at: 2)),
+              target > 0 else {
+            return nil
+        }
+
+        return (current, target)
+    }
+
+    private static func firstPercent(in text: String) -> Double? {
+        let pattern = #"([0-9]+(?:\.[0-9]+)?)\s*%"#
+        guard let match = firstMatch(in: text, pattern: pattern),
+              match.numberOfRanges >= 2 else {
+            return nil
+        }
+
+        return double(from: text, range: match.range(at: 1))
+    }
+
+    private static func firstMatch(in text: String, pattern: String) -> NSTextCheckingResult? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.firstMatch(in: text, options: [], range: range)
+    }
+
+    private static func double(from text: String, range: NSRange) -> Double? {
+        guard let range = Range(range, in: text) else {
+            return nil
+        }
+        return Double(text[range])
+    }
+
+    private static func firstMatchingDouble(
+        in dictionary: [String: Any],
+        prefixes: [String],
+        excluding excludedFragments: [String]
+    ) -> Double? {
+        for (key, value) in dictionary {
+            let normalizedKey = key.lowercased()
+            guard prefixes.contains(where: { normalizedKey.hasPrefix($0) }),
+                  !excludedFragments.contains(where: { normalizedKey.contains($0) }) else {
+                continue
+            }
+            if let doubleValue = double(from: value) {
+                return doubleValue
+            }
+        }
+        return nil
+    }
+
+    private static func double(from value: Any) -> Double? {
+        if let doubleValue = value as? Double {
+            return doubleValue
+        }
+        if let intValue = value as? Int {
+            return Double(intValue)
+        }
+        if let int64Value = value as? Int64 {
+            return Double(int64Value)
+        }
+        if let numberValue = value as? NSNumber {
+            return numberValue.doubleValue
+        }
+        if let stringValue = value as? String {
+            return Double(stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return nil
+    }
+
+    private static func clampedFraction(_ fraction: Double) -> Double {
+        min(max(fraction, 0), 1)
     }
 }
 
@@ -763,6 +1002,7 @@ struct InsigniaDashboardView: UIViewControllerRepresentable {
 enum InsigniaPublicService {
     static let dashboardURL = URL(string: "https://insignia.live/dashboard/")!
     static let gamesURL = URL(string: "https://insignia.live/games")!
+    private static let xblOnlineUsersURL = URL(string: "https://xb.live/api/online-users")!
 
     static func fetchLiveStatusSnapshot() async throws -> InsigniaLiveStatusSnapshot {
         async let publicSnapshot = fetchPublicSnapshot()
@@ -776,6 +1016,7 @@ enum InsigniaPublicService {
     }
 
     static func fetchPublicSnapshot() async throws -> InsigniaPublicSnapshot {
+        async let xblActiveGames = fetchXBLiveActiveGames()
         let url = URL(string: "https://insignia.live/")!
         let (data, response) = try await URLSession.shared.data(from: url)
 
@@ -789,7 +1030,7 @@ enum InsigniaPublicService {
             registeredUsers: firstStatistic(named: "Registered Users", in: html) ?? "Unknown",
             gamesSupported: firstStatistic(named: "Games Supported", in: html) ?? "Unknown",
             usersOnline: firstStatistic(named: "Users Online Now", in: html) ?? "Unknown",
-            activeGames: activeGames(from: html)
+            activeGames: (try? await xblActiveGames) ?? []
         )
     }
 
@@ -842,6 +1083,195 @@ enum InsigniaPublicService {
                     iconUrl: iconUrl
                 )
             }
+    }
+
+    private static func fetchXBLiveActiveGames() async throws -> [InsigniaActiveGame] {
+        let (data, response) = try await URLSession.shared.data(from: xblOnlineUsersURL)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw ServiceError.unavailable
+        }
+
+        let games = try JSONDecoder().decode([String: XBLiveOnlineUsersGame].self, from: data)
+        return games.values
+            .filter(\.isActive)
+            .map { game in
+                let titleID = GameLaunchLink.normalizedTitleID(game.titleID)
+                let serial = activeGameSerial(for: game, titleID: titleID)
+                let detail = activeGameDetail(for: game, serial: serial)
+                return InsigniaActiveGame(
+                    id: titleID ?? game.id,
+                    title: game.displayName,
+                    serial: serial,
+                    onlineUsers: "\(game.onlineCount)",
+                    detail: detail,
+                    iconUrl: XboxTitleIconCatalog.mobCatIconURL(for: titleID)?.absoluteString
+                )
+            }
+            .sorted { lhs, rhs in
+                let lhsCount = Int(lhs.onlineUsers) ?? 0
+                let rhsCount = Int(rhs.onlineUsers) ?? 0
+                if lhsCount != rhsCount {
+                    return lhsCount > rhsCount
+                }
+                return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+            }
+    }
+
+    private static func activeGameDetail(for game: XBLiveOnlineUsersGame, serial: String) -> String {
+        var detailParts: [String] = []
+        if !serial.isEmpty {
+            detailParts.append(serial)
+        }
+        if let activityText = activeGameActivityText(for: game) {
+            detailParts.append(activityText)
+        }
+        return detailParts.isEmpty ? "XB.Live activity" : detailParts.joined(separator: " - ")
+    }
+
+    private static func activeGameSerial(for game: XBLiveOnlineUsersGame, titleID: String?) -> String {
+        [game.productCode, titleID]
+            .compactMap { trimmed($0) }
+            .joined(separator: " | ")
+    }
+
+    private static func activeGameActivityText(for game: XBLiveOnlineUsersGame) -> String? {
+        if let activePlayersDisplay = trimmed(game.activePlayersDisplay),
+           let normalizedDisplay = normalizedInlineText(activePlayersDisplay),
+           !isEmptyActivityText(normalizedDisplay) {
+            return normalizedDisplay
+        }
+        if game.activeLobbyPlayers > 0, game.sessionCount > 0 {
+            return "\(game.activeLobbyPlayers) in \(game.sessionCount) \(game.sessionCount == 1 ? "session" : "sessions")"
+        }
+        if game.activeLobbyPlayers > 0, game.activeLobbies > 0 {
+            return "\(game.activeLobbyPlayers) in \(game.activeLobbies) \(game.activeLobbies == 1 ? "session" : "sessions")"
+        }
+        if game.sessionCount > 0 {
+            return "\(game.sessionCount) active \(game.sessionCount == 1 ? "session" : "sessions")"
+        }
+        if game.activeLobbies > 0 {
+            return "\(game.activeLobbies) active \(game.activeLobbies == 1 ? "session" : "sessions")"
+        }
+        if game.hasActiveSession {
+            return "Active session"
+        }
+        return nil
+    }
+
+    private static func isEmptyActivityText(_ value: String) -> Bool {
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized == "-" ||
+            normalized == "0" ||
+            normalized == "0 sessions" ||
+            normalized == "0 in 0 session" ||
+            normalized == "0 in 0 sessions"
+    }
+
+    private static func normalizedInlineText(_ value: String) -> String? {
+        let normalized = value
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    private struct XBLiveOnlineUsersGame: Decodable {
+        let name: String?
+        let titleID: String?
+        let publisher: String?
+        let imageURLString: String?
+        let onlineCount: Int
+        let activePlayersDisplay: String?
+        let activeLobbies: Int
+        let hasActiveSession: Bool
+        let sessionCount: Int
+        let activeLobbyPlayers: Int
+        let lobbyHostNames: [String]
+
+        var id: String {
+            GameLaunchLink.normalizedTitleID(titleID) ?? displayName
+        }
+
+        var displayName: String {
+            Self.trimmed(name) ?? "Unknown Game"
+        }
+
+        var productCode: String? {
+            Self.productCode(from: imageURLString)
+        }
+
+        var isActive: Bool {
+            onlineCount > 0 ||
+                activeLobbies > 0 ||
+                hasActiveSession ||
+                sessionCount > 0 ||
+                activeLobbyPlayers > 0
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: ProfileFlexibleCodingKey.self)
+            name = container.flexibleString(for: ["name", "game", "gameName", "title"])
+            titleID = container.flexibleString(for: ["titleId", "titleID", "title_id", "gameTitleId", "game_title_id"])?.uppercased()
+            publisher = container.flexibleString(for: ["publisher", "publisherName", "publisher_name"])
+            imageURLString = container.flexibleString(for: ["image", "imageUrl", "image_url", "thumbnail", "thumbnailUrl", "thumbnail_url"])
+            onlineCount = container.flexibleInt(for: ["online", "onlineCount", "online_count", "usersOnline", "users_online"]) ?? 0
+            activePlayersDisplay = container.flexibleString(for: ["activePlayersDisplay", "active_players_display"])
+            activeLobbies = container.flexibleInt(for: ["activeLobbies", "active_lobbies", "lobbies"]) ?? 0
+            hasActiveSession = container.flexibleBool(for: ["hasActiveSession", "has_active_session", "activeSession", "active_session"]) ?? false
+            sessionCount = container.flexibleInt(for: ["sessionCount", "session_count", "sessions"]) ?? 0
+            activeLobbyPlayers = container.flexibleInt(for: ["activeLobbyPlayers", "active_lobby_players", "lobbyPlayers", "lobby_players"]) ?? 0
+
+            if let key = ProfileFlexibleCodingKey(stringValue: "lobbyHostNames"),
+               let names = try? container.decodeIfPresent([String].self, forKey: key) {
+                lobbyHostNames = names.compactMap { Self.trimmed($0) }
+            } else if let key = ProfileFlexibleCodingKey(stringValue: "lobby_host_names"),
+                      let names = try? container.decodeIfPresent([String].self, forKey: key) {
+                lobbyHostNames = names.compactMap { Self.trimmed($0) }
+            } else if let hostName = container.flexibleString(for: ["lobbyHostName", "lobby_host_name", "host", "hostName", "host_name"]) {
+                lobbyHostNames = Self.trimmed(hostName).map { [$0] } ?? []
+            } else {
+                lobbyHostNames = []
+            }
+        }
+
+        private static func trimmed(_ value: String?) -> String? {
+            InsigniaPublicService.trimmed(value)
+        }
+
+        private static func productCode(from imageURLString: String?) -> String? {
+            guard let imageURLString = trimmed(imageURLString) else {
+                return nil
+            }
+
+            let fileName = URL(string: imageURLString)?
+                .deletingPathExtension()
+                .lastPathComponent ?? NSString(string: imageURLString).lastPathComponent
+            let baseName = URL(fileURLWithPath: fileName).deletingPathExtension().lastPathComponent
+            let pattern = #"^([A-Za-z]{2})([0-9]{3})"#
+            guard let regex = try? NSRegularExpression(pattern: pattern),
+                  let match = regex.firstMatch(
+                    in: baseName,
+                    range: NSRange(baseName.startIndex..<baseName.endIndex, in: baseName)
+                  ),
+                  let prefixRange = Range(match.range(at: 1), in: baseName),
+                  let numberRange = Range(match.range(at: 2), in: baseName) else {
+                return nil
+            }
+
+            return "\(baseName[prefixRange].uppercased())-\(baseName[numberRange])"
+        }
+    }
+
+    private static func trimmed(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            return nil
+        }
+        return value
     }
 
     private static func supportedGames(from html: String) -> [InsigniaSupportedGame] {
@@ -2095,6 +2525,16 @@ private extension KeyedDecodingContainer where Key == ProfileFlexibleCodingKey {
 }
 
 private extension Dictionary where Key == String, Value == Any {
+    func value(for keys: [String]) -> Any? {
+        for key in keys {
+            guard let value = self[key], !(value is NSNull) else {
+                continue
+            }
+            return value
+        }
+        return nil
+    }
+
     func flexibleString(for keys: [String]) -> String? {
         for key in keys {
             guard let value = self[key], !(value is NSNull) else {
@@ -2109,6 +2549,31 @@ private extension Dictionary where Key == String, Value == Any {
             }
             if let double = value as? Double {
                 return String(format: "%.0f", double)
+            }
+        }
+        return nil
+    }
+
+    func flexibleDouble(for keys: [String]) -> Double? {
+        for key in keys {
+            guard let value = self[key], !(value is NSNull) else {
+                continue
+            }
+            if let double = value as? Double {
+                return double
+            }
+            if let int = value as? Int {
+                return Double(int)
+            }
+            if let int64 = value as? Int64 {
+                return Double(int64)
+            }
+            if let number = value as? NSNumber {
+                return number.doubleValue
+            }
+            if let string = value as? String,
+               let double = Double(string.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return double
             }
         }
         return nil

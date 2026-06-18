@@ -88,7 +88,8 @@ struct ProfileView: View {
                     snapshot: snapshot?.achievements,
                     profileScore: snapshot?.xbProfile?.achievementScore,
                     profileCount: snapshot?.xbProfile?.achievementCount,
-                    supportedGames: snapshot?.supportedGames ?? []
+                    supportedGames: snapshot?.supportedGames ?? [],
+                    gamesPlayed: snapshot?.playtimeGames ?? []
                 )
             } label: {
                 ProfileAchievementsSummaryRow(

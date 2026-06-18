@@ -1864,7 +1864,8 @@ struct ProfileXBLiveFriendDetailView: View {
                             snapshot: profile.achievements,
                             profileScore: profile.achievementScore,
                             profileCount: profile.achievementCount,
-                            supportedGames: supportedGames
+                            supportedGames: supportedGames,
+                            gamesPlayed: profile.gamesPlayed ?? []
                         )
                     } label: {
                         ProfileInfoRow(title: "Achievements", value: achievementsSummaryText, systemImage: "medal")
