@@ -12,6 +12,7 @@ struct ProfileSocialMessagesView: View {
     let installedGames: [LibraryFile]
     let inviteEligibleGames: [LibraryFile]
     let currentUserAchievements: XBLiveAchievementsSnapshot?
+    let currentUserGamesPlayed: [XBLiveGamePlayed]
     let launchGameFromInvite: (LibraryFile) -> Void
 
     @State private var isComposePresented = false
@@ -39,6 +40,7 @@ struct ProfileSocialMessagesView: View {
                                 installedGames: installedGames,
                                 inviteEligibleGames: inviteEligibleGames,
                                 currentUserAchievements: currentUserAchievements,
+                                currentUserGamesPlayed: currentUserGamesPlayed,
                                 launchGameFromInvite: launchGameFromInvite
                             )
                         } label: {
@@ -607,6 +609,7 @@ struct ProfileSocialThreadView: View {
     let installedGames: [LibraryFile]
     let inviteEligibleGames: [LibraryFile]
     let currentUserAchievements: XBLiveAchievementsSnapshot?
+    let currentUserGamesPlayed: [XBLiveGamePlayed]
     let launchGameFromInvite: (LibraryFile) -> Void
 
     @State private var draft = ""
@@ -614,6 +617,10 @@ struct ProfileSocialThreadView: View {
     @State private var reportTarget: ProfileSocialReportTarget?
     @State private var isBlockConfirmationPresented = false
     @State private var isInviteSheetPresented = false
+    @State private var leaderboardRanksByTitleID: [String: Int] = [:]
+    @State private var leaderboardRanksLoadedForUsername: String?
+    @State private var isLoadingLeaderboardRanks = false
+    @State private var inviteStatsSnapshots = ProfileSocialGameInviteSnapshotStore.loadSnapshots()
 
     var body: some View {
         ScrollViewReader { scrollProxy in
@@ -691,6 +698,7 @@ struct ProfileSocialThreadView: View {
             }
             .onAppear {
                 socialStore.beginReadingThread(with: username)
+                inviteStatsSnapshots = ProfileSocialGameInviteSnapshotStore.loadSnapshots()
                 scrollToLatestMessage(using: scrollProxy, animated: false)
             }
             .onDisappear {
@@ -698,15 +706,24 @@ struct ProfileSocialThreadView: View {
             }
             .onChange(of: latestMessageID) { _ in
                 scrollToLatestMessage(using: scrollProxy)
+                Task {
+                    await loadCurrentUserLeaderboardRanksIfNeeded()
+                    freezeMissingInviteSnapshots()
+                }
             }
             .task(id: username) {
                 socialStore.beginReadingThread(with: username)
                 await socialStore.loadThread(with: username)
+                await loadCurrentUserLeaderboardRanksIfNeeded()
+                freezeMissingInviteSnapshots()
                 markLegacyMessagesViewed()
                 scrollToLatestMessage(using: scrollProxy, animated: false)
             }
             .refreshable {
                 await socialStore.loadThread(with: username)
+                leaderboardRanksLoadedForUsername = nil
+                await loadCurrentUserLeaderboardRanksIfNeeded()
+                freezeMissingInviteSnapshots()
                 markLegacyMessagesViewed()
                 scrollToLatestMessage(using: scrollProxy, animated: false)
             }
@@ -737,7 +754,10 @@ struct ProfileSocialThreadView: View {
 	                    ProfileSocialGameInviteView(
 	                        socialStore: socialStore,
 	                        username: username,
-	                        inviteEligibleGames: inviteEligibleGames
+	                        inviteEligibleGames: inviteEligibleGames,
+                            currentUserAchievements: currentUserAchievements,
+                            currentUserGamesPlayed: currentUserGamesPlayed,
+                            leaderboardRanksByTitleID: leaderboardRanksByTitleID
 	                    )
 	                }
 	            }
@@ -895,20 +915,74 @@ struct ProfileSocialThreadView: View {
             installedGame?.displayName ??
             inviteEligibleGames.first { GameLaunchLink.normalizedTitleID($0.titleID) == invite.titleID }?.displayName ??
             "Title \(invite.titleID)"
-        let score = ProfileSocialGameInviteScore.score(
-            forTitleID: invite.titleID,
-            title: resolvedTitle,
-            achievements: currentUserAchievements
+        let liveStats = liveInviteStats(for: invite, title: resolvedTitle)
+        let snapshotKey = ProfileSocialGameInviteSnapshotStore.snapshotKey(
+            for: message,
+            invite: invite,
+            currentUsername: socialStore.currentUsername,
+            threadUsername: username
         )
+        let snapshotStats = inviteStatsSnapshots[snapshotKey]?.stats
 
         return ProfileSocialGameInviteContext(
             invite: invite.replacingTitle(resolvedTitle),
             installedGame: installedGame,
-            score: score,
+            stats: snapshotStats ?? liveStats,
             senderName: message.sender.trimmedNonEmpty ?? username,
             recipientName: username,
+            createdAt: ProfileSocialTimestamp.value(message.createdAt).map { Date(timeIntervalSince1970: $0) },
             launch: launchGameFromInvite
         )
+    }
+
+    private func liveInviteStats(for invite: ProfileSocialGameInvite, title: String) -> ProfileSocialGameInviteStats {
+        ProfileSocialGameInviteStats.stats(
+            forTitleID: invite.titleID,
+            title: title,
+            achievements: currentUserAchievements,
+            gamesPlayed: currentUserGamesPlayed,
+            leaderboardRank: leaderboardRanksByTitleID[invite.titleID.uppercased()]
+        )
+    }
+
+    private func freezeMissingInviteSnapshots() {
+        var snapshots = inviteStatsSnapshots
+        var didChange = false
+
+        for message in messages {
+            guard let invite = ProfileSocialGameInvite(messageBody: message.body) else {
+                continue
+            }
+
+            let key = ProfileSocialGameInviteSnapshotStore.snapshotKey(
+                for: message,
+                invite: invite,
+                currentUsername: socialStore.currentUsername,
+                threadUsername: username
+            )
+            guard snapshots[key] == nil else {
+                continue
+            }
+
+            let resolvedTitle = invite.title.trimmedNonEmpty ??
+                installedGames.first { GameLaunchLink.normalizedTitleID($0.titleID) == invite.titleID }?.displayName ??
+                inviteEligibleGames.first { GameLaunchLink.normalizedTitleID($0.titleID) == invite.titleID }?.displayName ??
+                "Title \(invite.titleID)"
+            let snapshot = ProfileSocialGameInviteSnapshotStore.takePendingSnapshot(
+                for: message,
+                invite: invite,
+                currentUsername: socialStore.currentUsername,
+                threadUsername: username
+            ) ?? ProfileSocialGameInviteStatsSnapshot(stats: liveInviteStats(for: invite, title: resolvedTitle))
+
+            snapshots[key] = snapshot
+            didChange = true
+        }
+
+        if didChange {
+            inviteStatsSnapshots = snapshots
+            ProfileSocialGameInviteSnapshotStore.saveSnapshots(snapshots)
+        }
     }
 
     private func scrollToLatestMessage(using proxy: ScrollViewProxy, animated: Bool = true) {
@@ -923,6 +997,54 @@ struct ProfileSocialThreadView: View {
                 action()
             }
         }
+    }
+
+    private func loadCurrentUserLeaderboardRanksIfNeeded() async {
+        guard !isLoadingLeaderboardRanks,
+              !inviteTitleIDs.isEmpty,
+              let currentUsername = socialStore.currentUsername?.trimmedNonEmpty else {
+            return
+        }
+
+        let usernameKey = currentUsername.socialNormalizedKey
+        guard leaderboardRanksLoadedForUsername != usernameKey else {
+            return
+        }
+
+        isLoadingLeaderboardRanks = true
+        defer {
+            isLoadingLeaderboardRanks = false
+        }
+
+        guard let entries = try? await XBLiveService.fetchLeaderboardRanks(username: currentUsername) else {
+            return
+        }
+
+        leaderboardRanksByTitleID = bestLeaderboardRanksByTitleID(from: entries)
+        leaderboardRanksLoadedForUsername = usernameKey
+    }
+
+    private var inviteTitleIDs: [String] {
+        Array(Set(messages.compactMap { ProfileSocialGameInvite(messageBody: $0.body)?.titleID.uppercased() }))
+            .sorted()
+    }
+
+    private func bestLeaderboardRanksByTitleID(from entries: [XBLiveLeaderboardRankEntry]) -> [String: Int] {
+        var ranksByTitleID: [String: Int] = [:]
+        for entry in entries {
+            guard let titleID = entry.titleID?.uppercased(),
+                  let rank = entry.rank,
+                  rank > 0 else {
+                continue
+            }
+
+            if let existingRank = ranksByTitleID[titleID] {
+                ranksByTitleID[titleID] = min(existingRank, rank)
+            } else {
+                ranksByTitleID[titleID] = rank
+            }
+        }
+        return ranksByTitleID
     }
 }
 
@@ -1101,25 +1223,243 @@ private struct ProfileSocialGameInvite {
 private struct ProfileSocialGameInviteContext {
     let invite: ProfileSocialGameInvite
     let installedGame: LibraryFile?
-    let score: Int?
+    let stats: ProfileSocialGameInviteStats
     let senderName: String
     let recipientName: String
+    let createdAt: Date?
     let launch: (LibraryFile) -> Void
+
+    func isExpired(at date: Date) -> Bool {
+        guard let createdAt else {
+            return false
+        }
+        return date.timeIntervalSince(createdAt) >= 60 * 60
+    }
 }
 
-private enum ProfileSocialGameInviteScore {
-    static func score(
+private struct ProfileSocialGameInviteStatsSnapshot: Codable, Equatable {
+    let gamerscoreText: String
+    let achievementsText: String
+    let playtimeText: String
+    let leaderboardText: String
+
+    var stats: ProfileSocialGameInviteStats {
+        ProfileSocialGameInviteStats(
+            gamerscoreText: gamerscoreText,
+            achievementsText: achievementsText,
+            playtimeText: playtimeText,
+            leaderboardText: leaderboardText
+        )
+    }
+
+    init(stats: ProfileSocialGameInviteStats) {
+        gamerscoreText = stats.gamerscoreText
+        achievementsText = stats.achievementsText
+        playtimeText = stats.playtimeText
+        leaderboardText = stats.leaderboardText
+    }
+
+    static func snapshot(
         forTitleID titleID: String,
         title: String,
-        achievements: XBLiveAchievementsSnapshot?
-    ) -> Int? {
-        guard let achievements else {
+        achievements: XBLiveAchievementsSnapshot?,
+        gamesPlayed: [XBLiveGamePlayed],
+        leaderboardRank: Int?
+    ) -> ProfileSocialGameInviteStatsSnapshot {
+        let matchingAchievements = ProfileSocialGameInviteStats.matchingAchievements(
+            forTitleID: titleID,
+            title: title,
+            achievements: achievements
+        )
+        let unlockedAchievements = matchingAchievements.filter { $0.isUnlocked != false }
+        let score = matchingAchievements.isEmpty ? nil : unlockedAchievements.compactMap(\.score).reduce(0, +)
+        let playedGame = ProfileSocialGameInviteStats.matchingGamePlayed(
+            forTitleID: titleID,
+            title: title,
+            gamesPlayed: gamesPlayed
+        )
+
+        return ProfileSocialGameInviteStatsSnapshot(
+            stats: ProfileSocialGameInviteStats(
+                gamerscoreText: score.map { "\($0) GS" } ?? "GS not synced",
+                achievementsText: matchingAchievements.isEmpty ? "Not synced" : "\(unlockedAchievements.count)/\(matchingAchievements.count)",
+                playtimeText: playedGame?.totalMinutes.map(ProfileSocialGameInviteStats.playtimeText) ?? "Not synced",
+                leaderboardText: leaderboardRank.map { "#\($0)" } ?? "Unranked"
+            )
+        )
+    }
+}
+
+private enum ProfileSocialGameInviteSnapshotStore {
+    private struct PendingSnapshot: Codable, Equatable, Identifiable {
+        let id: String
+        let currentUserKey: String
+        let threadUserKey: String
+        let titleID: String
+        let bodyKey: String
+        let createdAt: Date
+        let snapshot: ProfileSocialGameInviteStatsSnapshot
+    }
+
+    private static let snapshotsKey = "ProfileSocialGameInviteSnapshotStore.snapshots"
+    private static let pendingSnapshotsKey = "ProfileSocialGameInviteSnapshotStore.pendingSnapshots"
+    private static let pendingSnapshotLifetime: TimeInterval = 24 * 60 * 60
+
+    static func loadSnapshots() -> [String: ProfileSocialGameInviteStatsSnapshot] {
+        guard let data = UserDefaults.standard.data(forKey: snapshotsKey),
+              let snapshots = try? JSONDecoder().decode([String: ProfileSocialGameInviteStatsSnapshot].self, from: data) else {
+            return [:]
+        }
+        return snapshots
+    }
+
+    static func saveSnapshots(_ snapshots: [String: ProfileSocialGameInviteStatsSnapshot]) {
+        guard let data = try? JSONEncoder().encode(snapshots) else {
+            return
+        }
+        UserDefaults.standard.set(data, forKey: snapshotsKey)
+    }
+
+    static func snapshotKey(
+        for message: XBLiveSocialMessage,
+        invite: ProfileSocialGameInvite,
+        currentUsername: String?,
+        threadUsername: String
+    ) -> String {
+        let messageID = message.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !messageID.isEmpty {
+            return "id:\(messageID)"
+        }
+
+        let timestamp = ProfileSocialTimestamp.value(message.createdAt)
+            .map { "\(Int($0.rounded()))" } ?? "no-time"
+        return [
+            "sig",
+            currentUsername?.socialNormalizedKey ?? "unknown-current",
+            threadUsername.socialNormalizedKey,
+            message.sender.socialNormalizedKey,
+            message.recipient?.socialNormalizedKey ?? "unknown-recipient",
+            invite.titleID.uppercased(),
+            message.body.socialNormalizedKey,
+            timestamp
+        ].joined(separator: "|")
+    }
+
+    static func savePendingSnapshot(
+        _ snapshot: ProfileSocialGameInviteStatsSnapshot,
+        body: String,
+        invite: ProfileSocialGameInvite,
+        currentUsername: String?,
+        threadUsername: String
+    ) -> String {
+        let id = UUID().uuidString
+        var pending = loadPendingSnapshots()
+        pending.append(
+            PendingSnapshot(
+                id: id,
+                currentUserKey: currentUsername?.socialNormalizedKey ?? "unknown-current",
+                threadUserKey: threadUsername.socialNormalizedKey,
+                titleID: invite.titleID.uppercased(),
+                bodyKey: body.socialNormalizedKey,
+                createdAt: Date(),
+                snapshot: snapshot
+            )
+        )
+        savePendingSnapshots(pruned(pending))
+        return id
+    }
+
+    static func removePendingSnapshot(id: String) {
+        savePendingSnapshots(loadPendingSnapshots().filter { $0.id != id })
+    }
+
+    static func takePendingSnapshot(
+        for message: XBLiveSocialMessage,
+        invite: ProfileSocialGameInvite,
+        currentUsername: String?,
+        threadUsername: String
+    ) -> ProfileSocialGameInviteStatsSnapshot? {
+        guard message.isFromCurrentUser(currentUsername) else {
             return nil
         }
 
+        let currentUserKey = currentUsername?.socialNormalizedKey ?? "unknown-current"
+        let threadUserKey = threadUsername.socialNormalizedKey
+        let titleID = invite.titleID.uppercased()
+        let bodyKey = message.body.socialNormalizedKey
+        var pending = pruned(loadPendingSnapshots())
+
+        guard let index = pending.indices.reversed().first(where: { index in
+            let item = pending[index]
+            return item.currentUserKey == currentUserKey &&
+                item.threadUserKey == threadUserKey &&
+                item.titleID == titleID &&
+                item.bodyKey == bodyKey
+        }) else {
+            savePendingSnapshots(pending)
+            return nil
+        }
+
+        let snapshot = pending.remove(at: index).snapshot
+        savePendingSnapshots(pending)
+        return snapshot
+    }
+
+    private static func loadPendingSnapshots() -> [PendingSnapshot] {
+        guard let data = UserDefaults.standard.data(forKey: pendingSnapshotsKey),
+              let pending = try? JSONDecoder().decode([PendingSnapshot].self, from: data) else {
+            return []
+        }
+        return pending
+    }
+
+    private static func savePendingSnapshots(_ pending: [PendingSnapshot]) {
+        guard let data = try? JSONEncoder().encode(pending) else {
+            return
+        }
+        UserDefaults.standard.set(data, forKey: pendingSnapshotsKey)
+    }
+
+    private static func pruned(_ pending: [PendingSnapshot]) -> [PendingSnapshot] {
+        let cutoff = Date().addingTimeInterval(-pendingSnapshotLifetime)
+        return pending.filter { $0.createdAt >= cutoff }
+    }
+}
+
+private struct ProfileSocialGameInviteStats {
+    let gamerscoreText: String
+    let achievementsText: String
+    let playtimeText: String
+    let leaderboardText: String
+
+    static func stats(
+        forTitleID titleID: String,
+        title: String,
+        achievements: XBLiveAchievementsSnapshot?,
+        gamesPlayed: [XBLiveGamePlayed],
+        leaderboardRank: Int?
+    ) -> ProfileSocialGameInviteStats {
+        ProfileSocialGameInviteStatsSnapshot.snapshot(
+            forTitleID: titleID,
+            title: title,
+            achievements: achievements,
+            gamesPlayed: gamesPlayed,
+            leaderboardRank: leaderboardRank
+        ).stats
+    }
+
+    fileprivate static func matchingAchievements(
+        forTitleID titleID: String,
+        title: String,
+        achievements: XBLiveAchievementsSnapshot?
+    ) -> [XBLiveAchievement] {
+        guard let achievements else {
+            return []
+        }
         let titleIDKey = titleID.uppercased()
         let titleKey = normalizedTitle(title)
-        let matchingAchievements = achievements.achievements.filter { achievement in
+
+        return achievements.achievements.filter { achievement in
             if achievement.gameTitleID?.uppercased() == titleIDKey {
                 return true
             }
@@ -1129,21 +1469,35 @@ private enum ProfileSocialGameInviteScore {
             }
             return false
         }
+    }
 
-        guard !matchingAchievements.isEmpty else {
-            return nil
+    fileprivate static func matchingGamePlayed(
+        forTitleID titleID: String,
+        title: String,
+        gamesPlayed: [XBLiveGamePlayed]
+    ) -> XBLiveGamePlayed? {
+        let titleIDKey = titleID.uppercased()
+        let titleKey = normalizedTitle(title)
+        return gamesPlayed.first { game in
+            if game.titleId?.uppercased() == titleIDKey {
+                return true
+            }
+            return normalizedTitle(game.gameName) == titleKey
         }
-
-        return matchingAchievements
-            .filter { $0.isUnlocked != false }
-            .compactMap(\.score)
-            .reduce(0, +)
     }
 
     private static func normalizedTitle(_ title: String) -> String {
         title
             .lowercased()
             .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "", options: .regularExpression)
+    }
+
+    fileprivate static func playtimeText(_ minutes: Double) -> String {
+        let hours = minutes / 60.0
+        if hours >= 10 {
+            return "\(Int(hours.rounded())) hr"
+        }
+        return String(format: "%.1f hr", hours)
     }
 }
 
@@ -1154,12 +1508,26 @@ private struct ProfileSocialGameInviteCard: View {
     let isMine: Bool
 
     var body: some View {
-        Button {
-            if let game = context.installedGame {
-                context.launch(game)
+        TimelineView(.periodic(from: Date(), by: 60)) { timeline in
+            let isExpired = context.isExpired(at: timeline.date)
+
+            Button {
+                if !isExpired,
+                   let game = context.installedGame {
+                    context.launch(game)
+                }
+            } label: {
+                cardContent(isExpired: isExpired)
             }
-        } label: {
-            HStack(spacing: 12) {
+            .buttonStyle(.plain)
+            .disabled(isExpired || context.installedGame == nil)
+            .accessibilityLabel(accessibilityText(isExpired: isExpired))
+        }
+    }
+
+    private func cardContent(isExpired: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
                 ProfileSocialGameInviteIcon(
                     iconURL: XboxTitleIconCatalog.mobCatIconURL(for: context.invite.titleID),
                     localCoverURL: context.installedGame?.coverURL
@@ -1167,81 +1535,126 @@ private struct ProfileSocialGameInviteCard: View {
                 .frame(width: 58, height: 58)
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(headline)
-                        .font(.subheadline.weight(.semibold))
+                    Text("\(context.invite.title) Invite")
+                        .font(.subheadline.weight(.bold))
                         .foregroundStyle(.primary)
+                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Text(context.invite.title)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .lineLimit(1)
-
-                    metadata
+                    inviteSentence
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .layoutPriority(1)
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                RoundedRectangle(cornerRadius: 21, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                RoundedRectangle(cornerRadius: 21, style: .continuous)
-                    .fill(theme.surfaceColor.opacity(0.86))
+
+            VStack(alignment: .leading, spacing: 7) {
+                statsIntro
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(spacing: 6) {
+                    HStack(spacing: 10) {
+                        ProfileSocialGameInviteStatItem(systemImage: "trophy", text: context.stats.gamerscoreText)
+                        ProfileSocialGameInviteStatItem(systemImage: "medal", text: context.stats.achievementsText)
+                    }
+
+                    HStack(spacing: 10) {
+                        ProfileSocialGameInviteStatItem(systemImage: "timer", text: context.stats.playtimeText)
+                        ProfileSocialGameInviteStatItem(systemImage: "list.number", text: context.stats.leaderboardText)
+                    }
+                }
+
+                Label(actionText(isExpired: isExpired), systemImage: actionIconName(isExpired: isExpired))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(actionColor(isExpired: isExpired))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 21, style: .continuous))
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityText)
+        .saturation(isExpired ? 0.18 : 1)
+        .opacity(isExpired ? 0.64 : 1)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: 320, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 21, style: .continuous)
+                .fill(.ultraThinMaterial)
+            RoundedRectangle(cornerRadius: 21, style: .continuous)
+                .fill(theme.surfaceColor.opacity(0.86))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 21, style: .continuous))
     }
 
-    private var headline: String {
+    private var inviteSentence: Text {
         if isMine {
-            return "You invited \(context.recipientName) to join you in \(context.invite.title)."
+            return Text("You have invited ") +
+                Text(context.recipientName).bold() +
+                Text(" to join you in ") +
+                Text(context.invite.title).bold()
         }
-        return "\(context.senderName) invited you to play \(context.invite.title) with them."
+        return Text(context.senderName).bold() +
+            Text(" has invited you to join them in ") +
+            Text(context.invite.title).bold()
     }
 
-    private var scoreText: String {
-        if let score = context.score {
-            return "\(score) GS"
+    private var statsIntro: Text {
+        Text("These are your current stats for ") +
+            Text(context.invite.title).bold() +
+            Text(":")
+    }
+
+    private func actionText(isExpired: Bool) -> String {
+        if isExpired {
+            return "Invite Expired"
         }
-        return "GS not synced"
+        return context.installedGame == nil ? "Installation Required to Participate" : "Tap to Launch"
     }
 
-    private var actionText: String {
-        context.installedGame == nil ? "Install to play" : "Tap to launch"
-    }
-
-    private var metadata: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            metadataRow(scoreText, systemImage: "trophy")
-            metadataRow(actionText, systemImage: context.installedGame == nil ? "arrow.down.circle" : "play.circle")
+    private func actionIconName(isExpired: Bool) -> String {
+        if isExpired {
+            return "clock.badge.xmark"
         }
-        .font(.caption2.weight(.medium))
-        .foregroundStyle(.secondary)
+        return context.installedGame == nil ? "exclamationmark.triangle.fill" : "play.circle.fill"
     }
 
-    private func metadataRow(_ text: String, systemImage: String) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: systemImage)
-                .imageScale(.medium)
-                .frame(width: 13)
-
-            Text(text)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+    private func actionColor(isExpired: Bool) -> Color {
+        if isExpired || context.installedGame == nil {
+            return Color.secondary
         }
+        return Color.accentColor
     }
 
-    private var accessibilityText: String {
+    private func accessibilityText(isExpired: Bool) -> String {
+        let actionText = actionText(isExpired: isExpired)
         if isMine {
             return "You invited \(context.recipientName) to play \(context.invite.title). \(actionText)."
         }
         return "\(context.senderName) invited you to play \(context.invite.title). \(actionText)."
+    }
+}
+
+private struct ProfileSocialGameInviteStatItem: View {
+    let systemImage: String
+    let text: String
+
+    var body: some View {
+        Label {
+            Text(text)
+                .font(.caption2.weight(.medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        } icon: {
+            Image(systemName: systemImage)
+                .imageScale(.small)
+                .frame(width: 13)
+        }
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -1300,6 +1713,9 @@ private struct ProfileSocialGameInviteView: View {
     @ObservedObject var socialStore: XBLiveSocialStore
     let username: String
     let inviteEligibleGames: [LibraryFile]
+    let currentUserAchievements: XBLiveAchievementsSnapshot?
+    let currentUserGamesPlayed: [XBLiveGamePlayed]
+    let leaderboardRanksByTitleID: [String: Int]
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedGameID: String?
@@ -1368,9 +1784,30 @@ private struct ProfileSocialGameInviteView: View {
 
     private func sendInvite() {
         guard let selectedGame,
-              let url = GameLaunchLink.url(for: selectedGame) else {
+              let url = GameLaunchLink.url(for: selectedGame),
+              let titleID = GameLaunchLink.normalizedTitleID(selectedGame.titleID) else {
             return
         }
+
+        let invite = ProfileSocialGameInvite(
+            titleID: titleID,
+            title: selectedGame.displayName,
+            url: url
+        )
+        let snapshot = ProfileSocialGameInviteStatsSnapshot.snapshot(
+            forTitleID: titleID,
+            title: selectedGame.displayName,
+            achievements: currentUserAchievements,
+            gamesPlayed: currentUserGamesPlayed,
+            leaderboardRank: leaderboardRanksByTitleID[titleID.uppercased()]
+        )
+        let pendingSnapshotID = ProfileSocialGameInviteSnapshotStore.savePendingSnapshot(
+            snapshot,
+            body: url.absoluteString,
+            invite: invite,
+            currentUsername: socialStore.currentUsername,
+            threadUsername: username
+        )
 
         isSending = true
         Task {
@@ -1378,6 +1815,8 @@ private struct ProfileSocialGameInviteView: View {
             isSending = false
             if sent {
                 dismiss()
+            } else {
+                ProfileSocialGameInviteSnapshotStore.removePendingSnapshot(id: pendingSnapshotID)
             }
         }
     }
@@ -1568,6 +2007,7 @@ struct ProfileXBLiveFriendsView: View {
                                 installedGames: [],
                                 inviteEligibleGames: [],
                                 currentUserAchievements: nil,
+                                currentUserGamesPlayed: [],
                                 launchGameFromInvite: { _ in },
                                 changeProfileImage: {}
                             )
@@ -1815,6 +2255,7 @@ struct ProfileXBLiveFriendDetailView: View {
     let installedGames: [LibraryFile]
     let inviteEligibleGames: [LibraryFile]
     let currentUserAchievements: XBLiveAchievementsSnapshot?
+    let currentUserGamesPlayed: [XBLiveGamePlayed]
     let launchGameFromInvite: (LibraryFile) -> Void
     let changeProfileImage: () -> Void
 
@@ -1907,6 +2348,7 @@ struct ProfileXBLiveFriendDetailView: View {
                         installedGames: installedGames,
                         inviteEligibleGames: inviteEligibleGames,
                         currentUserAchievements: currentUserAchievements,
+                        currentUserGamesPlayed: currentUserGamesPlayed,
                         launchGameFromInvite: launchGameFromInvite
                     )
                 } label: {

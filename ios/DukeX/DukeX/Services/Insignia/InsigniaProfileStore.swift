@@ -404,6 +404,63 @@ struct XBLiveGamePlayed: Codable, Identifiable, Equatable {
     }
 }
 
+struct XBLiveLeaderboardRankSearchResponse: Decodable, Equatable {
+    let results: [XBLiveLeaderboardRankEntry]
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: ProfileFlexibleCodingKey.self)
+        results = (try? container.decode(
+            [XBLiveLeaderboardRankEntry].self,
+            forKey: ProfileFlexibleCodingKey(stringValue: "results")!
+        )) ?? []
+    }
+}
+
+struct XBLiveLeaderboardRankEntry: Decodable, Identifiable, Equatable {
+    let id: String
+    let titleID: String?
+    let gameName: String?
+    let leaderboardName: String?
+    let rank: Int?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: ProfileFlexibleCodingKey.self)
+        let entryID = container.flexibleString(for: ["id", "entry_id", "entryId"])
+        let leaderboardID = container.flexibleString(for: ["leaderboard_id", "leaderboardId"])
+        let rawTitleID = container.flexibleString(for: [
+            "title_id",
+            "titleId",
+            "titleID",
+            "game_title_id",
+            "gameTitleId"
+        ])
+        titleID = GameLaunchLink.normalizedTitleID(rawTitleID)
+        gameName = container.flexibleString(for: ["game_name", "gameName", "game", "title", "titleName"])
+        leaderboardName = container.flexibleString(for: [
+            "leaderboard_name",
+            "leaderboardName",
+            "board_name",
+            "boardName",
+            "name"
+        ])
+        rank = container.flexibleInt(for: ["rank", "ranking", "position", "place"])
+        let idParts = [
+            titleID,
+            leaderboardID,
+            entryID,
+            rank.map(String.init)
+        ]
+            .compactMap { value -> String? in
+                guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !value.isEmpty else {
+                    return nil
+                }
+                return value
+            }
+        id = idParts.isEmpty ? UUID().uuidString : idParts.joined(separator: "-")
+    }
+}
+
 struct XBLiveAchievementsSnapshot: Codable, Equatable {
     let totalScore: Int?
     let totalCount: Int?
@@ -1573,6 +1630,13 @@ enum XBLiveService {
     static func fetchAchievements(username: String) async throws -> XBLiveAchievementsSnapshot {
         let json = try await jsonObject(pathComponents: ["profile", username, "achievements"])
         return XBLiveAchievementsSnapshot(json: json)
+    }
+
+    static func fetchLeaderboardRanks(username: String) async throws -> [XBLiveLeaderboardRankEntry] {
+        let response: XBLiveLeaderboardRankSearchResponse = try await decodedResponse(
+            pathComponents: ["datasearch", "player", username]
+        )
+        return response.results
     }
 
     static func fetchEvents() async throws -> [XBLiveEvent] {

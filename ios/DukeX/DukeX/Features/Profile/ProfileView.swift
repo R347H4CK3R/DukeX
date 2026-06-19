@@ -112,6 +112,7 @@ struct ProfileView: View {
                     installedGames: installedGames,
                     inviteEligibleGames: inviteEligibleGames,
                     currentUserAchievements: snapshot?.achievements,
+                    currentUserGamesPlayed: snapshot?.playtimeGames ?? [],
                     launchGameFromInvite: launchGameFromInvite
                 )
             } label: {
@@ -132,6 +133,7 @@ struct ProfileView: View {
                     installedGames: installedGames,
                     inviteEligibleGames: inviteEligibleGames,
                     currentUserAchievements: snapshot?.achievements,
+                    currentUserGamesPlayed: snapshot?.playtimeGames ?? [],
                     launchGameFromInvite: launchGameFromInvite
                 )
             } label: {

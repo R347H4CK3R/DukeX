@@ -307,6 +307,7 @@ struct ProfileFriendsView: View {
     let installedGames: [LibraryFile]
     let inviteEligibleGames: [LibraryFile]
     let currentUserAchievements: XBLiveAchievementsSnapshot?
+    let currentUserGamesPlayed: [XBLiveGamePlayed]
     let launchGameFromInvite: (LibraryFile) -> Void
 
     @State private var isAddFriendPresented = false
@@ -444,6 +445,7 @@ struct ProfileFriendsView: View {
                     installedGames: installedGames,
                     inviteEligibleGames: inviteEligibleGames,
                     currentUserAchievements: currentUserAchievements,
+                    currentUserGamesPlayed: currentUserGamesPlayed,
                     launchGameFromInvite: launchGameFromInvite,
                     changeProfileImage: { changeFriendProfileImage(friend) }
                 )
@@ -497,6 +499,7 @@ struct ProfileFriendsView: View {
                     installedGames: installedGames,
                     inviteEligibleGames: inviteEligibleGames,
                     currentUserAchievements: currentUserAchievements,
+                    currentUserGamesPlayed: currentUserGamesPlayed,
                     launchGameFromInvite: launchGameFromInvite,
                     changeProfileImage: { changeSocialFriendProfileImage(friend) }
                 )
@@ -1142,6 +1145,7 @@ struct ProfileFriendDetailView: View {
     let installedGames: [LibraryFile]
     let inviteEligibleGames: [LibraryFile]
     let currentUserAchievements: XBLiveAchievementsSnapshot?
+    let currentUserGamesPlayed: [XBLiveGamePlayed]
     let launchGameFromInvite: (LibraryFile) -> Void
     let changeProfileImage: () -> Void
 
@@ -1224,6 +1228,7 @@ struct ProfileFriendDetailView: View {
                             installedGames: installedGames,
                             inviteEligibleGames: inviteEligibleGames,
                             currentUserAchievements: currentUserAchievements,
+                            currentUserGamesPlayed: currentUserGamesPlayed,
                             launchGameFromInvite: launchGameFromInvite
                         )
                     } label: {
