@@ -16,6 +16,43 @@ struct InsigniaPublicSnapshot: Codable, Equatable {
     let gamesSupported: String
     let usersOnline: String
     let activeGames: [InsigniaActiveGame]
+    let activity24h: [InsigniaActivityPoint]
+    let activity7d: [InsigniaActivityPoint]
+
+    enum CodingKeys: String, CodingKey {
+        case registeredUsers
+        case gamesSupported
+        case usersOnline
+        case activeGames
+        case activity24h
+        case activity7d
+    }
+
+    init(
+        registeredUsers: String,
+        gamesSupported: String,
+        usersOnline: String,
+        activeGames: [InsigniaActiveGame],
+        activity24h: [InsigniaActivityPoint] = [],
+        activity7d: [InsigniaActivityPoint] = []
+    ) {
+        self.registeredUsers = registeredUsers
+        self.gamesSupported = gamesSupported
+        self.usersOnline = usersOnline
+        self.activeGames = activeGames
+        self.activity24h = activity24h
+        self.activity7d = activity7d
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        registeredUsers = try container.decodeIfPresent(String.self, forKey: .registeredUsers) ?? "Unknown"
+        gamesSupported = try container.decodeIfPresent(String.self, forKey: .gamesSupported) ?? "Unknown"
+        usersOnline = try container.decodeIfPresent(String.self, forKey: .usersOnline) ?? "Unknown"
+        activeGames = try container.decodeIfPresent([InsigniaActiveGame].self, forKey: .activeGames) ?? []
+        activity24h = try container.decodeIfPresent([InsigniaActivityPoint].self, forKey: .activity24h) ?? []
+        activity7d = try container.decodeIfPresent([InsigniaActivityPoint].self, forKey: .activity7d) ?? []
+    }
 }
 
 struct InsigniaActiveGame: Codable, Identifiable, Equatable {
@@ -27,6 +64,76 @@ struct InsigniaActiveGame: Codable, Identifiable, Equatable {
     let iconUrl: String?
 
     var iconURL: URL? { iconUrl.flatMap(URL.init(string:)) }
+}
+
+struct InsigniaActivityPoint: Codable, Identifiable, Equatable {
+    let timestamp: Double
+    let onlineCount: Int
+
+    var id: String { "\(Int(timestamp.rounded()))-\(onlineCount)" }
+    var date: Date { Date(timeIntervalSince1970: timestamp) }
+
+    init(timestamp: Double, onlineCount: Int) {
+        self.timestamp = timestamp
+        self.onlineCount = onlineCount
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: ProfileFlexibleCodingKey.self)
+        let timestampKeys = [
+            "recorded_at",
+            "recordedAt",
+            "timestamp",
+            "time",
+            "created_at",
+            "createdAt"
+        ]
+        timestamp = container.flexibleTimestamp(for: timestampKeys) ??
+            container.flexibleString(for: timestampKeys).flatMap(Self.timestamp(from:)) ??
+            0
+        onlineCount = container.flexibleInt(for: [
+            "online_count",
+            "onlineCount",
+            "count",
+            "online",
+            "users_online",
+            "usersOnline"
+        ]) ?? 0
+    }
+
+    private static func timestamp(from value: String) -> Double? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let doubleValue = Double(trimmed) {
+            return normalizedTimestamp(doubleValue)
+        }
+
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = isoFormatter.date(from: trimmed) {
+            return date.timeIntervalSince1970
+        }
+
+        isoFormatter.formatOptions = [.withInternetDateTime]
+        if let date = isoFormatter.date(from: trimmed) {
+            return date.timeIntervalSince1970
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        for format in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"] {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: trimmed) {
+                return date.timeIntervalSince1970
+            }
+        }
+
+        return nil
+    }
+
+    private static func normalizedTimestamp(_ value: Double) -> Double {
+        value > 9_999_999_999 ? value / 1_000.0 : value
+    }
 }
 
 struct InsigniaSupportedGame: Codable, Identifiable, Equatable {
@@ -1204,6 +1311,8 @@ enum InsigniaPublicService {
     static let dashboardURL = URL(string: "https://insignia.live/dashboard/")!
     static let gamesURL = URL(string: "https://insignia.live/games")!
     private static let xblOnlineUsersURL = URL(string: "https://xb.live/api/online-users")!
+    private static let xblOnlineUsersHistory24hURL = URL(string: "https://xb.live/api/insignia-stats/online-24h?days=1")!
+    private static let xblOnlineUsersHistory7dURL = URL(string: "https://xb.live/api/insignia-stats/online-24h?days=7")!
 
     static func fetchLiveStatusSnapshot() async throws -> InsigniaLiveStatusSnapshot {
         async let publicSnapshot = fetchPublicSnapshot()
@@ -1218,6 +1327,8 @@ enum InsigniaPublicService {
 
     static func fetchPublicSnapshot() async throws -> InsigniaPublicSnapshot {
         async let xblActiveGames = fetchXBLiveActiveGames()
+        async let xblActivity24h = fetchXBLiveActivityHistory(from: xblOnlineUsersHistory24hURL)
+        async let xblActivity7d = fetchXBLiveActivityHistory(from: xblOnlineUsersHistory7dURL)
         let url = URL(string: "https://insignia.live/")!
         let (data, response) = try await URLSession.shared.data(from: url)
 
@@ -1231,7 +1342,9 @@ enum InsigniaPublicService {
             registeredUsers: firstStatistic(named: "Registered Users", in: html) ?? "Unknown",
             gamesSupported: firstStatistic(named: "Games Supported", in: html) ?? "Unknown",
             usersOnline: firstStatistic(named: "Users Online Now", in: html) ?? "Unknown",
-            activeGames: (try? await xblActiveGames) ?? []
+            activeGames: (try? await xblActiveGames) ?? [],
+            activity24h: (try? await xblActivity24h) ?? [],
+            activity7d: (try? await xblActivity7d) ?? []
         )
     }
 
@@ -1318,6 +1431,20 @@ enum InsigniaPublicService {
                 }
                 return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
             }
+    }
+
+    private static func fetchXBLiveActivityHistory(from url: URL) async throws -> [InsigniaActivityPoint] {
+        let (data, response) = try await URLSession.shared.data(from: url)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw ServiceError.unavailable
+        }
+
+        let decoded = try JSONDecoder().decode(XBLiveActivityHistoryResponse.self, from: data)
+        return decoded.points
+            .filter { $0.timestamp > 0 }
+            .sorted { $0.timestamp < $1.timestamp }
     }
 
     private static func activeGameDetail(for game: XBLiveOnlineUsersGame, serial: String) -> String {
@@ -1464,6 +1591,35 @@ enum InsigniaPublicService {
             }
 
             return "\(baseName[prefixRange].uppercased())-\(baseName[numberRange])"
+        }
+    }
+
+    private struct XBLiveActivityHistoryResponse: Decodable {
+        let points: [InsigniaActivityPoint]
+
+        init(from decoder: Decoder) throws {
+            if let points = try? [InsigniaActivityPoint](from: decoder) {
+                self.points = points
+                return
+            }
+
+            if let pointMap = try? [String: InsigniaActivityPoint](from: decoder) {
+                self.points = pointMap.values.sorted { $0.timestamp < $1.timestamp }
+                return
+            }
+
+            let container = try decoder.container(keyedBy: ProfileFlexibleCodingKey.self)
+            for key in ["data", "history", "results", "activity", "online", "points"] {
+                guard let codingKey = ProfileFlexibleCodingKey(stringValue: key),
+                      let points = try? container.decodeIfPresent([InsigniaActivityPoint].self, forKey: codingKey) else {
+                    continue
+                }
+
+                self.points = points
+                return
+            }
+
+            self.points = []
         }
     }
 
@@ -2047,6 +2203,14 @@ final class InsigniaProfileStore: ObservableObject {
 
     var activeGames: [InsigniaActiveGame] {
         publicSnapshot?.activeGames ?? []
+    }
+
+    var activity24h: [InsigniaActivityPoint] {
+        publicSnapshot?.activity24h ?? []
+    }
+
+    var activity7d: [InsigniaActivityPoint] {
+        publicSnapshot?.activity7d ?? []
     }
 
     init() {

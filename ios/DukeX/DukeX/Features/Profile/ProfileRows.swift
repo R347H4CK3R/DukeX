@@ -1,3 +1,4 @@
+import Charts
 import SwiftUI
 import UIKit
 
@@ -59,6 +60,49 @@ enum ProfileEventMode: String, CaseIterable, Identifiable {
             return false
         case .paid, .tournaments:
             return true
+        }
+    }
+}
+
+enum ProfileActivityMode: String, CaseIterable, Identifiable {
+    case activeGames
+    case twentyFourHour
+    case sevenDay
+
+    static let defaultsKey = "DukeXProfileActivityMode"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .activeGames:
+            return "Active Games"
+        case .twentyFourHour:
+            return "24 Hour"
+        case .sevenDay:
+            return "7 Day"
+        }
+    }
+
+    var chartTitle: String {
+        switch self {
+        case .activeGames:
+            return "Active Games"
+        case .twentyFourHour:
+            return "24 Hour Activity"
+        case .sevenDay:
+            return "7 Day Activity"
+        }
+    }
+
+    var xAxisMarkCount: Int {
+        switch self {
+        case .activeGames:
+            return 0
+        case .twentyFourHour:
+            return 5
+        case .sevenDay:
+            return 4
         }
     }
 }
@@ -790,6 +834,25 @@ struct ProfileEventModePickerRow: View {
     }
 }
 
+struct ProfileActivityModePickerRow: View {
+    @Binding var selection: ProfileActivityMode
+
+    var body: some View {
+        Picker("Activity Category", selection: $selection) {
+            ForEach(ProfileActivityMode.allCases) { mode in
+                Text(mode.title).tag(mode)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: GameLibraryGridMetrics.compactControlHeight)
+        .pickerStyle(.segmented)
+        .accessibilityLabel("Activity Category")
+        .padding(.top, 4)
+        .padding(.bottom, 8)
+        .frame(height: GameLibraryGridMetrics.compactControlHeight + 12)
+    }
+}
+
 private enum ProfileFriendOnlineText {
     static func isOnline(friend: InsigniaFriend, profile: XBLiveFriendProfile?) -> Bool {
         if let profile {
@@ -954,6 +1017,122 @@ struct ProfileActiveGameRow: View {
                 .lineLimit(1)
         }
         .frame(minHeight: 50)
+    }
+}
+
+struct ProfileActivityChartRow: View {
+    let points: [InsigniaActivityPoint]
+    let mode: ProfileActivityMode
+
+    private var chartPoints: [InsigniaActivityPoint] {
+        points
+            .filter { $0.timestamp > 0 }
+            .sorted { $0.timestamp < $1.timestamp }
+    }
+
+    private var maximumOnlineCount: Int {
+        chartPoints.map(\.onlineCount).max() ?? 0
+    }
+
+    private var yUpperBound: Int {
+        max(1, Int((Double(maximumOnlineCount) * 1.12).rounded(.up)))
+    }
+
+    private var xDomain: ClosedRange<Date> {
+        guard let first = chartPoints.first?.date,
+              let last = chartPoints.last?.date else {
+            let now = Date()
+            return now.addingTimeInterval(-3_600)...now
+        }
+
+        guard first < last else {
+            return first.addingTimeInterval(-3_600)...first.addingTimeInterval(3_600)
+        }
+
+        return first...last
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Label(mode.chartTitle, systemImage: "chart.line.uptrend.xyaxis")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 12)
+
+                Text("Peak \(maximumOnlineCount)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            Chart(chartPoints) { point in
+                AreaMark(
+                    x: .value("Time", point.date),
+                    y: .value("Users Online", point.onlineCount)
+                )
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [
+                            Color.accentColor.opacity(0.34),
+                            Color.accentColor.opacity(0.06)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+
+                LineMark(
+                    x: .value("Time", point.date),
+                    y: .value("Users Online", point.onlineCount)
+                )
+                .foregroundStyle(Color.accentColor)
+                .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+            }
+            .chartXScale(domain: xDomain)
+            .chartYScale(domain: 0...yUpperBound)
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: mode.xAxisMarkCount)) { value in
+                    AxisGridLine()
+                        .foregroundStyle(Color.secondary.opacity(0.18))
+                    AxisValueLabel {
+                        if let date = value.as(Date.self) {
+                            Text(xAxisLabel(for: date))
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .trailing, values: .automatic(desiredCount: 5)) {
+                    AxisGridLine()
+                        .foregroundStyle(Color.secondary.opacity(0.18))
+                    AxisValueLabel()
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .chartPlotStyle { plotArea in
+                plotArea
+                    .background(Color.black.opacity(0.16))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .frame(height: 220)
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func xAxisLabel(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        switch mode {
+        case .activeGames:
+            return ""
+        case .twentyFourHour:
+            formatter.setLocalizedDateFormatFromTemplate("HH:mm")
+        case .sevenDay:
+            formatter.setLocalizedDateFormatFromTemplate("MMM d")
+        }
+        return formatter.string(from: date)
     }
 }
 

@@ -13,6 +13,7 @@ struct ProfileView: View {
     @ObservedObject var socialStore: XBLiveSocialStore
     @AppStorage(ProfileFriendSortMode.defaultsKey) private var friendSortModeRawValue = ProfileFriendSortMode.favorites.rawValue
     @AppStorage(ProfileEventMode.defaultsKey) private var eventModeRawValue = ProfileEventMode.today.rawValue
+    @AppStorage(ProfileActivityMode.defaultsKey) private var activityModeRawValue = ProfileActivityMode.activeGames.rawValue
     @State private var favoriteFriendKeys = ProfileFriendFavorites.load()
     @State private var maftyAvatarTapCount = 0
     @State private var maftyDownloadCountUnlocked = false
@@ -159,7 +160,7 @@ struct ProfileView: View {
         }
         .dukeXThemedListRowBackground()
 
-        activeGamesSection
+        activitySection
 
         Section("Events") {
             ProfileEventModePickerRow(selection: eventModeBinding)
@@ -206,7 +207,7 @@ struct ProfileView: View {
             }
             .dukeXThemedListRowBackground()
 
-            activeGamesSection
+            activitySection
         }
     }
 
@@ -243,14 +244,33 @@ struct ProfileView: View {
         .dukeXThemedListRowBackground()
     }
 
-    private var activeGamesSection: some View {
-        Section("Active Games") {
-            if profileStore.activeGames.isEmpty {
-                ProfileEmptyRow(title: "No public activity synced",
-                                systemImage: "antenna.radiowaves.left.and.right")
-            } else {
-                ForEach(profileStore.activeGames) { game in
-                    ProfileActiveGameRow(game: game)
+    private var activitySection: some View {
+        Section("Activity") {
+            ProfileActivityModePickerRow(selection: activityModeBinding)
+
+            switch activityMode {
+            case .activeGames:
+                if profileStore.activeGames.isEmpty {
+                    ProfileEmptyRow(title: "No public activity synced",
+                                    systemImage: "antenna.radiowaves.left.and.right")
+                } else {
+                    ForEach(profileStore.activeGames) { game in
+                        ProfileActiveGameRow(game: game)
+                    }
+                }
+            case .twentyFourHour:
+                if profileStore.activity24h.isEmpty {
+                    ProfileEmptyRow(title: "No 24-hour activity data synced",
+                                    systemImage: "chart.line.uptrend.xyaxis")
+                } else {
+                    ProfileActivityChartRow(points: profileStore.activity24h, mode: activityMode)
+                }
+            case .sevenDay:
+                if profileStore.activity7d.isEmpty {
+                    ProfileEmptyRow(title: "No 7-day activity data synced",
+                                    systemImage: "chart.line.uptrend.xyaxis")
+                } else {
+                    ProfileActivityChartRow(points: profileStore.activity7d, mode: activityMode)
                 }
             }
         }
@@ -308,6 +328,10 @@ struct ProfileView: View {
         ProfileEventMode(rawValue: eventModeRawValue) ?? .today
     }
 
+    private var activityMode: ProfileActivityMode {
+        ProfileActivityMode(rawValue: activityModeRawValue) ?? .activeGames
+    }
+
     private var friendSortModeBinding: Binding<ProfileFriendSortMode> {
         Binding(
             get: { friendSortMode },
@@ -319,6 +343,13 @@ struct ProfileView: View {
         Binding(
             get: { eventMode },
             set: { eventModeRawValue = $0.rawValue }
+        )
+    }
+
+    private var activityModeBinding: Binding<ProfileActivityMode> {
+        Binding(
+            get: { activityMode },
+            set: { activityModeRawValue = $0.rawValue }
         )
     }
 
