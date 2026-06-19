@@ -12,6 +12,7 @@ struct ProfileView: View {
     @ObservedObject var profileStore: InsigniaProfileStore
     @ObservedObject var socialStore: XBLiveSocialStore
     @AppStorage(ProfileFriendSortMode.defaultsKey) private var friendSortModeRawValue = ProfileFriendSortMode.favorites.rawValue
+    @AppStorage(ProfileEventMode.defaultsKey) private var eventModeRawValue = ProfileEventMode.today.rawValue
     @State private var favoriteFriendKeys = ProfileFriendFavorites.load()
     @State private var maftyAvatarTapCount = 0
     @State private var maftyDownloadCountUnlocked = false
@@ -161,9 +162,11 @@ struct ProfileView: View {
         activeGamesSection
 
         Section("Events") {
-            let events = XBLiveEvent.currentEvents(from: snapshot?.events ?? [])
+            ProfileEventModePickerRow(selection: eventModeBinding)
+
+            let events = events(for: eventMode, snapshot: snapshot)
             if events.isEmpty {
-                ProfileEmptyRow(title: "No events starting in the next 24 hours", systemImage: "calendar")
+                ProfileEmptyRow(title: eventMode.emptyTitle, systemImage: "calendar")
             } else {
                 ForEach(events) { event in
                     NavigationLink {
@@ -172,6 +175,10 @@ struct ProfileView: View {
                         ProfileEventRow(event: event)
                     }
                 }
+            }
+
+            if eventMode.requiresPaidEventDisclaimer {
+                ProfilePaidEventDisclaimerRow()
             }
         }
         .dukeXThemedListRowBackground()
@@ -297,11 +304,34 @@ struct ProfileView: View {
         ProfileFriendSortMode(rawValue: friendSortModeRawValue) ?? .favorites
     }
 
+    private var eventMode: ProfileEventMode {
+        ProfileEventMode(rawValue: eventModeRawValue) ?? .today
+    }
+
     private var friendSortModeBinding: Binding<ProfileFriendSortMode> {
         Binding(
             get: { friendSortMode },
             set: { friendSortModeRawValue = $0.rawValue }
         )
+    }
+
+    private var eventModeBinding: Binding<ProfileEventMode> {
+        Binding(
+            get: { eventMode },
+            set: { eventModeRawValue = $0.rawValue }
+        )
+    }
+
+    private func events(for mode: ProfileEventMode, snapshot: InsigniaAuthenticatedSnapshot?) -> [XBLiveEvent] {
+        let events = snapshot?.events ?? []
+        switch mode {
+        case .today:
+            return XBLiveEvent.currentEvents(from: events.filter { !$0.isPaid })
+        case .paid:
+            return XBLiveEvent.paidEvents(from: events)
+        case .tournaments:
+            return XBLiveEvent.tournaments(from: events)
+        }
     }
 
     private func toggleFavorite(_ friend: InsigniaFriend) {

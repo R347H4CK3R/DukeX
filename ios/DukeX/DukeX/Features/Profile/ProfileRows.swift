@@ -22,6 +22,47 @@ enum ProfileFriendSortMode: String, CaseIterable, Identifiable {
     }
 }
 
+enum ProfileEventMode: String, CaseIterable, Identifiable {
+    case today
+    case paid
+    case tournaments
+
+    static let defaultsKey = "DukeXProfileEventMode"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .today:
+            return "Today's Events"
+        case .paid:
+            return "Paid Events"
+        case .tournaments:
+            return "Tournaments"
+        }
+    }
+
+    var emptyTitle: String {
+        switch self {
+        case .today:
+            return "No events starting in the next 24 hours"
+        case .paid:
+            return "No paid events listed"
+        case .tournaments:
+            return "No tournaments in the next 30 days"
+        }
+    }
+
+    var requiresPaidEventDisclaimer: Bool {
+        switch self {
+        case .today:
+            return false
+        case .paid, .tournaments:
+            return true
+        }
+    }
+}
+
 enum ProfileFriendFavorites {
     private static let defaultsKey = "DukeXProfileFriendFavorites"
 
@@ -727,6 +768,25 @@ private struct ProfileFriendSortPicker: View {
         .frame(height: GameLibraryGridMetrics.compactControlHeight)
         .pickerStyle(.segmented)
         .accessibilityLabel("Sort Friends")
+    }
+}
+
+struct ProfileEventModePickerRow: View {
+    @Binding var selection: ProfileEventMode
+
+    var body: some View {
+        Picker("Event Category", selection: $selection) {
+            ForEach(ProfileEventMode.allCases) { mode in
+                Text(mode.title).tag(mode)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: GameLibraryGridMetrics.compactControlHeight)
+        .pickerStyle(.segmented)
+        .accessibilityLabel("Event Category")
+        .padding(.top, 4)
+        .padding(.bottom, 8)
+        .frame(height: GameLibraryGridMetrics.compactControlHeight + 12)
     }
 }
 
@@ -2289,7 +2349,7 @@ struct ProfileEventRow: View {
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(event.title)
+                Text(event.profileDisplayTitle)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                 Text(subtitle)
@@ -2304,9 +2364,91 @@ struct ProfileEventRow: View {
     }
 
     private var subtitle: String {
-        [event.gameName, event.scheduleText]
-            .compactMap { $0?.nilIfEmpty }
+        event.profileRowSubtitleParts
             .joined(separator: " - ")
+    }
+}
+
+struct ProfilePaidEventDisclaimerRow: View {
+    static let text = "Contests and paid promotions on xb.live are sponsored solely by Tiny Umbrella, LLC. DukeX is not a sponsor of, and is not involved in any way with, any contest, tournament, or promotion offered through xb.live services. Official rules can be found at: https://xb.live/paid-events-terms"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Official Rules", systemImage: "info.circle")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+
+            ProfileJustifiedText(Self.text)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 8)
+    }
+}
+
+private struct ProfileJustifiedText: UIViewRepresentable {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    func makeUIView(context: Context) -> UILabel {
+        let label = UILabel()
+        label.numberOfLines = 0
+        label.adjustsFontForContentSizeCategory = true
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
+    }
+
+    func updateUIView(_ label: UILabel, context: Context) {
+        label.attributedText = attributedText
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UILabel, context: Context) -> CGSize? {
+        let width = proposal.width ?? UIScreen.main.bounds.width
+        return uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+    }
+
+    private var attributedText: NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .justified
+        paragraph.lineBreakMode = .byWordWrapping
+        paragraph.hyphenationFactor = 0.2
+
+        return NSAttributedString(
+            string: text,
+            attributes: [
+                .font: UIFont.preferredFont(forTextStyle: .caption1),
+                .foregroundColor: UIColor.secondaryLabel,
+                .paragraphStyle: paragraph
+            ]
+        )
+    }
+}
+
+private struct ProfileEventDetailHeaderImage: View {
+    let url: URL?
+
+    var body: some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .success(let image):
+                image
+                    .resizable()
+                    .scaledToFill()
+            default:
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.secondary.opacity(0.18))
+                    Image(systemName: "calendar")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -2317,28 +2459,10 @@ struct ProfileEventDetailView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 12) {
-                    AsyncImage(url: event.bannerURL ?? event.gameImageURL) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        default:
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(Color.secondary.opacity(0.18))
-                                Image(systemName: "calendar")
-                                    .font(.title2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    ProfileEventDetailHeaderImage(url: event.profileDetailHeaderImageURL)
 
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(event.title)
+                        Text(event.profileDisplayTitle)
                             .font(.headline)
                             .fixedSize(horizontal: false, vertical: true)
 
@@ -2375,8 +2499,14 @@ struct ProfileEventDetailView: View {
             .dukeXThemedListRowBackground()
 
             Section("Details") {
+                if let type = event.profileTypeText {
+                    ProfileInfoRow(title: "Type", value: type, systemImage: event.isTournament ? "trophy" : "ticket")
+                }
                 if let gameName = event.gameName?.nilIfEmpty {
                     ProfileInfoRow(title: "Game", value: gameName, systemImage: "gamecontroller")
+                }
+                if let titleID = event.titleID?.nilIfEmpty {
+                    ProfileInfoRow(title: "Title ID", value: titleID, systemImage: "number")
                 }
                 ProfileInfoRow(title: "Starts", value: event.scheduleText, systemImage: "clock")
                 if let host = event.communityHost?.nilIfEmpty ?? event.createdBy?.nilIfEmpty {
@@ -2384,6 +2514,27 @@ struct ProfileEventDetailView: View {
                 }
                 if let tag = event.eventTag?.nilIfEmpty {
                     ProfileInfoRow(title: "Tag", value: tag, systemImage: "tag")
+                }
+                if let status = event.profileStatusText {
+                    ProfileInfoRow(title: "Status", value: status, systemImage: "flag.checkered")
+                }
+                if let signups = event.profileSignupText {
+                    ProfileInfoRow(title: "Signups", value: signups, systemImage: "person.2")
+                }
+                if let entryFee = event.profileEntryFeeText {
+                    ProfileInfoRow(title: "Entry Fee", value: entryFee, systemImage: "bitcoinsign.circle")
+                }
+                if let reward = event.profileRewardText {
+                    ProfileInfoRow(title: "Reward", value: reward, systemImage: "gift")
+                }
+                if let sponsor = event.sponsorName?.nilIfEmpty {
+                    ProfileInfoRow(title: "Sponsor", value: sponsor, systemImage: "building.2")
+                }
+                if let registration = event.profileRegistrationText {
+                    ProfileInfoRow(title: "Registration", value: registration, systemImage: "square.and.pencil")
+                }
+                if let pot = event.profilePotText {
+                    ProfileInfoRow(title: "Pot", value: pot, systemImage: "banknote")
                 }
                 if let source = event.source?.nilIfEmpty {
                     ProfileInfoRow(title: "Source", value: source.capitalized, systemImage: "network")
@@ -2396,6 +2547,13 @@ struct ProfileEventDetailView: View {
                     Text(additionalRules)
                         .font(.body)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                .dukeXThemedListRowBackground()
+            }
+
+            if event.isPaid || event.isTournament {
+                Section {
+                    ProfilePaidEventDisclaimerRow()
                 }
                 .dukeXThemedListRowBackground()
             }
@@ -2418,6 +2576,139 @@ private struct ProfileEventRequirement: Identifiable {
 }
 
 private extension XBLiveEvent {
+    var profileDetailHeaderImageURL: URL? {
+        if isTournament {
+            return gameImageURL ?? bannerURL
+        }
+        return bannerURL ?? gameImageURL
+    }
+
+    var profileDisplayTitle: String {
+        guard isTournament else {
+            return title
+        }
+        let cleanedTitle = Self.removingEmoji(from: title)
+        return cleanedTitle.nilIfEmpty ?? title
+    }
+
+    var profileRowSubtitleParts: [String] {
+        var parts = [String]()
+        if let gameName = gameName?.nilIfEmpty {
+            parts.append(gameName)
+        }
+        if let status = profileStatusText, isTournament {
+            parts.append(status)
+        } else if isPaid,
+                  let reward = profileRewardText {
+            parts.append(reward)
+        }
+        parts.append(scheduleText)
+        return parts
+    }
+
+    var profileTypeText: String? {
+        if isPaid && isTournament {
+            return "Paid Tournament"
+        }
+        if isPaid {
+            return "Paid Event"
+        }
+        if isTournament {
+            return "Tournament"
+        }
+        return nil
+    }
+
+    var profileStatusText: String? {
+        guard let status = tournamentStatus?.nilIfEmpty else {
+            return nil
+        }
+        return status
+            .replacingOccurrences(of: "_", with: " ")
+            .capitalized
+    }
+
+    var profileSignupText: String? {
+        guard let signupCount else {
+            return allowSignup == true ? "Open" : nil
+        }
+        let suffix = signupCount == 1 ? "signup" : "signups"
+        if allowSignup == true {
+            return "\(signupCount) \(suffix), open"
+        }
+        return "\(signupCount) \(suffix)"
+    }
+
+    var profileEntryFeeText: String? {
+        if let entryFeeSats {
+            return "\(Self.satsText(entryFeeSats)) \(entryFeeCurrency?.nilIfEmpty ?? "sats")"
+        }
+        if isPaid {
+            return "No entry fee listed"
+        }
+        return nil
+    }
+
+    var profileRewardText: String? {
+        if let rewardTotalSats {
+            return "\(Self.satsText(rewardTotalSats)) sats"
+        }
+        if hasPrize == true,
+           let prizeAmount = prizeAmount?.nilIfEmpty {
+            return prizeAmount
+        }
+        if isPaid {
+            return "Reward not listed"
+        }
+        return nil
+    }
+
+    var profileRegistrationText: String? {
+        let opens = registrationOpensAt?.nilIfEmpty
+        let closes = registrationClosesAt?.nilIfEmpty
+        switch (opens, closes) {
+        case let (opens?, closes?):
+            return "Opens \(opens), closes \(closes)"
+        case let (opens?, nil):
+            return "Opens \(opens)"
+        case let (nil, closes?):
+            return "Closes \(closes)"
+        case (nil, nil):
+            return allowSignup == true ? "Open" : nil
+        }
+    }
+
+    var profilePotText: String? {
+        var parts: [String] = []
+        if let potExpectedSats {
+            parts.append("Expected \(Self.satsText(potExpectedSats)) sats")
+        }
+        if let potVerifiedBalanceSats {
+            parts.append("Verified \(Self.satsText(potVerifiedBalanceSats)) sats")
+        }
+        if potFundsVerified == true {
+            parts.append("Funds verified")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " - ")
+    }
+
+    private static func satsText(_ value: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    private static func removingEmoji(from value: String) -> String {
+        let scalars = value.unicodeScalars.filter { scalar in
+            !scalar.properties.isEmojiPresentation &&
+                scalar.value != 0xFE0F &&
+                scalar.value != 0x200D
+        }
+        return String(String.UnicodeScalarView(scalars))
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var profileRequirements: [ProfileEventRequirement] {
         var requirements: [ProfileEventRequirement] = []
 

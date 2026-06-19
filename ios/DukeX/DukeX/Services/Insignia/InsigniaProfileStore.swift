@@ -826,13 +826,18 @@ struct XBLiveAchievementProgress: Codable, Equatable {
 
 struct XBLiveEvent: Codable, Identifiable, Equatable {
     let id: Int
+    let itemKind: String?
+    let tournamentSlug: String?
     let title: String
     let gameName: String?
+    let titleID: String?
     let gameImage: String?
     let description: String?
     let eventDate: String?
     let startTime: String?
     let endTime: String?
+    let hasPrize: Bool?
+    let prizeAmount: String?
     let dlcRequired: Bool?
     let moddedContentRequired: Bool?
     let communityHost: String?
@@ -852,16 +857,38 @@ struct XBLiveEvent: Codable, Identifiable, Equatable {
     let endDateTimeUTC: String?
     let additionalRules: String?
     let winningParameters: String?
+    let isPaidEvent: Bool?
+    let entryFeeSats: Int?
+    let entryFeeCurrency: String?
+    let rewardTotalSats: Int?
+    let allowBuyIn: Bool?
+    let allowSignup: Bool?
+    let sponsorName: String?
+    let sponsorURLString: String?
+    let registrationOpensAt: String?
+    let registrationClosesAt: String?
+    let placementRewardsJSON: String?
+    let potExpectedSats: Int?
+    let potVerifiedBalanceSats: Int?
+    let potVerifiedAt: String?
+    let potFundsVerified: Bool?
+    let signupCount: Int?
+    let tournamentStatus: String?
 
     enum CodingKeys: String, CodingKey {
         case id
+        case itemKind = "item_kind"
+        case tournamentSlug = "tournament_slug"
         case title
         case gameName = "game_name"
+        case titleID = "title_id"
         case gameImage = "game_image"
         case description
         case eventDate = "event_date"
         case startTime = "start_time"
         case endTime = "end_time"
+        case hasPrize = "has_prize"
+        case prizeAmount = "prize_amount"
         case dlcRequired = "dlc_required"
         case moddedContentRequired = "modded_content_required"
         case communityHost = "community_host"
@@ -881,10 +908,97 @@ struct XBLiveEvent: Codable, Identifiable, Equatable {
         case endDateTimeUTC = "end_datetime_utc"
         case additionalRules = "additional_rules"
         case winningParameters = "winning_parameters"
+        case isPaidEvent = "is_paid_event"
+        case entryFeeSats = "entry_fee_sats"
+        case entryFeeCurrency = "entry_fee_currency"
+        case rewardTotalSats = "reward_total_sats"
+        case allowBuyIn = "allow_buy_in"
+        case allowSignup = "allow_signup"
+        case sponsorName = "sponsor_name"
+        case sponsorURLString = "sponsor_url"
+        case registrationOpensAt = "registration_opens_at"
+        case registrationClosesAt = "registration_closes_at"
+        case placementRewardsJSON = "placement_rewards_json"
+        case potExpectedSats = "pot_expected_sats"
+        case potVerifiedBalanceSats = "pot_verified_balance_sats"
+        case potVerifiedAt = "pot_verified_at"
+        case potFundsVerified = "pot_funds_verified"
+        case signupCount = "signup_count"
+        case tournamentStatus = "tournament_status"
     }
 
-    var gameImageURL: URL? { gameImage.flatMap(URL.init(string:)) }
-    var bannerURL: URL? { bannerURLString.flatMap(URL.init(string:)) }
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: ProfileFlexibleCodingKey.self)
+        id = container.flexibleInt(for: ["id", "event_id", "eventId"]) ?? UUID().uuidString.hashValue
+        itemKind = container.flexibleString(for: ["item_kind", "itemKind", "kind"])
+        tournamentSlug = container.flexibleString(for: ["tournament_slug", "tournamentSlug", "slug"])
+        title = container.flexibleString(for: ["title", "name"]) ?? "Event"
+        gameName = container.flexibleString(for: ["game_name", "gameName", "game"])
+        titleID = container.flexibleString(for: ["title_id", "titleId", "titleID"])?.uppercased()
+        gameImage = container.flexibleString(for: ["game_image", "gameImage", "image", "image_url", "imageUrl"])
+        description = container.flexibleString(for: ["description", "desc"])
+        eventDate = container.flexibleString(for: ["event_date", "eventDate", "date"])
+        startTime = container.flexibleString(for: ["start_time", "startTime", "start"])
+        endTime = container.flexibleString(for: ["end_time", "endTime", "end"])
+        hasPrize = container.flexibleBool(for: ["has_prize", "hasPrize"])
+        prizeAmount = container.flexibleString(for: ["prize_amount", "prizeAmount"])
+        dlcRequired = container.flexibleBool(for: ["dlc_required", "dlcRequired"])
+        moddedContentRequired = container.flexibleBool(for: ["modded_content_required", "moddedContentRequired"])
+        communityHost = container.flexibleString(for: ["community_host", "communityHost", "host"])
+        eventTag = container.flexibleString(for: ["event_tag", "eventTag", "tag"])
+        xlinkKai = container.flexibleBool(for: ["xlink_kai", "xlinkKai"])
+        isLeaderboard = container.flexibleBool(for: ["is_leaderboard", "isLeaderboard", "leaderboard"])
+        bannerURLString = container.flexibleString(for: ["banner_url", "bannerURL", "bannerUrl", "banner"])
+        source = container.flexibleString(for: ["source"])
+        createdBy = container.flexibleString(for: ["created_by", "createdBy"])
+        discordEventID = container.flexibleString(for: ["discord_event_id", "discordEventID", "discordEventId"])
+        discordGuildID = container.flexibleString(for: ["discord_guild_id", "discordGuildID", "discordGuildId"])
+        eventTimezone = container.flexibleString(for: ["event_timezone", "eventTimezone", "timezone"])
+        eventEndDate = container.flexibleString(for: ["event_end_date", "eventEndDate"])
+        startDateUTC = container.flexibleString(for: ["start_date_utc", "startDateUTC", "startDateUtc"])
+        startDateTimeUTC = container.flexibleString(for: ["start_datetime_utc", "startDateTimeUTC", "startDatetimeUtc"])
+        endDateUTC = container.flexibleString(for: ["end_date_utc", "endDateUTC", "endDateUtc"])
+        endDateTimeUTC = container.flexibleString(for: ["end_datetime_utc", "endDateTimeUTC", "endDatetimeUtc"])
+        additionalRules = container.flexibleString(for: ["additional_rules", "additionalRules", "rules"])
+        winningParameters = container.flexibleString(for: ["winning_parameters", "winningParameters"])
+        isPaidEvent = container.flexibleBool(for: ["is_paid_event", "isPaidEvent", "paid"])
+        entryFeeSats = container.flexibleInt(for: ["entry_fee_sats", "entryFeeSats"])
+        entryFeeCurrency = container.flexibleString(for: ["entry_fee_currency", "entryFeeCurrency"])
+        rewardTotalSats = container.flexibleInt(for: ["reward_total_sats", "rewardTotalSats"])
+        allowBuyIn = container.flexibleBool(for: ["allow_buy_in", "allowBuyIn"])
+        allowSignup = container.flexibleBool(for: ["allow_signup", "allowSignup"])
+        sponsorName = container.flexibleString(for: ["sponsor_name", "sponsorName"])
+        sponsorURLString = container.flexibleString(for: ["sponsor_url", "sponsorURL", "sponsorUrl"])
+        registrationOpensAt = container.flexibleString(for: ["registration_opens_at", "registrationOpensAt"])
+        registrationClosesAt = container.flexibleString(for: ["registration_closes_at", "registrationClosesAt"])
+        placementRewardsJSON = container.flexibleString(for: ["placement_rewards_json", "placementRewardsJSON", "placementRewardsJson"])
+        potExpectedSats = container.flexibleInt(for: ["pot_expected_sats", "potExpectedSats"])
+        potVerifiedBalanceSats = container.flexibleInt(for: ["pot_verified_balance_sats", "potVerifiedBalanceSats"])
+        potVerifiedAt = container.flexibleString(for: ["pot_verified_at", "potVerifiedAt"])
+        potFundsVerified = container.flexibleBool(for: ["pot_funds_verified", "potFundsVerified"])
+        signupCount = container.flexibleInt(for: ["signup_count", "signupCount"])
+        tournamentStatus = container.flexibleString(for: ["tournament_status", "tournamentStatus", "status"])
+    }
+
+    var gameImageURL: URL? { Self.absoluteURL(from: gameImage) }
+    var bannerURL: URL? { Self.absoluteURL(from: bannerURLString) }
+    var sponsorURL: URL? { Self.absoluteURL(from: sponsorURLString) }
+
+    var isPaid: Bool {
+        isPaidEvent == true ||
+            entryFeeSats != nil ||
+            rewardTotalSats != nil ||
+            potExpectedSats != nil ||
+            potVerifiedBalanceSats != nil ||
+            Self.trimmed(sponsorName) != nil
+    }
+
+    var isTournament: Bool {
+            itemKind?.caseInsensitiveCompare("tournament") == .orderedSame ||
+            source?.caseInsensitiveCompare("tournament") == .orderedSame ||
+            Self.trimmed(tournamentSlug) != nil ||
+            Self.trimmed(tournamentStatus) != nil
+    }
 
     var startDate: Date? {
         if let date = Self.parsedUTCDate(date: startDateUTC, time: startDateTimeUTC) {
@@ -936,16 +1050,28 @@ struct XBLiveEvent: Codable, Identifiable, Equatable {
 
     static func currentEvents(from events: [XBLiveEvent], referenceDate: Date = Date()) -> [XBLiveEvent] {
         events
-            .filter { $0.startsWithinNext24Hours(referenceDate: referenceDate) }
+            .filter { $0.startsWithinNext(days: 1, referenceDate: referenceDate) }
             .sorted(by: startDateSort)
     }
 
-    private func startsWithinNext24Hours(referenceDate: Date) -> Bool {
+    static func paidEvents(from events: [XBLiveEvent]) -> [XBLiveEvent] {
+        events
+            .filter(\.isPaid)
+            .sorted(by: startDateSort)
+    }
+
+    static func tournaments(from events: [XBLiveEvent], referenceDate: Date = Date()) -> [XBLiveEvent] {
+        events
+            .filter { $0.isTournament && $0.startsWithinNext(days: 30, referenceDate: referenceDate) }
+            .sorted(by: startDateSort)
+    }
+
+    private func startsWithinNext(days: Int, referenceDate: Date) -> Bool {
         guard let startDate else {
             return false
         }
 
-        let windowEnd = referenceDate.addingTimeInterval(24 * 60 * 60)
+        let windowEnd = referenceDate.addingTimeInterval(TimeInterval(days) * 24 * 60 * 60)
         if startDate >= referenceDate && startDate <= windowEnd {
             return true
         }
@@ -971,6 +1097,21 @@ struct XBLiveEvent: Codable, Identifiable, Equatable {
         case (nil, nil):
             return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
         }
+    }
+
+    private static func absoluteURL(from value: String?) -> URL? {
+        guard let value = trimmed(value) else {
+            return nil
+        }
+        if let url = URL(string: value),
+           url.scheme != nil {
+            return url
+        }
+        guard var components = URLComponents(string: "https://xb.live") else {
+            return nil
+        }
+        components.path = value.hasPrefix("/") ? value : "/\(value)"
+        return components.url
     }
 
     private static func parsedUTCDate(date: String?, time: String?) -> Date? {
@@ -2140,7 +2281,7 @@ final class InsigniaProfileStore: ObservableObject {
             playtimeGames: playtimeGames,
             achievements: achievements,
             friendProfiles: friendProfiles,
-            events: XBLiveEvent.currentEvents(from: events),
+            events: events,
             supportedGames: supportedGames,
             loadedAt: Date()
         )
