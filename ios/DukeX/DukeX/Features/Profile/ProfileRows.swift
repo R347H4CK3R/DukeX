@@ -1124,6 +1124,7 @@ struct ProfileActivityChartRow: View {
     private func xAxisLabel(for date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = .current
+        formatter.timeZone = .autoupdatingCurrent
         switch mode {
         case .activeGames:
             return ""

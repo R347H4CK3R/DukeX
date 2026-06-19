@@ -633,13 +633,21 @@ struct ProfileSocialThreadView: View {
                             ProfileEmptyRow(title: "No messages in this thread", systemImage: "bubble.left.and.bubble.right")
                         }
                     } else {
-                        ForEach(messages) { message in
-	                            ProfileSocialMessageBubble(
-	                                message: message,
-	                                isMine: message.isFromCurrentUser(socialStore.currentUsername),
-	                                avatar: avatar(for: message),
-	                                invite: inviteContext(for: message)
-	                            )
+                        ForEach(messages.indices, id: \.self) { index in
+                            let message = messages[index]
+                            VStack(spacing: 8) {
+                                if let dayHeader = dayHeaderText(for: message, at: index) {
+                                    ProfileSocialThreadDayHeader(title: dayHeader)
+                                }
+
+                                ProfileSocialMessageBubble(
+                                    message: message,
+                                    isMine: message.isFromCurrentUser(socialStore.currentUsername),
+                                    avatar: avatar(for: message),
+                                    invite: inviteContext(for: message),
+                                    sentTime: ProfileSocialTimestamp.timeText(message.createdAt)
+                                )
+                            }
                             .id(message.id)
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
@@ -806,6 +814,20 @@ struct ProfileSocialThreadView: View {
 
     private var latestMessageID: String {
         messages.last?.id ?? "empty"
+    }
+
+    private func dayHeaderText(for message: XBLiveSocialMessage, at index: Int) -> String? {
+        guard let messageDate = ProfileSocialTimestamp.date(message.createdAt) else {
+            return nil
+        }
+
+        if index > 0,
+           let previousDate = ProfileSocialTimestamp.date(messages[index - 1].createdAt),
+           Calendar.autoupdatingCurrent.isDate(messageDate, inSameDayAs: previousDate) {
+            return nil
+        }
+
+        return ProfileSocialTimestamp.dayHeaderText(message.createdAt)
     }
 
     private var messages: [XBLiveSocialMessage] {
@@ -1114,7 +1136,15 @@ private struct ProfileSocialMessageBubbleBackground: View {
 
     var body: some View {
         ProfileSocialMessageBubbleShape(isMine: isMine)
-            .fill(isMine ? Color.accentColor : Color.secondary.opacity(0.18))
+            .fill(isMine ? Color.accentColor : incomingBubbleFill)
+    }
+
+    private var incomingBubbleFill: Color {
+        Color(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(red: 0.105, green: 0.150, blue: 0.110, alpha: 1.0)
+                : UIColor(red: 0.910, green: 0.965, blue: 0.900, alpha: 1.0)
+        })
     }
 }
 
@@ -1132,11 +1162,25 @@ private struct ProfileSocialMessageBubbleShape: Shape {
     }
 }
 
+private struct ProfileSocialThreadDayHeader: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 6)
+    }
+}
+
 private struct ProfileSocialMessageBubble: View {
     let message: XBLiveSocialMessage
     let isMine: Bool
     let avatar: ProfileSocialAvatarData
     let invite: ProfileSocialGameInviteContext?
+    let sentTime: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -1152,27 +1196,32 @@ private struct ProfileSocialMessageBubble: View {
                 if let invite {
                     ProfileSocialGameInviteCard(
                         context: invite,
-                        isMine: isMine
+                        isMine: isMine,
+                        sentTime: sentTime
                     )
+                    .layoutPriority(1)
                 } else {
                     Text(message.body.isEmpty ? " " : message.body)
                         .font(.body)
                         .foregroundStyle(isMine ? .white : .primary)
                         .textSelection(.enabled)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .background(ProfileSocialMessageBubbleBackground(isMine: isMine))
-                }
-
-                if let createdAt = ProfileSocialTimestamp.displayText(message.createdAt) {
-                    Text(createdAt)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .padding(.bottom, sentTime == nil ? 0 : 14)
+                        .frame(minWidth: sentTime == nil ? nil : 64, alignment: .leading)
+                        .overlay(alignment: .bottomTrailing) {
+                            if let sentTime {
+                                Text(sentTime)
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(isMine ? Color.white.opacity(0.76) : Color.secondary)
+                            }
+                        }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(ProfileSocialMessageBubbleBackground(isMine: isMine))
                 }
             }
 
             if !isMine {
-                Spacer(minLength: 44)
+                Spacer(minLength: invite == nil ? 44 : 0)
             }
         }
         .frame(maxWidth: .infinity)
@@ -1503,9 +1552,11 @@ private struct ProfileSocialGameInviteStats {
 
 private struct ProfileSocialGameInviteCard: View {
     @Environment(\.dukeXTheme) private var theme
+    private static let cardWidth: CGFloat = 320
 
     let context: ProfileSocialGameInviteContext
     let isMine: Bool
+    let sentTime: String?
 
     var body: some View {
         TimelineView(.periodic(from: Date(), by: 60)) { timeline in
@@ -1520,7 +1571,7 @@ private struct ProfileSocialGameInviteCard: View {
                 cardContent(isExpired: isExpired)
             }
             .buttonStyle(.plain)
-            .disabled(isExpired || context.installedGame == nil)
+            .disabled(isExpired)
             .accessibilityLabel(accessibilityText(isExpired: isExpired))
         }
     }
@@ -1569,18 +1620,29 @@ private struct ProfileSocialGameInviteCard: View {
                     }
                 }
 
-                Label(actionText(isExpired: isExpired), systemImage: actionIconName(isExpired: isExpired))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(actionColor(isExpired: isExpired))
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .bottom, spacing: 10) {
+                    Label(actionText(isExpired: isExpired), systemImage: actionIconName(isExpired: isExpired))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(actionColor(isExpired: isExpired))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
+
+                    Spacer(minLength: 6)
+
+                    if let sentTime {
+                        Text(sentTime)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
         .saturation(isExpired ? 0.18 : 1)
         .opacity(isExpired ? 0.64 : 1)
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .frame(maxWidth: 320, alignment: .leading)
+        .frame(width: Self.cardWidth, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: 21, style: .continuous)
                 .fill(.ultraThinMaterial)
@@ -1623,7 +1685,7 @@ private struct ProfileSocialGameInviteCard: View {
     }
 
     private func actionColor(isExpired: Bool) -> Color {
-        if isExpired || context.installedGame == nil {
+        if isExpired {
             return Color.secondary
         }
         return Color.accentColor
@@ -2800,12 +2862,89 @@ private enum ProfileSocialTimestamp {
         return displayFormatter.string(from: Date(timeIntervalSince1970: timestamp))
     }
 
+    static func date(_ rawValue: String?) -> Date? {
+        guard let timestamp = value(rawValue) else {
+            return nil
+        }
+        return Date(timeIntervalSince1970: timestamp)
+    }
+
+    static func timeText(_ rawValue: String?) -> String? {
+        guard let date = date(rawValue) else {
+            return nil
+        }
+        return timeFormatter.string(from: date)
+    }
+
+    static func dayHeaderText(_ rawValue: String?) -> String? {
+        guard let date = date(rawValue) else {
+            return nil
+        }
+
+        let calendar = Calendar.autoupdatingCurrent
+        if calendar.isDateInToday(date) {
+            return "Today"
+        }
+        if calendar.isDateInYesterday(date) {
+            return "Yesterday"
+        }
+
+        let day = calendar.component(.day, from: date)
+        let year = calendar.component(.year, from: date)
+        return "\(weekdayFormatter.string(from: date)) \(monthFormatter.string(from: date)) \(ordinalDay(day)), \(year)"
+    }
+
     private static let displayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .short
         formatter.timeStyle = .short
         return formatter
     }()
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return formatter
+    }()
+
+    private static let weekdayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateFormat = "EEEE"
+        return formatter
+    }()
+
+    private static let monthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateFormat = "MMMM"
+        return formatter
+    }()
+
+    private static func ordinalDay(_ day: Int) -> String {
+        let suffix: String
+        switch day {
+        case 11, 12, 13:
+            suffix = "th"
+        default:
+            switch day % 10 {
+            case 1:
+                suffix = "st"
+            case 2:
+                suffix = "nd"
+            case 3:
+                suffix = "rd"
+            default:
+                suffix = "th"
+            }
+        }
+        return "\(day)\(suffix)"
+    }
 
     private static let fallbackFormatters: [DateFormatter] = {
         [
