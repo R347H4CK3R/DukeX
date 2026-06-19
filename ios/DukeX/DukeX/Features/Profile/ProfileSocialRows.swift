@@ -1136,15 +1136,7 @@ private struct ProfileSocialMessageBubbleBackground: View {
 
     var body: some View {
         ProfileSocialMessageBubbleShape(isMine: isMine)
-            .fill(isMine ? Color.accentColor : incomingBubbleFill)
-    }
-
-    private var incomingBubbleFill: Color {
-        Color(uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark
-                ? UIColor(red: 0.105, green: 0.150, blue: 0.110, alpha: 1.0)
-                : UIColor(red: 0.910, green: 0.965, blue: 0.900, alpha: 1.0)
-        })
+            .fill(isMine ? Color.accentColor : Color.secondary.opacity(0.18))
     }
 }
 
@@ -1176,6 +1168,11 @@ private struct ProfileSocialThreadDayHeader: View {
 }
 
 private struct ProfileSocialMessageBubble: View {
+    private static let avatarSize: CGFloat = 32
+    private static let avatarSpacing: CGFloat = 10
+    private static let contentRailWidth: CGFloat = 320
+    private static let rowHorizontalInset: CGFloat = 10
+
     let message: XBLiveSocialMessage
     let isMine: Bool
     let avatar: ProfileSocialAvatarData
@@ -1183,12 +1180,12 @@ private struct ProfileSocialMessageBubble: View {
     let sentTime: String?
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: Self.avatarSpacing) {
             if isMine {
-                Spacer(minLength: 44)
+                Spacer(minLength: Self.avatarSize + Self.avatarSpacing)
             } else {
                 ProfileSocialAvatar(image: avatar.image, url: avatar.url, initial: avatar.initial)
-                    .frame(width: 32, height: 32)
+                    .frame(width: Self.avatarSize, height: Self.avatarSize)
                     .padding(.top, 4)
             }
 
@@ -1201,30 +1198,43 @@ private struct ProfileSocialMessageBubble: View {
                     )
                     .layoutPriority(1)
                 } else {
-                    Text(message.body.isEmpty ? " " : message.body)
-                        .font(.body)
-                        .foregroundStyle(isMine ? .white : .primary)
-                        .textSelection(.enabled)
-                        .padding(.bottom, sentTime == nil ? 0 : 14)
-                        .frame(minWidth: sentTime == nil ? nil : 64, alignment: .leading)
-                        .overlay(alignment: .bottomTrailing) {
-                            if let sentTime {
-                                Text(sentTime)
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(isMine ? Color.white.opacity(0.76) : Color.secondary)
-                            }
+                    HStack {
+                        if isMine {
+                            Spacer(minLength: 0)
                         }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(ProfileSocialMessageBubbleBackground(isMine: isMine))
+
+                        Text(message.body.isEmpty ? " " : message.body)
+                            .font(.body)
+                            .foregroundStyle(isMine ? .white : .primary)
+                            .textSelection(.enabled)
+                            .padding(.bottom, sentTime == nil ? 0 : 14)
+                            .frame(minWidth: sentTime == nil ? nil : 64, alignment: .leading)
+                            .overlay(alignment: .bottomTrailing) {
+                                if let sentTime {
+                                    Text(sentTime)
+                                        .font(.caption2.weight(.medium))
+                                        .foregroundStyle(isMine ? Color.white.opacity(0.76) : Color.secondary)
+                                }
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .background(ProfileSocialMessageBubbleBackground(isMine: isMine))
+
+                        if !isMine {
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    .frame(width: Self.contentRailWidth, alignment: isMine ? .trailing : .leading)
                 }
             }
 
             if !isMine {
-                Spacer(minLength: invite == nil ? 44 : 0)
+                Spacer(minLength: 0)
             }
         }
+        .padding(.horizontal, Self.rowHorizontalInset)
         .frame(maxWidth: .infinity)
+        .offset(x: isMine ? -3 : 3)
         .padding(.vertical, 2)
     }
 }
@@ -1621,19 +1631,20 @@ private struct ProfileSocialGameInviteCard: View {
                 }
 
                 HStack(alignment: .bottom, spacing: 10) {
-                    Label(actionText(isExpired: isExpired), systemImage: actionIconName(isExpired: isExpired))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(actionColor(isExpired: isExpired))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .layoutPriority(1)
-
-                    Spacer(minLength: 6)
+                    ProfileSocialGameInviteActionItem(
+                        systemImage: actionIconName(isExpired: isExpired),
+                        text: actionText(isExpired: isExpired),
+                        color: actionColor(isExpired: isExpired)
+                    )
+                    .layoutPriority(0)
 
                     if let sentTime {
                         Text(sentTime)
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                            .frame(minWidth: 44, alignment: .trailing)
+                            .layoutPriority(2)
                     }
                 }
             }
@@ -1697,6 +1708,28 @@ private struct ProfileSocialGameInviteCard: View {
             return "You invited \(context.recipientName) to play \(context.invite.title). \(actionText)."
         }
         return "\(context.senderName) invited you to play \(context.invite.title). \(actionText)."
+    }
+}
+
+private struct ProfileSocialGameInviteActionItem: View {
+    let systemImage: String
+    let text: String
+    let color: Color
+
+    var body: some View {
+        Label {
+            Text(text)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .allowsTightening(true)
+        } icon: {
+            Image(systemName: systemImage)
+                .imageScale(.small)
+                .frame(width: 13)
+        }
+        .foregroundStyle(color)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
