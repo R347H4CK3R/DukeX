@@ -525,6 +525,9 @@ struct XBLiveAchievement: Codable, Identifiable, Equatable {
     static func defaultTitle(forGroupID groupID: String?, category: String?) -> String? {
         let normalizedGroupID = groupID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let normalizedCategory = category?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalizedGroupID == "dukex_core" || normalizedCategory == "dukex core" {
+            return "DukeX Core"
+        }
         if normalizedGroupID == "xbl_core" || normalizedCategory == "xbl core" {
             return "XBL Core"
         }

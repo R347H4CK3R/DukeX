@@ -1,9 +1,14 @@
 import Foundation
+import CryptoKit
 
 struct FATXHDDCloudSaveStore {
     let hddURL: URL
 
-    func exportArchives(to directoryURL: URL, games: [LibraryFile]) throws -> [XBLCloudSaveArchive] {
+    func exportArchives(
+        to directoryURL: URL,
+        games: [LibraryFile],
+        contentHashProfiles: XBLCloudSaveContentHashProfiles = .empty
+    ) throws -> [XBLCloudSaveArchive] {
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true, attributes: nil)
 
         let volume = try openVolume(readOnly: true)
@@ -34,6 +39,11 @@ struct FATXHDDCloudSaveStore {
             try FileManager.default.createDirectory(at: titleScratchURL, withIntermediateDirectories: true, attributes: nil)
 
             try volume.extractDirectory(cluster: titleDirectory.startCluster, to: titleScratchURL)
+            let contentHash = try XBLCloudSaveContentHasher.contentHash(
+                for: titleScratchURL,
+                titleID: titleID,
+                profiles: contentHashProfiles
+            )
 
             do {
                 try DukeXZipArchive.createArchive(atPath: archiveURL.path, fromDirectory: titleScratchURL.path)
@@ -59,6 +69,7 @@ struct FATXHDDCloudSaveStore {
                 size: size,
                 modifiedDate: modifiedDate,
                 fingerprint: metadata.fingerprint,
+                contentHash: contentHash,
                 saveCount: metadata.saveCount,
                 totalBytes: Int64(metadata.totalSize),
                 saveModifiedDate: metadata.latestSaveModifiedDate,
@@ -156,6 +167,171 @@ struct FATXHDDCloudSaveStore {
                 hash ^= UInt64(byte)
                 hash = hash &* 1_099_511_628_211
             }
+        }
+    }
+}
+
+struct XBLCloudSaveContentHashProfiles: Decodable {
+    static let empty = XBLCloudSaveContentHashProfiles(rulesByTitleID: [:])
+
+    let rulesByTitleID: [String: [XBLCloudSaveContentHashRule]]
+
+    init(rulesByTitleID: [String: [XBLCloudSaveContentHashRule]]) {
+        self.rulesByTitleID = rulesByTitleID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawRules = try container.decode([String: [XBLCloudSaveContentHashRule]].self)
+        rulesByTitleID = Dictionary(
+            uniqueKeysWithValues: rawRules.map { titleID, rules in
+                (titleID.uppercased(), rules)
+            }
+        )
+    }
+
+    func rule(for titleID: String, relativePath: String) -> XBLCloudSaveContentHashRule? {
+        let normalizedTitleID = titleID.uppercased()
+        return rulesByTitleID[normalizedTitleID]?.first { rule in
+            rule.noRoam && rule.matches(relativePath: relativePath)
+        }
+    }
+}
+
+struct XBLCloudSaveContentHashRule: Decodable {
+    let dataFile: String
+    let dataOffset: Int?
+    let dataLen: Int?
+    let noRoam: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case dataFile
+        case dataOffset
+        case dataLen
+        case noRoam
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        dataFile = (try? container.decode(String.self, forKey: .dataFile)) ?? ""
+        dataOffset = try? container.decodeIfPresent(Int.self, forKey: .dataOffset)
+        dataLen = try? container.decodeIfPresent(Int.self, forKey: .dataLen)
+        noRoam = (try? container.decodeIfPresent(Bool.self, forKey: .noRoam)) ?? false
+    }
+
+    func matches(relativePath: String) -> Bool {
+        guard !dataFile.isEmpty else {
+            return false
+        }
+
+        let normalizedPath = relativePath.replacingOccurrences(of: "\\", with: "/")
+        let candidate = dataFile.contains("/") ? normalizedPath : URL(fileURLWithPath: normalizedPath).lastPathComponent
+        return Self.wildcard(dataFile, matches: candidate)
+    }
+
+    func payloadForHash(from data: Data) -> Data {
+        let offset = dataOffset ?? 0
+        let start = offset >= 0 ? offset : data.count + offset
+        guard start >= 0, start <= data.count else {
+            return data
+        }
+
+        let length: Int
+        if let dataLen {
+            length = dataLen >= 0 ? dataLen : data.count - start + dataLen
+        } else {
+            length = data.count - start
+        }
+
+        guard length >= 0 else {
+            return data
+        }
+
+        let end = min(data.count, start + length)
+        guard end >= start else {
+            return data
+        }
+        return data.subdata(in: start..<end)
+    }
+
+    private static func wildcard(_ pattern: String, matches candidate: String) -> Bool {
+        var regex = "^"
+        for character in pattern {
+            switch character {
+            case "*":
+                regex += ".*"
+            case "?":
+                regex += "."
+            default:
+                regex += NSRegularExpression.escapedPattern(for: String(character))
+            }
+        }
+        regex += "$"
+
+        guard let expression = try? NSRegularExpression(pattern: regex, options: [.caseInsensitive]) else {
+            return pattern.caseInsensitiveCompare(candidate) == .orderedSame
+        }
+        let range = NSRange(candidate.startIndex..<candidate.endIndex, in: candidate)
+        return expression.firstMatch(in: candidate, options: [], range: range) != nil
+    }
+}
+
+enum XBLCloudSaveContentHasher {
+    static func contentHash(
+        for directoryURL: URL,
+        titleID: String,
+        profiles: XBLCloudSaveContentHashProfiles
+    ) throws -> String {
+        var hasher = SHA256()
+        let files = try sortedFiles(in: directoryURL)
+        for file in files {
+            hasher.update(data: Data(file.relativePath.utf8))
+            hasher.update(data: Data("\n".utf8))
+
+            let data = try Data(contentsOf: file.url, options: .mappedIfSafe)
+            if let rule = profiles.rule(for: titleID, relativePath: file.relativePath) {
+                hasher.update(data: rule.payloadForHash(from: data))
+            } else {
+                hasher.update(data: data)
+            }
+        }
+
+        let digest = hasher.finalize()
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func sortedFiles(in directoryURL: URL) throws -> [(relativePath: String, url: URL)] {
+        let rootURL = directoryURL.standardizedFileURL
+        let rootPath = rootURL.path
+        guard let enumerator = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var files: [(relativePath: String, url: URL)] = []
+        for case let fileURL as URL in enumerator {
+            let values = try fileURL.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile == true else {
+                continue
+            }
+
+            var relativePath = String(fileURL.standardizedFileURL.path.dropFirst(rootPath.count))
+            if relativePath.hasPrefix("/") {
+                relativePath.removeFirst()
+            }
+            relativePath = relativePath.replacingOccurrences(of: "\\", with: "/")
+            guard !relativePath.isEmpty,
+                  URL(fileURLWithPath: relativePath).lastPathComponent.caseInsensitiveCompare("_xbl_sync.txt") != .orderedSame else {
+                continue
+            }
+            files.append((relativePath, fileURL))
+        }
+
+        return files.sorted { lhs, rhs in
+            lhs.relativePath < rhs.relativePath
         }
     }
 }

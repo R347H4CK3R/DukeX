@@ -55,6 +55,9 @@ struct XBLCloudSaveSyncResult {
 struct XBLCloudSaveService {
     private static let baseURL = URL(string: "https://xb.live/api/me/xbox-saves")!
     private static let accountBaseURL = URL(string: "https://xb.live/api/me/xbox-account")!
+    private static let noRoamProfilesURL = URL(string: "https://xb.live/lib/xbox-save-profiles.json")!
+    private static let consoleIDScheme = "v2"
+    private static let consoleIDDefaultsKeyPrefix = "DukeXCloudSaveConsoleID.v2."
     private static let uploadMaxBytes: Int64 = 32 * 1024 * 1024
 
     func pushLocalSaves(
@@ -76,7 +79,12 @@ struct XBLCloudSaveService {
         let scratchURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("DukeXCloudSavePush-\(UUID().uuidString)", isDirectory: true)
         let hddStore = FATXHDDCloudSaveStore(hddURL: hdd.url)
-        let archives = try hddStore.exportArchives(to: scratchURL, games: games)
+        let contentHashProfiles = await fetchContentHashProfiles()
+        let archives = try hddStore.exportArchives(
+            to: scratchURL,
+            games: games,
+            contentHashProfiles: contentHashProfiles
+        )
         guard !archives.isEmpty else {
             throw CloudSaveError.noLocalArchives(directoryName: "Xbox HDD UDATA")
         }
@@ -98,12 +106,17 @@ struct XBLCloudSaveService {
                 continue
             }
 
-            if manifest.contains(titleID: archive.titleID, consoleID: consoleID, fingerprint: archive.fingerprint) {
+            if manifest.shouldSkipUpload(archive: archive, consoleID: consoleID) {
                 skipped += 1
                 continue
             }
 
-            try await upload(archive, sessionKey: sessionKey, consoleID: consoleID, hddKeyHex: identity.hddKeyHex)
+            try await upload(
+                archive,
+                sessionKey: sessionKey,
+                consoleID: consoleID,
+                identity: identity
+            )
             uploaded += 1
         }
 
@@ -191,10 +204,12 @@ struct XBLCloudSaveService {
         var request = URLRequest(url: Self.baseURL.appendingPathComponent("console-data"))
         request.httpMethod = "POST"
         request.setValue(sessionKey, forHTTPHeaderField: "X-Session-Key")
+        request.setValue(Self.consoleIDScheme, forHTTPHeaderField: "X-Console-Id-Scheme")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(
             withJSONObject: [
                 "sessionKey": sessionKey,
+                "console_id_scheme": Self.consoleIDScheme,
                 "serial": identity.serial,
                 "hdd_key_hex": identity.hddKeyHex,
                 "eeprom_base64": identity.eepromData.base64EncodedString()
@@ -208,10 +223,24 @@ struct XBLCloudSaveService {
         if let response = try? JSONDecoder().decode(ConsoleDataResponse.self, from: data),
            let consoleID = response.consoleID?.trimmingCharacters(in: .whitespacesAndNewlines),
            !consoleID.isEmpty {
+            persistConsoleID(consoleID, for: identity)
             return consoleID
         }
 
-        return "unknown"
+        return persistedConsoleID(for: identity) ?? "unknown"
+    }
+
+    private func persistedConsoleID(for identity: XboxEEPROMIdentity) -> String? {
+        UserDefaults.standard.string(forKey: Self.consoleIDDefaultsKeyPrefix + identity.serial)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    private func persistConsoleID(_ consoleID: String, for identity: XboxEEPROMIdentity) {
+        guard consoleID.caseInsensitiveCompare("unknown") != .orderedSame else {
+            return
+        }
+        UserDefaults.standard.set(consoleID, forKey: Self.consoleIDDefaultsKeyPrefix + identity.serial)
     }
 
     private func fetchManifest(sessionKey: String) async throws -> CloudSaveManifest {
@@ -237,17 +266,30 @@ struct XBLCloudSaveService {
         return CloudSaveListParser.remoteEntries(from: object)
     }
 
+    private func fetchContentHashProfiles() async -> XBLCloudSaveContentHashProfiles {
+        do {
+            let (data, response) = try await URLSession.shared.data(from: Self.noRoamProfilesURL)
+            try validate(response: response, data: data)
+            return try JSONDecoder().decode(XBLCloudSaveContentHashProfiles.self, from: data)
+        } catch {
+            NSLog("DukeX cloud save NoRoam content hash profile fetch failed: %@", error.localizedDescription)
+            return .empty
+        }
+    }
+
     private func upload(
         _ archive: XBLCloudSaveArchive,
         sessionKey: String,
         consoleID: String,
-        hddKeyHex: String
+        identity: XboxEEPROMIdentity
     ) async throws {
         var components = URLComponents(url: Self.baseURL.appendingPathComponent("game"), resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "title_id", value: archive.titleID),
             URLQueryItem(name: "console_id", value: consoleID),
-            URLQueryItem(name: "hdd_key_hex", value: hddKeyHex),
+            URLQueryItem(name: "console_id_scheme", value: Self.consoleIDScheme),
+            URLQueryItem(name: "serial", value: identity.serial),
+            URLQueryItem(name: "hdd_key_hex", value: identity.hddKeyHex),
             URLQueryItem(name: "profile", value: ""),
             URLQueryItem(name: "save_count", value: "\(archive.saveCount)"),
             URLQueryItem(name: "total_bytes", value: "\(archive.totalBytes)"),
@@ -262,9 +304,13 @@ struct XBLCloudSaveService {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue(sessionKey, forHTTPHeaderField: "X-Session-Key")
+        request.setValue(Self.consoleIDScheme, forHTTPHeaderField: "X-Console-Id-Scheme")
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         request.setValue(Data(archive.titleName.utf8).base64EncodedString(), forHTTPHeaderField: "X-Title-Name-B64")
         request.setValue(archive.manifestBase64, forHTTPHeaderField: "X-Manifest-B64")
+        if let contentHash = archive.contentHash {
+            request.setValue(contentHash, forHTTPHeaderField: "X-Content-Hash")
+        }
 
         let (data, response) = try await URLSession.shared.upload(for: request, fromFile: archive.url)
         try validate(response: response, data: data)
@@ -298,8 +344,32 @@ struct XBLCloudSaveService {
         request.setValue(sessionKey, forHTTPHeaderField: "X-Session-Key")
 
         let (temporaryURL, response) = try await URLSession.shared.download(for: request)
-        try validate(response: response, data: nil)
+        let responseData = try? Data(contentsOf: temporaryURL)
+        try validate(response: response, data: responseData)
+        try validateDownloadedArchive(temporaryURL, response: response, data: responseData)
         return temporaryURL
+    }
+
+    private func validateDownloadedArchive(_ url: URL, response: URLResponse, data: Data?) throws {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw CloudSaveError.unavailable
+        }
+
+        let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
+        let prefix = data ?? (try? Data(contentsOf: url, options: .mappedIfSafe))
+        let trimmedPrefix = prefix?
+            .prefix(128)
+            .drop { byte in
+                byte == UInt8(ascii: " ") ||
+                    byte == UInt8(ascii: "\n") ||
+                    byte == UInt8(ascii: "\r") ||
+                    byte == UInt8(ascii: "\t")
+            }
+
+        if contentType.contains("json") || trimmedPrefix?.first == UInt8(ascii: "{") {
+            let body = data.flatMap { String(data: $0, encoding: .utf8) }
+            throw CloudSaveError.server(statusCode: httpResponse.statusCode, message: body)
+        }
     }
 
     private func uploadXboxLiveProfilesIfEnabled(
@@ -506,6 +576,7 @@ struct XBLCloudSaveArchive {
     let size: Int64
     let modifiedDate: Date
     let fingerprint: String
+    let contentHash: String?
     let saveCount: Int
     let totalBytes: Int64
     let saveModifiedDate: Date
@@ -518,6 +589,7 @@ struct XBLCloudSaveArchive {
         size: Int64,
         modifiedDate: Date,
         fingerprint: String,
+        contentHash: String? = nil,
         saveCount: Int = 0,
         totalBytes: Int64? = nil,
         saveModifiedDate: Date? = nil,
@@ -529,6 +601,7 @@ struct XBLCloudSaveArchive {
         self.size = size
         self.modifiedDate = modifiedDate
         self.fingerprint = fingerprint
+        self.contentHash = contentHash
         self.saveCount = saveCount
         self.totalBytes = totalBytes ?? size
         self.saveModifiedDate = saveModifiedDate ?? modifiedDate
@@ -562,19 +635,48 @@ private struct CloudSaveManifest {
             .compactMap { Entry(String($0)) }
     }
 
-    func contains(titleID: String, consoleID: String, fingerprint: String) -> Bool {
-        entries.contains { entry in
-            entry.titleID == titleID &&
+    func shouldSkipUpload(archive: XBLCloudSaveArchive, consoleID: String) -> Bool {
+        let matchingEntries = entries.filter { entry in
+            entry.titleID == archive.titleID &&
+                (entry.profile?.isEmpty ?? true)
+        }
+
+        if let contentHash = archive.contentHash,
+           matchingEntries.contains(where: { $0.contentHash == contentHash }) {
+            return true
+        }
+
+        if matchingEntries.contains(where: { entry in
+            guard let saveModifiedUnix = entry.saveModifiedUnix else {
+                return false
+            }
+            return saveModifiedUnix >= archive.modifiedUnixTime
+        }) {
+            return true
+        }
+
+        return matchingEntries.contains { entry in
             (entry.consoleID == nil || entry.consoleID == consoleID) &&
-            (entry.profile?.isEmpty ?? true) &&
-            entry.fingerprint == fingerprint
+                entry.fingerprint == archive.fingerprint
         }
     }
 
     var remoteEntries: [CloudSaveRemoteEntry] {
         entries
             .filter { !$0.noSync }
-            .map { CloudSaveRemoteEntry(consoleID: $0.consoleID, profile: $0.profile, titleID: $0.titleID, noSync: $0.noSync) }
+            .sorted { lhs, rhs in
+                (lhs.saveModifiedUnix ?? 0) > (rhs.saveModifiedUnix ?? 0)
+            }
+            .map {
+                CloudSaveRemoteEntry(
+                    consoleID: $0.consoleID,
+                    profile: $0.profile,
+                    titleID: $0.titleID,
+                    noSync: $0.noSync,
+                    saveModifiedUnix: $0.saveModifiedUnix,
+                    contentHash: $0.contentHash
+                )
+            }
     }
 
     struct Entry {
@@ -582,6 +684,8 @@ private struct CloudSaveManifest {
         let profile: String?
         let titleID: String
         let fingerprint: String
+        let saveModifiedUnix: Int?
+        let contentHash: String?
         let noSync: Bool
 
         init?(_ line: String) {
@@ -624,11 +728,25 @@ private struct CloudSaveManifest {
                 return nil
             }
 
+            let remainingValues = valueParts.dropFirst().map {
+                String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+
             consoleID = possibleConsoleID?.isEmpty == true ? nil : possibleConsoleID
             profile = possibleProfile
             titleID = normalizedTitleID
             fingerprint = parsedFingerprint
-            noSync = valueParts.dropFirst().contains { $0.caseInsensitiveCompare("nosync") == .orderedSame }
+            saveModifiedUnix = remainingValues.compactMap { Int($0) }.first
+            contentHash = remainingValues.first {
+                Self.isContentHash($0)
+            }?.lowercased()
+            noSync = remainingValues.contains { $0.caseInsensitiveCompare("nosync") == .orderedSame }
+        }
+
+        private static func isContentHash(_ value: String) -> Bool {
+            let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return (16...128).contains(normalized.count) &&
+                normalized.allSatisfy { $0.isHexDigit }
         }
     }
 }
@@ -638,6 +756,8 @@ private struct CloudSaveRemoteEntry: Hashable {
     let profile: String?
     let titleID: String
     let noSync: Bool
+    let saveModifiedUnix: Int?
+    let contentHash: String?
 }
 
 private enum CloudSaveListParser {
@@ -653,6 +773,12 @@ private enum CloudSaveListParser {
     private static let profileKeys: Set<String> = [
         "profile", "profile_key", "profilekey", "source_profile", "sourceprofile"
     ]
+    private static let saveModifiedKeys: Set<String> = [
+        "save_modified", "savemodified", "save_modified_unix", "savemodifiedunix", "modified", "modified_unix"
+    ]
+    private static let contentHashKeys: Set<String> = [
+        "content_hash", "contenthash", "hash"
+    ]
     private static let syncBackEnabledKeys: Set<String> = [
         "sync_back_enabled", "syncbackenabled", "sync_enabled", "syncenabled"
     ]
@@ -662,7 +788,11 @@ private enum CloudSaveListParser {
         collectEntries(from: object, inheritedConsoleID: nil, entries: &entries)
 
         var seen = Set<String>()
-        return entries.filter { entry in
+        return entries
+            .sorted { lhs, rhs in
+                (lhs.saveModifiedUnix ?? 0) > (rhs.saveModifiedUnix ?? 0)
+            }
+            .filter { entry in
             guard !entry.noSync else {
                 return false
             }
@@ -680,15 +810,35 @@ private enum CloudSaveListParser {
         if let dictionary = object as? [String: Any] {
             let consoleID = normalizedString(from: dictionary, keys: consoleIDKeys) ?? inheritedConsoleID
             let profile = normalizedString(from: dictionary, keys: profileKeys)
+            let saveModifiedUnix = normalizedInt(from: dictionary, keys: saveModifiedKeys)
+            let contentHash = normalizedString(from: dictionary, keys: contentHashKeys)?.lowercased()
             let noSync = noSyncFlag(in: dictionary)
 
             if let titleID = normalizedTitleID(from: dictionary) {
-                entries.append(CloudSaveRemoteEntry(consoleID: consoleID, profile: profile, titleID: titleID, noSync: noSync))
+                entries.append(
+                    CloudSaveRemoteEntry(
+                        consoleID: consoleID,
+                        profile: profile,
+                        titleID: titleID,
+                        noSync: noSync,
+                        saveModifiedUnix: saveModifiedUnix,
+                        contentHash: contentHash
+                    )
+                )
             }
 
             for (key, value) in dictionary {
                 if let titleID = normalizedTitleID(key) {
-                    entries.append(CloudSaveRemoteEntry(consoleID: consoleID, profile: profile, titleID: titleID, noSync: noSync))
+                    entries.append(
+                        CloudSaveRemoteEntry(
+                            consoleID: consoleID,
+                            profile: profile,
+                            titleID: titleID,
+                            noSync: noSync,
+                            saveModifiedUnix: saveModifiedUnix,
+                            contentHash: contentHash
+                        )
+                    )
                 }
 
                 collectEntries(from: value, inheritedConsoleID: consoleID, entries: &entries)
@@ -713,6 +863,21 @@ private enum CloudSaveListParser {
                 }
             } else if let number = value as? NSNumber {
                 return number.stringValue
+            }
+        }
+        return nil
+    }
+
+    private static func normalizedInt(from dictionary: [String: Any], keys: Set<String>) -> Int? {
+        for (key, value) in dictionary where keys.contains(normalizedKey(key)) {
+            if let number = value as? NSNumber {
+                return number.intValue
+            }
+            if let string = value as? String {
+                let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let intValue = Int(trimmed) {
+                    return intValue
+                }
             }
         }
         return nil

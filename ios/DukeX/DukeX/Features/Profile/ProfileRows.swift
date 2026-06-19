@@ -1573,16 +1573,17 @@ struct ProfileAchievementsView: View {
                 }
                 let first = sortedAchievements[0]
                 let supportedGame = supportedGame(for: sortedAchievements)
-                let isXBLCore = sortedAchievements.contains(where: Self.isXBLCoreAchievement)
+                let coreKind = Self.coreAchievementKind(for: sortedAchievements)
+                let isCoreAchievementGroup = coreKind != nil
                 return ProfileAchievementGameGroup(
-                    id: isXBLCore ? "xbl-core" : supportedGame?.titleID ?? first.gameTitleID ?? first.groupID ?? Self.groupKey(for: first),
-                    title: isXBLCore ? "XB.Live Core" : supportedGame?.title ?? first.gameTitle?.nilIfEmpty ?? "Unknown Game",
-                    iconURL: isXBLCore ? nil : XboxTitleIconCatalog.mobCatIconURL(for: supportedGame?.titleID ?? first.gameTitleID) ??
+                    id: coreKind?.id ?? supportedGame?.titleID ?? first.gameTitleID ?? first.groupID ?? Self.groupKey(for: first),
+                    title: coreKind?.title ?? supportedGame?.title ?? first.gameTitle?.nilIfEmpty ?? "Unknown Game",
+                    iconURL: isCoreAchievementGroup ? nil : XboxTitleIconCatalog.mobCatIconURL(for: supportedGame?.titleID ?? first.gameTitleID) ??
                         first.gameIconURL,
-                    iconAssetName: isXBLCore ? "XBLCoreAchievementIcon" : Self.iconAssetName(for: sortedAchievements),
+                    iconAssetName: coreKind?.assetName ?? Self.iconAssetName(for: sortedAchievements),
                     achievements: sortedAchievements,
                     gamesPlayed: gamesPlayed,
-                    isXBLCore: isXBLCore
+                    isXBLCore: isCoreAchievementGroup
                 )
             }
             .sorted { lhs, rhs in
@@ -1596,6 +1597,14 @@ struct ProfileAchievementsView: View {
 
     private var xblCoreAchievementGroups: [ProfileAchievementGameGroup] {
         achievementGroups.filter(\.isXBLCore)
+            .sorted { lhs, rhs in
+                let lhsOrder = Self.coreSortOrder(forTitle: lhs.title)
+                let rhsOrder = Self.coreSortOrder(forTitle: rhs.title)
+                if lhsOrder != rhsOrder {
+                    return lhsOrder < rhsOrder
+                }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
     }
 
     private func supportedGame(for achievements: [XBLiveAchievement]) -> InsigniaSupportedGame? {
@@ -1612,8 +1621,8 @@ struct ProfileAchievementsView: View {
     }
 
     private static func groupKey(for achievement: XBLiveAchievement) -> String {
-        if isXBLCoreAchievement(achievement) {
-            return "xbl_core"
+        if coreAchievementKind(for: achievement) != nil {
+            return coreGroupKey(for: achievement)
         }
         if let groupID = achievement.groupID?.nilIfEmpty {
             return groupID.lowercased()
@@ -1625,19 +1634,108 @@ struct ProfileAchievementsView: View {
     }
 
     private static func iconAssetName(for achievements: [XBLiveAchievement]) -> String? {
-        achievements.contains(where: isXBLCoreAchievement) ? "XBLCoreAchievementIcon" : nil
+        coreAchievementKind(for: achievements)?.assetName
     }
 
-    private static func isXBLCoreAchievement(_ achievement: XBLiveAchievement) -> Bool {
-        achievement.groupID?.localizedCaseInsensitiveCompare("xbl_core") == .orderedSame ||
-            achievement.gameTitle?.localizedCaseInsensitiveCompare("XBL Core") == .orderedSame ||
-            achievement.category?.localizedCaseInsensitiveCompare("XBL Core") == .orderedSame
+    private static func coreAchievementKind(for achievements: [XBLiveAchievement]) -> ProfileCoreAchievementKind? {
+        achievements.compactMap(coreAchievementKind(for:))
+            .sorted { lhs, rhs in
+                lhs.sortOrder < rhs.sortOrder
+            }
+            .first
+    }
+
+    private static func coreAchievementKind(for achievement: XBLiveAchievement) -> ProfileCoreAchievementKind? {
+        let normalizedValues = [
+            achievement.groupID,
+            achievement.gameTitle,
+            achievement.category
+        ]
+            .compactMap { value -> String? in
+                guard let value = value?.nilIfEmpty else {
+                    return nil
+                }
+                return normalizedTitle(value)
+            }
+
+        if normalizedValues.contains("dukexcore") {
+            return .dukeX
+        }
+        if normalizedValues.contains("xblcore") || normalizedValues.contains("xblivecore") {
+            return .xbLive
+        }
+        return nil
+    }
+
+    private static func coreGroupKey(for achievement: XBLiveAchievement) -> String {
+        if let groupID = achievement.groupID?.nilIfEmpty {
+            return groupID.lowercased()
+        }
+        if let category = achievement.category?.nilIfEmpty {
+            return normalizedTitle(category)
+        }
+        if let gameTitle = achievement.gameTitle?.nilIfEmpty {
+            return normalizedTitle(gameTitle)
+        }
+        return "core"
+    }
+
+    private static func coreSortOrder(forTitle title: String) -> Int {
+        switch normalizedTitle(title) {
+        case "xblivecore", "xblcore":
+            return 0
+        case "dukexcore":
+            return 1
+        default:
+            return 2
+        }
     }
 
     private static func normalizedTitle(_ title: String) -> String {
         title
             .lowercased()
             .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "", options: .regularExpression)
+    }
+}
+
+private enum ProfileCoreAchievementKind {
+    case xbLive
+    case dukeX
+
+    var id: String {
+        switch self {
+        case .xbLive:
+            return "xbl-core"
+        case .dukeX:
+            return "dukex-core"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .xbLive:
+            return "XB.Live Core"
+        case .dukeX:
+            return "DukeX Core"
+        }
+    }
+
+    var assetName: String {
+        switch self {
+        case .xbLive:
+            return "XBLCoreAchievementIcon"
+        case .dukeX:
+            return "DukeXAppIcon"
+        }
+    }
+
+    var sortOrder: Int {
+        switch self {
+        case .xbLive:
+            return 0
+        case .dukeX:
+            return 1
+        }
     }
 }
 
@@ -2121,7 +2219,9 @@ private struct ProfileGameIcon: View {
 
     @ViewBuilder
     private var fallback: some View {
-        if let assetName {
+        if assetName == "DukeXAppIcon" {
+            DukeXAppIconImage()
+        } else if let assetName {
             Image(assetName)
                 .resizable()
                 .scaledToFill()
@@ -2133,6 +2233,35 @@ private struct ProfileGameIcon: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+private struct DukeXAppIconImage: View {
+    var body: some View {
+        if let image = UIImage.dukeXPrimaryAppIcon {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.secondary.opacity(0.18))
+                Image(systemName: "app.fill")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private extension UIImage {
+    static var dukeXPrimaryAppIcon: UIImage? {
+        let iconFiles = (((Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any])?["CFBundlePrimaryIcon"] as? [String: Any])?["CFBundleIconFiles"] as? [String]) ?? []
+        for iconFile in iconFiles.reversed() {
+            if let image = UIImage(named: iconFile) {
+                return image
+            }
+        }
+        return UIImage(named: "AppIconGC") ?? UIImage(named: "dukex_gc_1024")
     }
 }
 
