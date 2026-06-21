@@ -297,6 +297,75 @@ static const char *get_bound_driver(int port)
 
 static const int port_map[4] = { 3, 4, 1, 2 };
 
+#ifdef CONFIG_IOS
+static bool xemu_input_ios_xbox_headset_mic_enabled(void)
+{
+    const char *env = getenv("XEMU_IOS_XBOX_HEADSET_MIC");
+    return env && env[0] != '\0' && strcmp(env, "0") != 0;
+}
+
+static void xemu_input_attach_ios_xbox_headset_mic(int player_index)
+{
+    if (player_index != 0 || !xemu_input_ios_xbox_headset_mic_enabled()) {
+        return;
+    }
+
+    static const int headset_slot_map[2] = { 2, 3 };
+    int expansion_slot_index = -1;
+
+    for (int i = 0; i < 2; i++) {
+        enum peripheral_type peripheral_type =
+            (enum peripheral_type)(*peripheral_types_settings_map[player_index][i]);
+        if (peripheral_type == PERIPHERAL_NONE) {
+            expansion_slot_index = i;
+            break;
+        }
+    }
+
+    if (expansion_slot_index < 0) {
+        xemu_ios_input_diagnostic_log(
+            "xbox_headset_mic skipped player=%d reason=no-empty-expansion-slot",
+            player_index + 1);
+        return;
+    }
+
+    QDict *qdict = qdict_new();
+    qdict_put_str(qdict, "driver", "usb-xblc");
+
+    static int id_counter = 0;
+    char *tmp = g_strdup_printf("xblc_%d", id_counter++);
+    qdict_put_str(qdict, "id", tmp);
+    g_free(tmp);
+
+    tmp = g_strdup_printf("1.%d.%d",
+                          port_map[player_index],
+                          headset_slot_map[expansion_slot_index]);
+    qdict_put_str(qdict, "port", tmp);
+    xemu_ios_input_diagnostic_log(
+        "xbox_headset_mic attaching player=%d slot=%c port=%s",
+        player_index + 1,
+        'A' + expansion_slot_index,
+        tmp);
+    g_free(tmp);
+
+    Error *err = NULL;
+    QemuOpts *opts =
+        qemu_opts_from_qdict(qemu_find_opts("device"), qdict, &error_abort);
+    DeviceState *dev = qdev_device_add(opts, &err);
+    if (err) {
+        xemu_ios_input_diagnostic_log(
+            "xbox_headset_mic attach failed: %s",
+            error_get_pretty(err));
+        error_free(err);
+    } else if (dev) {
+        object_unref(OBJECT(dev));
+        xemu_ios_input_diagnostic_log("xbox_headset_mic attached");
+    }
+
+    qobject_unref(qdict);
+}
+#endif
+
 static ControllerState *xemu_input_find_sdl_gamepad(SDL_JoystickID instance_id)
 {
     ControllerState *iter;
@@ -1041,6 +1110,10 @@ void xemu_input_bind(int index, ControllerState *state, int save)
         object_unref(OBJECT(usbhub_dev));
         qobject_unref(qdict);
         object_unref(OBJECT(dev));
+
+#ifdef CONFIG_IOS
+        xemu_input_attach_ios_xbox_headset_mic(index);
+#endif
 
         state->device = usbhub_dev;
     }

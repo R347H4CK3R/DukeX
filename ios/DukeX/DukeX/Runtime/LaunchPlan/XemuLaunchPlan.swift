@@ -119,12 +119,6 @@ struct XemuLaunchPlan: Identifiable {
             ])
         }
 
-        if xboxHeadsetMicEnabled {
-            arguments.append(contentsOf: [
-                "-device", "usb-xblc"
-            ])
-        }
-
         return XemuLaunchPlan(
             configURL: customConfigURL ?? configURL,
             arguments: arguments,
