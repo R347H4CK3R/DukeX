@@ -22,6 +22,7 @@ struct ContentView: View {
     @StateObject private var autoJIT = StikDebugAutoJITCoordinator()
     @StateObject private var profileStore = InsigniaProfileStore()
     @StateObject private var socialStore = XBLiveSocialStore()
+    @StateObject private var emulatorPresence = XBLiveEmulatorPresenceCoordinator()
     @StateObject private var liveStatusStore = InsigniaLiveStatusStore()
     @StateObject private var gameMetadataStore = GameMetadataStore()
     @StateObject private var controllerBatteryMonitor = ControllerBatteryMonitor()
@@ -101,6 +102,7 @@ struct ContentView: View {
                         signIn: { isProfileLoginPresented = true },
                         signOut: {
                             socialStore.clear()
+                            emulatorPresence.stop(reason: "sign out")
                             profileStore.signOut()
                         },
                         changeProfileImage: beginProfileImageSelection,
@@ -507,6 +509,7 @@ struct ContentView: View {
         }
 
         configureSocialNotifications()
+        configureEmulatorPresenceNotifications()
         await socialStore.refreshAll()
     }
 
@@ -544,6 +547,16 @@ struct ContentView: View {
                 return store.game(matchingTitleID: normalizedTitleID)?.coverURL
             }
         )
+    }
+
+    @MainActor
+    private func configureEmulatorPresenceNotifications() {
+        emulatorPresence.onAuthenticationFailure = { message in
+            store.message = UserMessage(
+                title: "XB.Live Presence Not Synced",
+                detail: message
+            )
+        }
     }
 
     private func refreshGamesTab() {
@@ -666,7 +679,7 @@ struct ContentView: View {
         let plan = try makePlan(for: target)
         activeRuntimeWasGame = target == .game
         guard plan.requiresJITHandoff && store.autoJITBeforeLaunchEnabled else {
-            runtime.launch(plan: plan)
+            launchRuntime(plan, target: target)
             return
         }
 
@@ -683,6 +696,10 @@ struct ContentView: View {
     ) {
         guard activeRuntimeWasGame,
               oldState.isRunning else {
+            if activeRuntimeWasGame,
+               case .failed = newState {
+                emulatorPresence.stop(reason: "launch failed")
+            }
             if !newState.isRunning {
                 activeRuntimeWasGame = false
             }
@@ -692,11 +709,13 @@ struct ContentView: View {
         switch newState {
         case .exited:
             activeRuntimeWasGame = false
+            emulatorPresence.stop(reason: "game exit")
             Task { @MainActor in
                 await pushCloudSavesAutomaticallyIfNeeded(reason: "game exit")
             }
         case .failed:
             activeRuntimeWasGame = false
+            emulatorPresence.stop(reason: "runtime failed")
         default:
             break
         }
@@ -912,10 +931,21 @@ struct ContentView: View {
 
     private func launchWithoutAutoJIT(_ target: AutoJITLaunchTarget) {
         do {
-            runtime.launch(plan: try makePlan(for: target))
+            let plan = try makePlan(for: target)
+            activeRuntimeWasGame = target == .game
+            launchRuntime(plan, target: target)
         } catch {
             store.message = UserMessage(title: "Launch Blocked", detail: error.localizedDescription)
         }
+    }
+
+    private func launchRuntime(_ plan: XemuLaunchPlan, target: AutoJITLaunchTarget) {
+        if target == .game {
+            emulatorPresence.start(titleID: plan.titleID, gameName: plan.gameName)
+        } else {
+            emulatorPresence.stop(reason: "dashboard launch")
+        }
+        runtime.launch(plan: plan)
     }
 
     private func makePlan(for target: AutoJITLaunchTarget) throws -> XemuLaunchPlan {

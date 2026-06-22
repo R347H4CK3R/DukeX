@@ -66,6 +66,7 @@
 		I50000000000000000000005 /* XboxEEPROMIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = I50000000000000000000018 /* XboxEEPROMIdentity.swift */; };
 		J60000000000000000000001 /* XBLiveSocialService.swift in Sources */ = {isa = PBXBuildFile; fileRef = J60000000000000000000011 /* XBLiveSocialService.swift */; };
 		J60000000000000000000002 /* ProfileSocialRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = J60000000000000000000012 /* ProfileSocialRows.swift */; };
+		J60000000000000000000003 /* XBLiveEmulatorPresenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = J60000000000000000000013 /* XBLiveEmulatorPresenceService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -134,6 +135,7 @@
 		I50000000000000000000018 /* XboxEEPROMIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XboxEEPROMIdentity.swift; sourceTree = "<group>"; };
 		J60000000000000000000011 /* XBLiveSocialService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XBLiveSocialService.swift; sourceTree = "<group>"; };
 		J60000000000000000000012 /* ProfileSocialRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileSocialRows.swift; sourceTree = "<group>"; };
+		J60000000000000000000013 /* XBLiveEmulatorPresenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XBLiveEmulatorPresenceService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -438,6 +440,7 @@
 				E10000000000000000000012 /* InsigniaLiveStatusStore.swift */,
 				I50000000000000000000011 /* XBLCloudSaveService.swift */,
 				J60000000000000000000011 /* XBLiveSocialService.swift */,
+				J60000000000000000000013 /* XBLiveEmulatorPresenceService.swift */,
 			);
 			path = Insignia;
 			sourceTree = "<group>";
@@ -611,6 +614,7 @@
 					E10000000000000000000002 /* InsigniaLiveStatusStore.swift in Sources */,
 					I50000000000000000000001 /* XBLCloudSaveService.swift in Sources */,
 					J60000000000000000000001 /* XBLiveSocialService.swift in Sources */,
+					J60000000000000000000003 /* XBLiveEmulatorPresenceService.swift in Sources */,
 					J60000000000000000000002 /* ProfileSocialRows.swift in Sources */,
 					I50000000000000000000002 /* FATXHDDCloudSaveStore.swift in Sources */,
 					I50000000000000000000005 /* XboxEEPROMIdentity.swift in Sources */,

@@ -9,6 +9,7 @@ struct XemuLaunchPlan: Identifiable {
     let requiresJITHandoff: Bool
     let universalJITEnabled: Bool
     let gameName: String
+    let titleID: String?
     let isDashboard: Bool
     let xboxCameraEnabled: Bool
     let xboxHeadsetMicEnabled: Bool
@@ -40,6 +41,7 @@ struct XemuLaunchPlan: Identifiable {
         let gamesPath = game?.url.deletingLastPathComponent().path ?? gamesDirectoryURL.path
         let dvdPath = game?.url.path ?? ""
         let launchName = game?.displayName ?? "Xbox Dashboard"
+        let titleID = GameLaunchLink.normalizedTitleID(game?.titleID)
         let customConfigURL = game?.customConfigURL
         let jitMode = UniversalJITSupport.currentMode
         let requiresJITHandoff = UniversalJITSupport.requiresJITHandoff(for: universalJITEnabled)
@@ -126,6 +128,7 @@ struct XemuLaunchPlan: Identifiable {
             requiresJITHandoff: requiresJITHandoff,
             universalJITEnabled: effectiveUniversalJITEnabled,
             gameName: launchName,
+            titleID: titleID,
             isDashboard: game == nil,
             xboxCameraEnabled: xboxCameraEnabled,
             xboxHeadsetMicEnabled: xboxHeadsetMicEnabled,
