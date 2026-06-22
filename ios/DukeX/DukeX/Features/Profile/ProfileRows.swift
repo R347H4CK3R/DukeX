@@ -1284,23 +1284,12 @@ struct ProfilePlaytimeGameRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            AsyncImage(url: game.imageURL) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                default:
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Color.secondary.opacity(0.18))
-                        Image(systemName: "gamecontroller")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+            ProfileGameIcon(
+                url: iconDisplay.url,
+                assetName: iconDisplay.assetName,
+                systemImage: iconDisplay.systemImage
+            )
             .frame(width: 42, height: 42)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(game.gameName)
@@ -1323,6 +1312,14 @@ struct ProfilePlaytimeGameRow: View {
             }
         }
         .frame(minHeight: 50)
+    }
+
+    private var iconDisplay: ProfileGameIconDisplay {
+        ProfileGameIconDisplayResolver.display(
+            title: game.gameName,
+            titleID: game.titleId,
+            primaryURL: game.imageURL
+        )
     }
 
     private var detailText: String {
@@ -1820,12 +1817,24 @@ struct ProfileAchievementsView: View {
                 let supportedGame = supportedGame(for: sortedAchievements)
                 let coreKind = Self.coreAchievementKind(for: sortedAchievements)
                 let isCoreAchievementGroup = coreKind != nil
+                let groupTitle = coreKind?.title ?? supportedGame?.title ?? first.gameTitle?.nilIfEmpty ?? "Unknown Game"
+                let groupTitleID = supportedGame?.titleID ?? first.gameTitleID
+                let matchingPlayedGame = playedGame(for: sortedAchievements, supportedGame: supportedGame)
+                let iconDisplay = ProfileGameIconDisplayResolver.display(
+                    title: groupTitle,
+                    titleID: groupTitleID,
+                    primaryURL: isCoreAchievementGroup ? nil : (
+                        XboxTitleIconCatalog.iconURL(for: groupTitleID) ??
+                        matchingPlayedGame?.imageURL ??
+                        first.gameIconURL
+                    )
+                )
                 return ProfileAchievementGameGroup(
                     id: coreKind?.id ?? supportedGame?.titleID ?? first.gameTitleID ?? first.groupID ?? Self.groupKey(for: first),
-                    title: coreKind?.title ?? supportedGame?.title ?? first.gameTitle?.nilIfEmpty ?? "Unknown Game",
-                    iconURL: isCoreAchievementGroup ? nil : XboxTitleIconCatalog.mobCatIconURL(for: supportedGame?.titleID ?? first.gameTitleID) ??
-                        first.gameIconURL,
-                    iconAssetName: coreKind?.assetName ?? Self.iconAssetName(for: sortedAchievements),
+                    title: groupTitle,
+                    iconURL: iconDisplay.url,
+                    iconAssetName: coreKind?.assetName ?? iconDisplay.assetName ?? Self.iconAssetName(for: sortedAchievements),
+                    iconSystemImage: iconDisplay.systemImage,
                     achievements: sortedAchievements,
                     gamesPlayed: gamesPlayed,
                     isXBLCore: isCoreAchievementGroup
@@ -1862,6 +1871,32 @@ struct ProfileAchievementsView: View {
         return supportedGames.first { supportedGame in
             titles.contains(Self.normalizedTitle(supportedGame.title)) ||
             titles.contains(Self.normalizedTitle(supportedGame.subtitle))
+        }
+    }
+
+    private func playedGame(
+        for achievements: [XBLiveAchievement],
+        supportedGame: InsigniaSupportedGame?
+    ) -> XBLiveGamePlayed? {
+        let titleIDs = Set(
+            achievements.compactMap { $0.gameTitleID?.uppercased().nilIfEmpty } +
+            [supportedGame?.titleID.uppercased()].compactMap { $0?.nilIfEmpty }
+        )
+        if let game = gamesPlayed.first(where: { game in
+            guard let titleID = game.titleId?.uppercased().nilIfEmpty else {
+                return false
+            }
+            return titleIDs.contains(titleID)
+        }) {
+            return game
+        }
+
+        let titles = Set(
+            achievements.compactMap { $0.gameTitle?.nilIfEmpty.map(Self.normalizedTitle) } +
+            [supportedGame?.title, supportedGame?.subtitle].compactMap { $0?.nilIfEmpty.map(Self.normalizedTitle) }
+        )
+        return gamesPlayed.first { game in
+            titles.contains(Self.normalizedTitle(game.gameName))
         }
     }
 
@@ -1989,6 +2024,7 @@ private struct ProfileAchievementGameGroup: Identifiable {
     let title: String
     let iconURL: URL?
     let iconAssetName: String?
+    let iconSystemImage: String
     let achievements: [XBLiveAchievement]
     let gamesPlayed: [XBLiveGamePlayed]
     let isXBLCore: Bool
@@ -2256,12 +2292,43 @@ private enum ProfileAchievementProgressResolver {
     }
 }
 
+private struct ProfileGameIconDisplay {
+    let url: URL?
+    let assetName: String?
+    let systemImage: String
+}
+
+private enum ProfileGameIconDisplayResolver {
+    static func display(
+        title: String?,
+        titleID: String?,
+        primaryURL: URL?,
+        systemImage: String = "gamecontroller"
+    ) -> ProfileGameIconDisplay {
+        let normalizedTitleID = GameLaunchLink.normalizedTitleID(titleID)
+        let normalizedTitle = normalizedTitle(title)
+        if normalizedTitleID == "4D53007C" || normalizedTitle == "xboxvideochat" {
+            return ProfileGameIconDisplay(url: nil, assetName: "XboxVideoChatIcon", systemImage: "video.circle")
+        }
+        if normalizedTitleID == "FFFE0000" || normalizedTitle == "xboxlivedashboard" {
+            return ProfileGameIconDisplay(url: nil, assetName: "XboxLiveDashboardIcon", systemImage: "network")
+        }
+        return ProfileGameIconDisplay(url: primaryURL, assetName: nil, systemImage: systemImage)
+    }
+
+    private static func normalizedTitle(_ title: String?) -> String {
+        title?
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "", options: .regularExpression) ?? ""
+    }
+}
+
 private struct ProfileAchievementGameRow: View {
     let group: ProfileAchievementGameGroup
 
     var body: some View {
         HStack(spacing: 12) {
-            ProfileGameIcon(url: group.iconURL, assetName: group.iconAssetName, systemImage: "medal")
+            ProfileGameIcon(url: group.iconURL, assetName: group.iconAssetName, systemImage: group.iconSystemImage)
                 .frame(width: 42, height: 42)
 
             VStack(alignment: .leading, spacing: 3) {
@@ -2292,7 +2359,7 @@ private struct ProfileAchievementGameView: View {
         List {
             Section {
                 HStack(spacing: 12) {
-                    ProfileGameIcon(url: group.iconURL, assetName: group.iconAssetName, systemImage: "medal")
+                    ProfileGameIcon(url: group.iconURL, assetName: group.iconAssetName, systemImage: group.iconSystemImage)
                         .frame(width: 48, height: 48)
 
                     VStack(alignment: .leading, spacing: 3) {

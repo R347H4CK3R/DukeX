@@ -1883,7 +1883,7 @@ final class XBLiveSocialStore: ObservableObject {
                 titleID: invite.titleID,
                 embeddedTitle: invite.title
             )
-            let iconURL = XboxTitleIconCatalog.mobCatIconURL(for: invite.titleID)
+            let iconURL = XboxTitleIconCatalog.iconURL(for: invite.titleID)
             let localImageURL = notificationGameLocalCoverURL?(invite.titleID)
             Task {
                 await XBLiveSocialLocalNotificationPresenter.shared.schedule(

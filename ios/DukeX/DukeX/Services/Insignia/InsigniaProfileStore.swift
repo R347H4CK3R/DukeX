@@ -416,7 +416,7 @@ struct XBLiveGamePlayed: Codable, Identifiable, Equatable {
     }
 
     var imageURL: URL? {
-        XboxTitleIconCatalog.mobCatIconURL(for: titleId) ??
+        XboxTitleIconCatalog.iconURL(for: titleId) ??
             imageUrl.flatMap(URL.init(string:))
     }
 
@@ -1421,7 +1421,7 @@ enum InsigniaPublicService {
                     serial: serial,
                     onlineUsers: "\(game.onlineCount)",
                     detail: detail,
-                    iconUrl: XboxTitleIconCatalog.mobCatIconURL(for: titleID)?.absoluteString
+                    iconUrl: XboxTitleIconCatalog.iconURL(for: titleID)?.absoluteString
                 )
             }
             .sorted { lhs, rhs in

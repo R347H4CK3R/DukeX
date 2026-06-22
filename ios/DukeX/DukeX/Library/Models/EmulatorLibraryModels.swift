@@ -133,14 +133,37 @@ enum GameLaunchLink {
 }
 
 enum XboxTitleIconCatalog {
-    static func mobCatIconURL(for titleID: String?) -> URL? {
+    static func iconURL(for titleID: String?) -> URL? {
+        xdbIconURL(for: titleID)
+    }
+
+    static func xdbIconURL(for titleID: String?) -> URL? {
         guard let normalizedTitleID = GameLaunchLink.normalizedTitleID(titleID),
-              normalizedTitleID.count >= 4 else {
+              normalizedTitleID.count == 8,
+              normalizedTitleID.allSatisfy(\.isHexDigit),
+              let publisherCode = publisherCode(from: String(normalizedTitleID.prefix(4))),
+              let titleNumber = Int(normalizedTitleID.suffix(4), radix: 16) else {
             return nil
         }
 
-        let prefix = String(normalizedTitleID.prefix(4))
-        return URL(string: "https://raw.githubusercontent.com/MobCat/MobCats-original-xbox-game-list/main/icon/\(prefix)/\(normalizedTitleID).png")
+        let serialNumber = String(format: "%03d", titleNumber)
+        return URL(string: "https://raw.githubusercontent.com/xemu-project/xdb/main/titles/\(publisherCode)/\(serialNumber)/xtimage.png")
+    }
+
+    private static func publisherCode(from hexPrefix: String) -> String? {
+        guard hexPrefix.count == 4,
+              let firstByte = UInt8(hexPrefix.prefix(2), radix: 16),
+              let secondByte = UInt8(hexPrefix.suffix(2), radix: 16),
+              let firstScalar = UnicodeScalar(UInt32(firstByte)),
+              let secondScalar = UnicodeScalar(UInt32(secondByte)) else {
+            return nil
+        }
+
+        guard (firstByte >= 48 && firstByte <= 57) || (firstByte >= 65 && firstByte <= 90),
+              (secondByte >= 48 && secondByte <= 57) || (secondByte >= 65 && secondByte <= 90) else {
+            return nil
+        }
+        return String(Character(firstScalar)) + String(Character(secondScalar))
     }
 }
 

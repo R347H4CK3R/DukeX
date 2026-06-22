@@ -1590,7 +1590,7 @@ private struct ProfileSocialGameInviteCard: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
                 ProfileSocialGameInviteIcon(
-                    iconURL: XboxTitleIconCatalog.mobCatIconURL(for: context.invite.titleID),
+                    iconURL: XboxTitleIconCatalog.iconURL(for: context.invite.titleID),
                     localCoverURL: context.installedGame?.coverURL
                 )
                 .frame(width: 58, height: 58)
@@ -1923,7 +1923,7 @@ private struct ProfileSocialGameInvitePreviewRow: View {
     var body: some View {
         HStack(spacing: 12) {
             ProfileSocialGameInviteIcon(
-                iconURL: XboxTitleIconCatalog.mobCatIconURL(for: game.titleID),
+                iconURL: XboxTitleIconCatalog.iconURL(for: game.titleID),
                 localCoverURL: game.coverURL
             )
             .frame(width: 42, height: 42)
