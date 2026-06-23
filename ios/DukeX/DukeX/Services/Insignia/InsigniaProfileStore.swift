@@ -1400,7 +1400,7 @@ enum InsigniaPublicService {
             }
     }
 
-    private static func fetchXBLiveActiveGames() async throws -> [InsigniaActiveGame] {
+    static func fetchXBLiveActiveGames() async throws -> [InsigniaActiveGame] {
         let (data, response) = try await URLSession.shared.data(from: xblOnlineUsersURL)
 
         guard let httpResponse = response as? HTTPURLResponse,
@@ -2369,6 +2369,80 @@ final class InsigniaProfileStore: ObservableObject {
             } catch {
             }
         }
+    }
+
+    func refreshXBLiveLiveStatus() async {
+        do {
+            let activeGames = try await InsigniaPublicService.fetchXBLiveActiveGames()
+            let totalOnline = activeGames
+                .compactMap { Int($0.onlineUsers) }
+                .reduce(0, +)
+            let currentSnapshot = publicSnapshot
+            let snapshot = InsigniaPublicSnapshot(
+                registeredUsers: currentSnapshot?.registeredUsers ?? "Unknown",
+                gamesSupported: currentSnapshot?.gamesSupported ?? "Unknown",
+                usersOnline: "\(totalOnline)",
+                activeGames: activeGames,
+                activity24h: currentSnapshot?.activity24h ?? [],
+                activity7d: currentSnapshot?.activity7d ?? []
+            )
+            publicSnapshot = snapshot
+            Self.savePublicSnapshot(snapshot)
+        } catch {
+        }
+    }
+
+    func refreshLivePresence() async {
+        guard let session,
+              let currentSnapshot = authenticatedSnapshot,
+              let xbProfile = try? await XBLiveService.fetchProfile(username: session.gamertag) else {
+            return
+        }
+
+        let snapshot = InsigniaAuthenticatedSnapshot(
+            profile: currentSnapshot.profile,
+            friends: currentSnapshot.friends,
+            games: currentSnapshot.games,
+            messages: currentSnapshot.messages,
+            xbProfile: xbProfile,
+            playtimeGames: currentSnapshot.playtimeGames,
+            achievements: currentSnapshot.achievements,
+            friendProfiles: currentSnapshot.friendProfiles,
+            events: currentSnapshot.events,
+            supportedGames: currentSnapshot.supportedGames,
+            loadedAt: currentSnapshot.loadedAt
+        )
+        authenticatedSnapshot = snapshot
+        Self.saveAuthenticatedSnapshot(snapshot)
+    }
+
+    func refreshLiveProfileData() async {
+        guard let session,
+              let currentSnapshot = authenticatedSnapshot else {
+            return
+        }
+
+        async let xbProfile: XBLiveProfileSnapshot? = try? XBLiveService.fetchProfile(username: session.gamertag)
+        async let playtimeGames: [XBLiveGamePlayed]? = try? XBLiveService.fetchGamesPlayed(username: session.gamertag)
+        async let achievements: XBLiveAchievementsSnapshot? = try? XBLiveService.fetchAchievements(username: session.gamertag)
+        let (refreshedProfile, refreshedPlaytimeGames, refreshedAchievements) =
+            await (xbProfile, playtimeGames, achievements)
+
+        let snapshot = InsigniaAuthenticatedSnapshot(
+            profile: currentSnapshot.profile,
+            friends: currentSnapshot.friends,
+            games: currentSnapshot.games,
+            messages: currentSnapshot.messages,
+            xbProfile: refreshedProfile ?? currentSnapshot.xbProfile,
+            playtimeGames: refreshedPlaytimeGames ?? currentSnapshot.playtimeGames,
+            achievements: refreshedAchievements ?? currentSnapshot.achievements,
+            friendProfiles: currentSnapshot.friendProfiles,
+            events: currentSnapshot.events,
+            supportedGames: currentSnapshot.supportedGames,
+            loadedAt: Date()
+        )
+        authenticatedSnapshot = snapshot
+        Self.saveAuthenticatedSnapshot(snapshot)
     }
 
     func unviewedMessages(from messages: [InsigniaMessage]) -> [InsigniaMessage] {

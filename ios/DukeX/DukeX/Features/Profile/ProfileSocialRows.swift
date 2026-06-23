@@ -2686,7 +2686,7 @@ struct ProfileXBLiveFriendDetailView: View {
     }
 
     private var effectiveProfile: XBLiveFriendProfile? {
-        profile ?? socialStore.messageableFriendProfiles[friend.key]
+        socialStore.messageableFriendProfiles[friend.key] ?? profile
     }
 }
 

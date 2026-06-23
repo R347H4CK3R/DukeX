@@ -46,10 +46,16 @@ struct ContentView: View {
     @State private var activeRuntimeWasGame = false
     @State private var lastObservedRuntimeState: EmulatorCoreRuntime.RunState?
     @State private var hasPhysicalControllerConnected = false
+    @State private var xbliveRealtimeStatusTask: Task<Void, Never>?
+    @State private var lastXBLiveRealtimeSocialRefreshAt: Date?
+    @State private var lastXBLiveRealtimeProfileDataRefreshAt: Date?
     @AppStorage(GameLibrarySortMode.defaultsKey) private var sortModeRawValue = GameLibrarySortMode.title.rawValue
 
     private let tabRefreshTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     private let controllerBatteryRefreshTimer = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
+    private let xbliveRealtimeStatusRefreshInterval: UInt64 = 10_000_000_000
+    private let xbliveRealtimeSocialRefreshInterval: TimeInterval = 30
+    private let xbliveRealtimeProfileDataRefreshInterval: TimeInterval = 60
 
     var body: some View {
         let theme = DukeXTheme(mode: store.themeMode)
@@ -263,6 +269,7 @@ struct ContentView: View {
             .task {
                 profileStore.refresh()
                 await refreshProfileSocialNowIfAuthenticated()
+                startXBLiveRealtimeStatusRefreshIfNeeded()
                 await refreshGamesNow()
                 await pullCloudSavesAutomaticallyIfNeeded(reason: "launch")
                 if environmentRequestsAutoLaunch && !autoLaunchAttempted {
@@ -278,8 +285,10 @@ struct ContentView: View {
                 case .active:
                     autoJIT.markAppReturnedFromStikDebugIfPending()
                     resumePendingAutoJITLaunchIfNeeded()
+                    startXBLiveRealtimeStatusRefreshIfNeeded()
                 case .inactive, .background:
                     autoJIT.markAppLeftForStikDebugIfPending()
+                    stopXBLiveRealtimeStatusRefresh()
                 @unknown default:
                     break
                 }
@@ -511,6 +520,85 @@ struct ContentView: View {
         configureSocialNotifications()
         configureEmulatorPresenceNotifications()
         await socialStore.refreshAll()
+        lastXBLiveRealtimeSocialRefreshAt = Date()
+        await refreshXBLiveRealtimeStatusNow()
+    }
+
+    @MainActor
+    private func startXBLiveRealtimeStatusRefreshIfNeeded() {
+        guard scenePhase == .active,
+              xbliveRealtimeStatusTask == nil else {
+            return
+        }
+
+        xbliveRealtimeStatusTask = Task { @MainActor in
+            while !Task.isCancelled {
+                await refreshXBLiveRealtimeStatusNow()
+
+                do {
+                    try await Task.sleep(nanoseconds: xbliveRealtimeStatusRefreshInterval)
+                } catch {
+                    break
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func stopXBLiveRealtimeStatusRefresh() {
+        xbliveRealtimeStatusTask?.cancel()
+        xbliveRealtimeStatusTask = nil
+    }
+
+    @MainActor
+    private func refreshXBLiveRealtimeStatusNow() async {
+        await profileStore.refreshXBLiveLiveStatus()
+
+        guard profileStore.session?.isAuthenticated == true else {
+            socialStore.clear()
+            lastXBLiveRealtimeSocialRefreshAt = nil
+            lastXBLiveRealtimeProfileDataRefreshAt = nil
+            return
+        }
+
+        let now = Date()
+        let shouldRefreshSocial = shouldRunXBLiveRealtimeRefresh(
+            lastRun: lastXBLiveRealtimeSocialRefreshAt,
+            interval: xbliveRealtimeSocialRefreshInterval,
+            now: now
+        )
+        let shouldRefreshProfileData = shouldRunXBLiveRealtimeRefresh(
+            lastRun: lastXBLiveRealtimeProfileDataRefreshAt,
+            interval: xbliveRealtimeProfileDataRefreshInterval,
+            now: now
+        )
+
+        configureSocialNotifications()
+        configureEmulatorPresenceNotifications()
+        await profileStore.refreshLivePresence()
+        await socialStore.refreshLivePresence()
+
+        if shouldRefreshProfileData {
+            await profileStore.refreshLiveProfileData()
+            lastXBLiveRealtimeProfileDataRefreshAt = now
+        }
+
+        if shouldRefreshSocial {
+            await socialStore.refreshLiveSocialItems()
+            lastXBLiveRealtimeSocialRefreshAt = now
+        }
+    }
+
+    private func shouldRunXBLiveRealtimeRefresh(
+        lastRun: Date?,
+        interval: TimeInterval,
+        now: Date
+    ) -> Bool {
+        guard let lastRun else {
+            return true
+        }
+
+        return now.timeIntervalSince(lastRun) >= interval
     }
 
     @MainActor

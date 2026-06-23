@@ -1074,6 +1074,7 @@ final class XBLiveSocialStore: ObservableObject {
     @Published private(set) var unreadCount = 0
     @Published private(set) var isRefreshingMessages = false
     @Published private(set) var isRefreshingFriends = false
+    @Published private(set) var isRefreshingPresence = false
     @Published var notice: XBLiveSocialNotice?
 
     private var notificationCustomAvatarImage: ((String) -> UIImage?)?
@@ -1137,6 +1138,7 @@ final class XBLiveSocialStore: ObservableObject {
         unreadCount = 0
         isRefreshingMessages = false
         isRefreshingFriends = false
+        isRefreshingPresence = false
         notice = nil
         UserDefaults.standard.removeObject(forKey: Self.cachedSnapshotKey)
     }
@@ -1253,6 +1255,84 @@ final class XBLiveSocialStore: ObservableObject {
             saveCachedSnapshot()
         } catch {
             handle(error, title: "Friends Not Synced")
+        }
+    }
+
+    func refreshLivePresence() async {
+        guard !isRefreshingPresence,
+              !isRefreshingFriends else {
+            return
+        }
+
+        isRefreshingPresence = true
+        defer { isRefreshingPresence = false }
+
+        do {
+            if messageableFriends.isEmpty {
+                let sessionKey = try sessionKey()
+                if let friendsResponse = try? await XBLiveSocialService.fetchMessageableFriends(sessionKey: sessionKey) {
+                    currentUsername = friendsResponse.user ?? currentUsername
+                    messageableFriends = friendsResponse.friends.sorted(by: friendSort)
+                }
+            }
+
+            let friends = messageableFriends
+            guard !friends.isEmpty else {
+                return
+            }
+
+            messageableFriendProfiles = await fetchPresenceProfiles(
+                for: friends,
+                existingProfiles: messageableFriendProfiles
+            )
+            notifyForFriendsComingOnline(friends, profiles: messageableFriendProfiles)
+            saveCachedSnapshot()
+        } catch {
+            handle(error, title: "Presence Not Synced")
+        }
+    }
+
+    func refreshLiveSocialItems() async {
+        await refreshMessages()
+        await refreshFriendRequestsAndRoster()
+    }
+
+    func refreshFriendRequestsAndRoster() async {
+        guard !isRefreshingFriends else {
+            return
+        }
+
+        isRefreshingFriends = true
+        defer { isRefreshingFriends = false }
+
+        do {
+            let sessionKey = try sessionKey()
+            let requests = try await XBLiveSocialService.fetchFriendRequests(sessionKey: sessionKey)
+            let friendsResponse = try? await XBLiveSocialService.fetchMessageableFriends(sessionKey: sessionKey)
+            let blocksResponse = try? await XBLiveSocialService.fetchBlocks(sessionKey: sessionKey)
+
+            currentUsername = requests.user ?? friendsResponse?.user ?? blocksResponse?.user ?? currentUsername
+            incomingRequests = requests.incoming
+                .map { $0.withUsername($0.fromUsername ?? $0.username) }
+                .sorted { $0.username.localizedStandardCompare($1.username) == .orderedAscending }
+            outgoingRequests = requests.outgoing
+                .map { $0.withUsername($0.toUsername ?? $0.username) }
+                .sorted { $0.username.localizedStandardCompare($1.username) == .orderedAscending }
+            if let friendsResponse {
+                let friends = friendsResponse.friends.sorted(by: friendSort)
+                messageableFriends = friends
+                messageableFriendProfiles = await fetchPresenceProfiles(
+                    for: friends,
+                    existingProfiles: messageableFriendProfiles
+                )
+                notifyForFriendsComingOnline(friends, profiles: messageableFriendProfiles)
+            }
+            if let blocksResponse {
+                blockedUsers = blocksResponse.blocked.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            }
+            saveCachedSnapshot()
+        } catch {
+            handle(error, title: "Friend Requests Not Synced")
         }
     }
 
@@ -1958,10 +2038,11 @@ final class XBLiveSocialStore: ObservableObject {
     }
 
     private func isFriendOnline(_ friend: XBLiveSocialFriend, profile: XBLiveFriendProfile?) -> Bool {
-        profile?.isOnline == true ||
-            profile?.currentGame?.nilIfBlank != nil ||
-            friend.isOnline == true ||
-            friend.currentGame?.nilIfBlank != nil
+        if let profile {
+            return profile.isOnline == true || profile.currentGame?.nilIfBlank != nil
+        }
+
+        return friend.isOnline == true || friend.currentGame?.nilIfBlank != nil
     }
 
     private func displayName(for username: String) -> String {
@@ -2015,29 +2096,13 @@ final class XBLiveSocialStore: ObservableObject {
                     let achievements = (try? await XBLiveService.fetchAchievements(username: friend.username)) ??
                         existingProfile?.achievements
                     let lastGame = games.first { $0.gameName == xbProfile.lastPlayedGame } ?? games.first
-                    let isOnline = xbProfile.isOnline || friend.isOnline == true || friend.currentGame?.nilIfBlank != nil
-                    let totalMinutes = xbProfile.totalMinutes ?? Self.totalMinutes(from: games)
-                    let lastOnlineAt = Self.lastOnlineTimestamp(
-                        isOnline: isOnline,
-                        profile: xbProfile,
-                        friend: friend
-                    )
-                    let profile = XBLiveFriendProfile(
-                        gamertag: friend.title,
-                        avatarURLString: xbProfile.avatarURLString ?? friend.avatarURLString,
-                        isOnline: isOnline,
-                        lastState: xbProfile.lastState ?? friend.status,
-                        currentGame: xbProfile.currentGame ?? (isOnline ? friend.currentGame : nil),
-                        lastPlayedGame: xbProfile.lastPlayedGame ?? lastGame?.gameName,
-                        lastPlayedAt: xbProfile.lastPlayedAt,
-                        lastOnlineAt: lastOnlineAt,
-                        lastCheckedAt: xbProfile.lastCheckedAt,
-                        achievementScore: xbProfile.achievementScore,
-                        achievementCount: xbProfile.achievementCount,
-                        totalMinutes: totalMinutes,
-                        lastPlayedImageURLString: lastGame?.imageUrl,
-                        gamesPlayed: games,
-                        achievements: achievements
+                    let profile = Self.friendProfile(
+                        from: xbProfile,
+                        friend: friend,
+                        existingProfile: existingProfile,
+                        games: games,
+                        achievements: achievements,
+                        lastGame: lastGame
                     )
                     return (friend.key, profile)
                 }
@@ -2052,6 +2117,91 @@ final class XBLiveSocialStore: ObservableObject {
         }
 
         return profiles
+    }
+
+    private func fetchPresenceProfiles(
+        for friends: [XBLiveSocialFriend],
+        existingProfiles: [String: XBLiveFriendProfile]
+    ) async -> [String: XBLiveFriendProfile] {
+        let currentKeys = Set(friends.map(\.key))
+        var profiles = existingProfiles.filter { currentKeys.contains($0.key) }
+        let batchSize = 6
+
+        var batchStart = friends.startIndex
+        while batchStart < friends.endIndex {
+            let batchEnd = min(batchStart + batchSize, friends.endIndex)
+            let batch = friends[batchStart..<batchEnd]
+
+            await withTaskGroup(of: (String, XBLiveFriendProfile)?.self) { group in
+                for friend in batch {
+                    let existingProfile = existingProfiles[friend.key]
+                    group.addTask {
+                        guard let xbProfile = try? await XBLiveService.fetchProfile(username: friend.username) else {
+                            return nil
+                        }
+
+                        let games = existingProfile?.gamesPlayed ?? []
+                        let lastGame = games.first { $0.gameName == xbProfile.lastPlayedGame } ?? games.first
+                        let profile = Self.friendProfile(
+                            from: xbProfile,
+                            friend: friend,
+                            existingProfile: existingProfile,
+                            games: games,
+                            achievements: existingProfile?.achievements,
+                            lastGame: lastGame
+                        )
+                        return (friend.key, profile)
+                    }
+                }
+
+                for await result in group {
+                    guard let result else {
+                        continue
+                    }
+                    profiles[result.0] = result.1
+                }
+            }
+
+            batchStart = batchEnd
+        }
+
+        return profiles
+    }
+
+    nonisolated private static func friendProfile(
+        from xbProfile: XBLiveProfileSnapshot,
+        friend: XBLiveSocialFriend,
+        existingProfile: XBLiveFriendProfile?,
+        games: [XBLiveGamePlayed],
+        achievements: XBLiveAchievementsSnapshot?,
+        lastGame: XBLiveGamePlayed?
+    ) -> XBLiveFriendProfile {
+        let isOnline = xbProfile.isOnline
+        let resolvedGames = games.isEmpty ? existingProfile?.gamesPlayed : games
+        let totalMinutes = xbProfile.totalMinutes ?? Self.totalMinutes(from: games) ?? existingProfile?.totalMinutes
+        let lastOnlineAt = Self.lastOnlineTimestamp(
+            isOnline: isOnline,
+            profile: xbProfile,
+            friend: friend
+        )
+
+        return XBLiveFriendProfile(
+            gamertag: friend.title,
+            avatarURLString: xbProfile.avatarURLString ?? existingProfile?.avatarURLString ?? friend.avatarURLString,
+            isOnline: isOnline,
+            lastState: xbProfile.lastState ?? (isOnline ? friend.status : "offline"),
+            currentGame: xbProfile.currentGame ?? (isOnline ? friend.currentGame : nil),
+            lastPlayedGame: xbProfile.lastPlayedGame ?? lastGame?.gameName ?? existingProfile?.lastPlayedGame,
+            lastPlayedAt: xbProfile.lastPlayedAt ?? existingProfile?.lastPlayedAt,
+            lastOnlineAt: lastOnlineAt,
+            lastCheckedAt: xbProfile.lastCheckedAt ?? existingProfile?.lastCheckedAt,
+            achievementScore: xbProfile.achievementScore ?? existingProfile?.achievementScore,
+            achievementCount: xbProfile.achievementCount ?? existingProfile?.achievementCount,
+            totalMinutes: totalMinutes,
+            lastPlayedImageURLString: lastGame?.imageUrl ?? existingProfile?.lastPlayedImageURLString,
+            gamesPlayed: resolvedGames,
+            achievements: achievements ?? existingProfile?.achievements
+        )
     }
 
     nonisolated private static func lastOnlineTimestamp(

@@ -8,6 +8,13 @@ enum DukeXDownloadCountState: Equatable {
     case failed
 }
 
+private enum ProfileHeaderDestination: Hashable {
+    case achievements
+    case friends
+    case messages
+    case playtime
+}
+
 struct ProfileView: View {
     @ObservedObject var profileStore: InsigniaProfileStore
     @ObservedObject var socialStore: XBLiveSocialStore
@@ -19,6 +26,7 @@ struct ProfileView: View {
     @State private var maftyDownloadCountUnlocked = false
     @State private var maftyDownloadCountState = DukeXDownloadCountState.hidden
     @State private var maftyDownloadCountTask: Task<Void, Never>?
+    @State private var profileHeaderDestination: ProfileHeaderDestination?
 
     let signIn: () -> Void
     let signOut: () -> Void
@@ -41,6 +49,11 @@ struct ProfileView: View {
         }
         .listStyle(.insetGrouped)
         .dukeXThemedListBackground()
+        .navigationDestination(isPresented: profileHeaderDestinationBinding) {
+            if let destination = profileHeaderDestination {
+                profileHeaderDestinationView(destination, snapshot: profileStore.authenticatedSnapshot)
+            }
+        }
         .task(id: profileStore.session?.gamertag) {
             guard profileStore.session?.isAuthenticated == true else {
                 await MainActor.run {
@@ -58,108 +71,147 @@ struct ProfileView: View {
         let snapshot = profileStore.authenticatedSnapshot
 
         Section {
-            ProfileHeaderRow(
-                session: session,
-                snapshot: snapshot,
-                profileImage: profileStore.profileImage,
-                dukeXDownloadCountState: dukeXDownloadCountState(for: session),
-                avatarTapAction: { handleProfileAvatarTap(for: session) },
-                changeProfileImage: changeProfileImage,
-                clearProfileImage: profileStore.clearProfileImage
-            )
+            VStack(spacing: 12) {
+                ProfileHeaderRow(
+                    session: session,
+                    snapshot: snapshot,
+                    profileImage: profileStore.profileImage,
+                    dukeXDownloadCountState: dukeXDownloadCountState(for: session),
+                    avatarTapAction: { handleProfileAvatarTap(for: session) },
+                    changeProfileImage: changeProfileImage,
+                    clearProfileImage: profileStore.clearProfileImage
+                )
+
+                if session.isAuthenticated {
+                    profileActionPills(snapshot: snapshot)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .dukeXThemedListRowBackground()
 
         if session.isAuthenticated {
-            authenticatedSections(session: session, snapshot: snapshot)
+            authenticatedSections(snapshot: snapshot)
         } else {
             gamertagOnlySections
         }
     }
 
     @ViewBuilder
-    private func authenticatedSections(
-        session: InsigniaProfileSession,
+    private func profileActionPills(snapshot: InsigniaAuthenticatedSnapshot?) -> some View {
+        let friends = snapshot?.friends ?? []
+
+        ProfileHeaderActionPillsRow {
+            Button {
+                profileHeaderDestination = .achievements
+            } label: {
+                ProfileHeaderActionPill(
+                    title: "Achievements",
+                    value: snapshot?.achievements?.summaryText ??
+                        snapshot?.xbProfile?.achievementCount.map(String.init) ??
+                        "Not Synced",
+                    systemImage: "medal",
+                    tint: .green
+                )
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                profileHeaderDestination = .friends
+            } label: {
+                ProfileHeaderActionPill(
+                    title: "Friends",
+                    value: countText(mergedFriendsCount(insigniaFriends: friends)),
+                    systemImage: "person.2",
+                    tint: .mint
+                )
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                profileHeaderDestination = .messages
+            } label: {
+                ProfileHeaderActionPill(
+                    title: "Messages",
+                    value: unreadMessagesText(legacyMessages: snapshot?.messages ?? []),
+                    systemImage: "envelope",
+                    tint: .teal
+                )
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                profileHeaderDestination = .playtime
+            } label: {
+                ProfileHeaderActionPill(
+                    title: "Playtime",
+                    value: playtimeSummaryText(
+                        totalMinutes: snapshot?.xbProfile?.totalMinutes,
+                        gameCount: snapshot?.playtimeGames.count ?? 0
+                    ),
+                    systemImage: "timer",
+                    tint: .yellow
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private func profileHeaderDestinationView(
+        _ destination: ProfileHeaderDestination,
         snapshot: InsigniaAuthenticatedSnapshot?
     ) -> some View {
-        Section("Account") {
-            let friends = snapshot?.friends ?? []
-
-            NavigationLink {
-                ProfileAchievementsView(
-                    snapshot: snapshot?.achievements,
-                    profileScore: snapshot?.xbProfile?.achievementScore,
-                    profileCount: snapshot?.xbProfile?.achievementCount,
-                    supportedGames: snapshot?.supportedGames ?? [],
-                    gamesPlayed: snapshot?.playtimeGames ?? []
-                )
-            } label: {
-                ProfileAchievementsSummaryRow(
-                    countText: snapshot?.achievements?.summaryText ??
-                        snapshot?.xbProfile?.achievementCount.map(String.init) ??
-                        "Not Synced"
-                )
-            }
-
-            NavigationLink {
-                ProfileFriendsView(
-                    profileStore: profileStore,
-                    socialStore: socialStore,
-                    sortMode: friendSortModeBinding,
-                    favoriteFriendKeys: favoriteFriendKeys,
-                    toggleFavorite: toggleFavorite,
-                    toggleSocialFavorite: toggleSocialFavorite,
-                    changeFriendProfileImage: changeFriendProfileImage,
-                    changeSocialFriendProfileImage: changeSocialFriendProfileImage,
-                    installedGames: installedGames,
-                    inviteEligibleGames: inviteEligibleGames,
-                    currentUserAchievements: snapshot?.achievements,
-                    currentUserGamesPlayed: snapshot?.playtimeGames ?? [],
-                    launchGameFromInvite: launchGameFromInvite
-                )
-            } label: {
-                ProfileInfoRow(title: "Friends",
-                               value: countText(mergedFriendsCount(insigniaFriends: friends)),
-                               systemImage: "person.2")
-            }
-
-            NavigationLink {
-                ProfileSocialMessagesView(
-                    socialStore: socialStore,
-                    legacyMessages: snapshot?.messages ?? [],
-                    legacyUnreadMessages: profileStore.unviewedMessages(from: snapshot?.messages ?? []),
-                    friendProfileImages: profileStore.friendProfileImages,
-                    friendProfiles: snapshot?.friendProfiles ?? [:],
-                    socialFriends: socialStore.messageableFriends,
-                    markLegacyMessageViewed: profileStore.markMessageViewed,
-                    installedGames: installedGames,
-                    inviteEligibleGames: inviteEligibleGames,
-                    currentUserAchievements: snapshot?.achievements,
-                    currentUserGamesPlayed: snapshot?.playtimeGames ?? [],
-                    launchGameFromInvite: launchGameFromInvite
-                )
-            } label: {
-                ProfileInfoRow(title: "Messages",
-                               value: unreadMessagesText(legacyMessages: snapshot?.messages ?? []),
-                               systemImage: "envelope")
-            }
-
-            NavigationLink {
-                ProfilePlaytimeView(
-                    totalMinutes: snapshot?.xbProfile?.totalMinutes,
-                    games: snapshot?.playtimeGames ?? []
-                )
-            } label: {
-                ProfileInfoRow(title: "Playtime",
-                               value: playtimeSummaryText(
-                                   totalMinutes: snapshot?.xbProfile?.totalMinutes,
-                                   gameCount: snapshot?.playtimeGames.count ?? 0
-                               ),
-                               systemImage: "timer")
-            }
+        switch destination {
+        case .achievements:
+            ProfileAchievementsView(
+                snapshot: snapshot?.achievements,
+                profileScore: snapshot?.xbProfile?.achievementScore,
+                profileCount: snapshot?.xbProfile?.achievementCount,
+                supportedGames: snapshot?.supportedGames ?? [],
+                gamesPlayed: snapshot?.playtimeGames ?? []
+            )
+        case .friends:
+            ProfileFriendsView(
+                profileStore: profileStore,
+                socialStore: socialStore,
+                sortMode: friendSortModeBinding,
+                favoriteFriendKeys: favoriteFriendKeys,
+                toggleFavorite: toggleFavorite,
+                toggleSocialFavorite: toggleSocialFavorite,
+                changeFriendProfileImage: changeFriendProfileImage,
+                changeSocialFriendProfileImage: changeSocialFriendProfileImage,
+                installedGames: installedGames,
+                inviteEligibleGames: inviteEligibleGames,
+                currentUserAchievements: snapshot?.achievements,
+                currentUserGamesPlayed: snapshot?.playtimeGames ?? [],
+                launchGameFromInvite: launchGameFromInvite
+            )
+        case .messages:
+            ProfileSocialMessagesView(
+                socialStore: socialStore,
+                legacyMessages: snapshot?.messages ?? [],
+                legacyUnreadMessages: profileStore.unviewedMessages(from: snapshot?.messages ?? []),
+                friendProfileImages: profileStore.friendProfileImages,
+                friendProfiles: snapshot?.friendProfiles ?? [:],
+                socialFriends: socialStore.messageableFriends,
+                markLegacyMessageViewed: profileStore.markMessageViewed,
+                installedGames: installedGames,
+                inviteEligibleGames: inviteEligibleGames,
+                currentUserAchievements: snapshot?.achievements,
+                currentUserGamesPlayed: snapshot?.playtimeGames ?? [],
+                launchGameFromInvite: launchGameFromInvite
+            )
+        case .playtime:
+            ProfilePlaytimeView(
+                totalMinutes: snapshot?.xbProfile?.totalMinutes,
+                games: snapshot?.playtimeGames ?? []
+            )
         }
-        .dukeXThemedListRowBackground()
+    }
 
+    @ViewBuilder
+    private func authenticatedSections(snapshot: InsigniaAuthenticatedSnapshot?) -> some View {
         activitySection
 
         Section("Events") {
@@ -350,6 +402,17 @@ struct ProfileView: View {
         Binding(
             get: { activityMode },
             set: { activityModeRawValue = $0.rawValue }
+        )
+    }
+
+    private var profileHeaderDestinationBinding: Binding<Bool> {
+        Binding(
+            get: { profileHeaderDestination != nil },
+            set: { isPresented in
+                if !isPresented {
+                    profileHeaderDestination = nil
+                }
+            }
         )
     }
 

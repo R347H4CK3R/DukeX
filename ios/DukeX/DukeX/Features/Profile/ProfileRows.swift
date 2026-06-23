@@ -265,6 +265,70 @@ struct ProfileHeaderRow: View {
     }
 }
 
+struct ProfileHeaderActionPillsRow<Content: View>: View {
+    private let columns = [
+        GridItem(.flexible(minimum: 126), spacing: 10),
+        GridItem(.flexible(minimum: 126), spacing: 10)
+    ]
+
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 8) {
+            content()
+        }
+        .padding(.top, 2)
+        .padding(.bottom, 4)
+    }
+}
+
+struct ProfileHeaderActionPill: View {
+    let title: String
+    let value: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 20, height: 20)
+
+            Text(title)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.95)
+
+            Spacer(minLength: 4)
+
+            Text(value)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .multilineTextAlignment(.trailing)
+                .frame(minWidth: 24, alignment: .trailing)
+                .layoutPriority(2)
+        }
+        .padding(.horizontal, 9)
+        .frame(maxWidth: .infinity)
+        .frame(height: GameLibraryGridMetrics.compactControlHeight)
+        .background(
+            Capsule(style: .continuous)
+                .fill(tint.opacity(0.07))
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(tint.opacity(0.20), lineWidth: 1)
+        )
+        .shadow(color: tint.opacity(0.08), radius: 8, x: 0, y: 2)
+        .contentShape(Capsule(style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+}
+
 struct ProfileInfoRow: View {
     let title: String
     let value: String
@@ -520,7 +584,7 @@ struct ProfileFriendsView: View {
             NavigationLink {
                 ProfileFriendDetailView(
                     friend: friend,
-                    profile: friendProfiles[friend.key],
+                    profile: friendProfile(for: friend),
                     customProfileImage: friendProfileImages[friend.key],
                     supportedGames: supportedGames,
                     socialStore: socialStore,
@@ -537,7 +601,7 @@ struct ProfileFriendsView: View {
             } label: {
                 ProfileFriendRow(
                     friend: friend,
-                    profile: friendProfiles[friend.key],
+                    profile: friendProfile(for: friend),
                     customProfileImage: friendProfileImages[friend.key]
                 )
             }
@@ -733,7 +797,7 @@ struct ProfileFriendsView: View {
     }
 
     private func activitySortValue(for friend: InsigniaFriend) -> Double {
-        let profile = friendProfiles[friend.key]
+        let profile = friendProfile(for: friend)
         if ProfileFriendOnlineText.isOnline(friend: friend, profile: profile) {
             return .greatestFiniteMagnitude
         }
@@ -776,6 +840,15 @@ struct ProfileFriendsView: View {
 
     private func socialFriendProfile(for friend: XBLiveSocialFriend) -> XBLiveFriendProfile? {
         socialStore.messageableFriendProfiles[friend.key]
+    }
+
+    private func friendProfile(for friend: InsigniaFriend) -> XBLiveFriendProfile? {
+        if let socialFriend = socialFriend(for: friend),
+           let liveProfile = socialFriendProfile(for: socialFriend) {
+            return liveProfile
+        }
+
+        return friendProfiles[friend.key]
     }
 
     private func socialMatchingKeys(for friend: XBLiveSocialFriend) -> Set<String> {
@@ -980,23 +1053,12 @@ struct ProfileActiveGameRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            AsyncImage(url: game.iconURL) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                default:
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Color.secondary.opacity(0.18))
-                        Image(systemName: "play.circle")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+            ProfileGameIcon(
+                url: iconDisplay.url,
+                assetName: iconDisplay.assetName,
+                systemImage: iconDisplay.systemImage
+            )
             .frame(width: 42, height: 42)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(game.title)
@@ -1018,6 +1080,15 @@ struct ProfileActiveGameRow: View {
         }
         .frame(minHeight: 50)
     }
+
+    private var iconDisplay: ProfileGameIconDisplay {
+        ProfileGameIconDisplayResolver.display(
+            title: game.title,
+            titleID: game.id,
+            primaryURL: XboxTitleIconCatalog.iconURL(for: game.id) ?? game.iconURL,
+            systemImage: "play.circle"
+        )
+    }
 }
 
 struct ProfileActivityChartRow: View {
@@ -1035,7 +1106,7 @@ struct ProfileActivityChartRow: View {
     }
 
     private var yUpperBound: Int {
-        max(1, Int((Double(maximumOnlineCount) * 1.12).rounded(.up)))
+        max(maximumOnlineCount + 1, 10)
     }
 
     private var xDomain: ClosedRange<Date> {
@@ -1062,8 +1133,18 @@ struct ProfileActivityChartRow: View {
                 Spacer(minLength: 12)
 
                 Text("Peak \(maximumOnlineCount)")
-                    .font(.caption.weight(.semibold))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(0.05))
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                    )
             }
 
             Chart(chartPoints) { point in
@@ -1074,49 +1155,54 @@ struct ProfileActivityChartRow: View {
                 .foregroundStyle(
                     LinearGradient(
                         colors: [
-                            Color.accentColor.opacity(0.34),
+                            Color.accentColor.opacity(0.35),
                             Color.accentColor.opacity(0.06)
                         ],
                         startPoint: .top,
                         endPoint: .bottom
                     )
                 )
+                .interpolationMethod(.catmullRom)
 
                 LineMark(
                     x: .value("Time", point.date),
                     y: .value("Users Online", point.onlineCount)
                 )
                 .foregroundStyle(Color.accentColor)
-                .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                .interpolationMethod(.catmullRom)
+                .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
             }
             .chartXScale(domain: xDomain)
             .chartYScale(domain: 0...yUpperBound)
             .chartXAxis {
                 AxisMarks(values: .automatic(desiredCount: mode.xAxisMarkCount)) { value in
-                    AxisGridLine()
-                        .foregroundStyle(Color.secondary.opacity(0.18))
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                        .foregroundStyle(Color.secondary.opacity(0.16))
                     AxisValueLabel {
                         if let date = value.as(Date.self) {
                             Text(xAxisLabel(for: date))
                         }
                     }
+                    .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.secondary)
                 }
             }
             .chartYAxis {
                 AxisMarks(position: .trailing, values: .automatic(desiredCount: 5)) {
-                    AxisGridLine()
-                        .foregroundStyle(Color.secondary.opacity(0.18))
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                        .foregroundStyle(Color.secondary.opacity(0.16))
                     AxisValueLabel()
+                        .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
             }
             .chartPlotStyle { plotArea in
                 plotArea
-                    .background(Color.black.opacity(0.16))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .background(Color.black.opacity(0.25))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            .frame(height: 220)
+            .frame(height: 240)
+            .padding(4)
         }
         .padding(.vertical, 8)
     }
@@ -1646,7 +1732,7 @@ struct ProfileFriendDetailView: View {
     }
 
     private var effectiveProfile: XBLiveFriendProfile? {
-        liveProfile ?? profile
+        profile ?? liveProfile
     }
 
     private func loadLiveProfile() async {
@@ -2031,13 +2117,13 @@ private struct ProfileAchievementGameGroup: Identifiable {
 
     var unlockedAchievements: [XBLiveAchievement] {
         achievements
-            .filter(isEffectivelyUnlocked)
+            .filter { $0.isUnlocked != false }
             .sorted(by: Self.unlockedAchievementSort)
     }
 
     var lockedAchievements: [XBLiveAchievement] {
         achievements
-            .filter { !isEffectivelyUnlocked($0) }
+            .filter { $0.isUnlocked == false }
             .sorted(by: lockedAchievementSort)
     }
 
@@ -2047,16 +2133,6 @@ private struct ProfileAchievementGameGroup: Identifiable {
 
     func progress(for achievement: XBLiveAchievement) -> ProfileAchievementProgress? {
         ProfileAchievementProgressResolver.visibleProgress(for: achievement, gamesPlayed: gamesPlayed)
-    }
-
-    private func isEffectivelyUnlocked(_ achievement: XBLiveAchievement) -> Bool {
-        if achievement.isUnlocked != false {
-            return true
-        }
-        return ProfileAchievementProgressResolver.resolvedProgress(
-            for: achievement,
-            gamesPlayed: gamesPlayed
-        )?.fractionComplete == 1
     }
 
     private func lockedAchievementSort(_ lhs: XBLiveAchievement, _ rhs: XBLiveAchievement) -> Bool {
@@ -2234,9 +2310,11 @@ private enum ProfileAchievementProgressResolver {
     ) -> Double {
         if let titleID = achievement.gameTitleID?.nilIfEmpty {
             let normalizedTitleID = titleID.uppercased()
-            return gamesPlayed
-                .first { $0.titleId?.uppercased() == normalizedTitleID }?
-                .totalMinutes ?? 0
+            if let totalMinutes = gamesPlayed
+                .first(where: { $0.titleId?.uppercased() == normalizedTitleID })?
+                .totalMinutes {
+                return totalMinutes
+            }
         }
 
         if let gameTitle = achievement.gameTitle?.nilIfEmpty,
