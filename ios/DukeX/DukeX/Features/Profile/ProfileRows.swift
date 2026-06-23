@@ -1857,7 +1857,7 @@ struct ProfileAchievementsView: View {
             Section("Games") {
                 if gameAchievementGroups.isEmpty {
                     ProfileEmptyRow(
-                        title: achievementGroups.isEmpty ? "No achievements synced" : "No game achievements synced",
+                        title: hasSyncedAchievements ? "No game achievement progress synced" : "No achievements synced",
                         systemImage: "medal"
                     )
                 } else {
@@ -1929,6 +1929,11 @@ struct ProfileAchievementsView: View {
             .sorted { lhs, rhs in
                 lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
             }
+            .filter(\.hasVisibleAchievementActivity)
+    }
+
+    private var hasSyncedAchievements: Bool {
+        !(snapshot?.achievements ?? []).isEmpty
     }
 
     private var gameAchievementGroups: [ProfileAchievementGameGroup] {
@@ -1949,14 +1954,8 @@ struct ProfileAchievementsView: View {
 
     private func supportedGame(for achievements: [XBLiveAchievement]) -> InsigniaSupportedGame? {
         let titleIDs = Set(achievements.compactMap { $0.gameTitleID?.uppercased().nilIfEmpty })
-        if let supportedGame = supportedGames.first(where: { titleIDs.contains($0.titleID.uppercased()) }) {
-            return supportedGame
-        }
-
-        let titles = Set(achievements.compactMap { $0.gameTitle?.nilIfEmpty.map(Self.normalizedTitle) })
         return supportedGames.first { supportedGame in
-            titles.contains(Self.normalizedTitle(supportedGame.title)) ||
-            titles.contains(Self.normalizedTitle(supportedGame.subtitle))
+            titleIDs.contains(supportedGame.titleID.uppercased())
         }
     }
 
@@ -1977,10 +1976,7 @@ struct ProfileAchievementsView: View {
             return game
         }
 
-        let titles = Set(
-            achievements.compactMap { $0.gameTitle?.nilIfEmpty.map(Self.normalizedTitle) } +
-            [supportedGame?.title, supportedGame?.subtitle].compactMap { $0?.nilIfEmpty.map(Self.normalizedTitle) }
-        )
+        let titles = Set(achievements.compactMap { $0.gameTitle?.nilIfEmpty.map(Self.normalizedTitle) })
         return gamesPlayed.first { game in
             titles.contains(Self.normalizedTitle(game.gameName))
         }
@@ -2117,14 +2113,23 @@ private struct ProfileAchievementGameGroup: Identifiable {
 
     var unlockedAchievements: [XBLiveAchievement] {
         achievements
-            .filter { $0.isUnlocked != false }
+            .filter(\.isUnlockedForDisplay)
             .sorted(by: Self.unlockedAchievementSort)
     }
 
     var lockedAchievements: [XBLiveAchievement] {
         achievements
-            .filter { $0.isUnlocked == false }
+            .filter { !$0.isUnlockedForDisplay }
             .sorted(by: lockedAchievementSort)
+    }
+
+    var hasVisibleAchievementActivity: Bool {
+        achievements.contains { achievement in
+            achievement.isUnlockedForDisplay || ProfileAchievementProgressResolver.hasTrackedProgress(
+                for: achievement,
+                gamesPlayed: gamesPlayed
+            )
+        }
     }
 
     var score: Int {
@@ -2239,13 +2244,24 @@ private enum ProfileAchievementProgressResolver {
         for achievement: XBLiveAchievement,
         gamesPlayed: [XBLiveGamePlayed]
     ) -> ProfileAchievementProgress? {
-        guard achievement.isUnlocked == false,
+        guard !achievement.isUnlockedForDisplay,
               let progress = resolvedProgress(for: achievement, gamesPlayed: gamesPlayed),
               progress.fractionComplete > 0,
               progress.fractionComplete < 1 else {
             return nil
         }
         return progress
+    }
+
+    static func hasTrackedProgress(
+        for achievement: XBLiveAchievement,
+        gamesPlayed: [XBLiveGamePlayed]
+    ) -> Bool {
+        guard !achievement.isUnlockedForDisplay,
+              let progress = resolvedProgress(for: achievement, gamesPlayed: gamesPlayed) else {
+            return false
+        }
+        return progress.fractionComplete > 0
     }
 
     private static func apiProgress(for achievement: XBLiveAchievement) -> ProfileAchievementProgress? {
@@ -2265,13 +2281,14 @@ private enum ProfileAchievementProgressResolver {
     ) -> ProfileAchievementProgress? {
         guard let description = achievement.description?.nilIfEmpty,
               description.localizedCaseInsensitiveContains("play"),
-              description.localizedCaseInsensitiveContains("time"),
               let targetMinutes = targetMinutes(from: description),
               targetMinutes > 0 else {
             return nil
         }
 
-        let currentMinutes = currentPlaytimeMinutes(for: achievement, gamesPlayed: gamesPlayed)
+        guard let currentMinutes = currentPlaytimeMinutes(for: achievement, gamesPlayed: gamesPlayed) else {
+            return nil
+        }
         return ProfileAchievementProgress(
             fractionComplete: clampedFraction(currentMinutes / targetMinutes),
             label: nil
@@ -2290,6 +2307,7 @@ private enum ProfileAchievementProgressResolver {
         guard normalizedDescription.contains("game"),
               normalizedDescription.contains("insignia"),
               normalizedDescription.contains("play"),
+              isCoreAchievement(achievement),
               let targetCount = targetGameCount(from: description),
               targetCount > 0 else {
             return nil
@@ -2307,25 +2325,50 @@ private enum ProfileAchievementProgressResolver {
     private static func currentPlaytimeMinutes(
         for achievement: XBLiveAchievement,
         gamesPlayed: [XBLiveGamePlayed]
-    ) -> Double {
+    ) -> Double? {
         if let titleID = achievement.gameTitleID?.nilIfEmpty {
             let normalizedTitleID = titleID.uppercased()
-            if let totalMinutes = gamesPlayed
-                .first(where: { $0.titleId?.uppercased() == normalizedTitleID })?
-                .totalMinutes {
-                return totalMinutes
+            if let game = gamesPlayed.first(where: { $0.titleId?.uppercased() == normalizedTitleID }) {
+                return game.totalMinutes ?? 0
             }
         }
 
         if let gameTitle = achievement.gameTitle?.nilIfEmpty,
-           gameTitle.localizedCaseInsensitiveCompare("XBL Core") != .orderedSame,
+           !isCoreTitle(gameTitle),
            let game = gamesPlayed.first(where: {
+               $0.titleId?.nilIfEmpty == nil &&
                normalizedTitle($0.gameName) == normalizedTitle(gameTitle)
            }) {
             return game.totalMinutes ?? 0
         }
 
-        return gamesPlayed.compactMap(\.totalMinutes).reduce(0, +)
+        guard isCoreAchievement(achievement) else {
+            return nil
+        }
+
+        let minutes = gamesPlayed.compactMap(\.totalMinutes)
+        return minutes.isEmpty ? nil : minutes.reduce(0, +)
+    }
+
+    private static func isCoreAchievement(_ achievement: XBLiveAchievement) -> Bool {
+        [
+            achievement.groupID,
+            achievement.gameTitle,
+            achievement.category
+        ]
+            .compactMap { $0?.nilIfEmpty.map(normalizedTitle) }
+            .contains { value in
+                value == "xblcore" ||
+                    value == "xblivecore" ||
+                    value == "dukexcore"
+            }
+    }
+
+    private static func isCoreTitle(_ title: String) -> Bool {
+        let normalized = normalizedTitle(title)
+        return normalized == "xblcore" ||
+            normalized == "xblivecore" ||
+            normalized == "dukexcore"
     }
 
     private static func targetMinutes(from text: String) -> Double? {

@@ -580,7 +580,7 @@ struct XBLiveAchievementsSnapshot: Codable, Equatable {
             return "\(unlockedCount)"
         }
         if !achievements.isEmpty {
-            return "\(achievements.filter { $0.isUnlocked != false }.count)"
+            return "\(achievements.filter(\.isUnlockedForDisplay).count)"
         }
         return totalCount.map(String.init) ?? "Not Synced"
     }
@@ -595,10 +595,12 @@ struct XBLiveAchievementsSnapshot: Codable, Equatable {
     init(json: Any) {
         if let array = json as? [[String: Any]] {
             let achievements = array.map { XBLiveAchievement(json: $0) }
-            self.init(totalScore: achievements.compactMap(\.score).reduce(0, +),
-                      totalCount: achievements.count,
-                      unlockedCount: achievements.filter { $0.isUnlocked == true }.count,
-                      achievements: achievements)
+            self.init(
+                totalScore: achievements.compactMap(\.score).reduce(0, +),
+                totalCount: achievements.count,
+                unlockedCount: achievements.filter(\.isUnlockedForDisplay).count,
+                achievements: achievements
+            )
             return
         }
 
@@ -659,6 +661,9 @@ struct XBLiveAchievement: Codable, Identifiable, Equatable {
 
     var iconURL: URL? { iconURLString.flatMap(URL.init(string:)) }
     var gameIconURL: URL? { gameIconURLString.flatMap(URL.init(string:)) }
+    var isUnlockedForDisplay: Bool {
+        isUnlocked == true || unlockedAt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
 
     init(json: [String: Any],
          inheritedGameTitle: String? = nil,

@@ -1330,7 +1330,7 @@ private struct ProfileSocialGameInviteStatsSnapshot: Codable, Equatable {
             title: title,
             achievements: achievements
         )
-        let unlockedAchievements = matchingAchievements.filter { $0.isUnlocked != false }
+        let unlockedAchievements = matchingAchievements.filter(\.isUnlockedForDisplay)
         let score = matchingAchievements.isEmpty ? nil : unlockedAchievements.compactMap(\.score).reduce(0, +)
         let playedGame = ProfileSocialGameInviteStats.matchingGamePlayed(
             forTitleID: titleID,
@@ -1519,8 +1519,8 @@ private struct ProfileSocialGameInviteStats {
         let titleKey = normalizedTitle(title)
 
         return achievements.achievements.filter { achievement in
-            if achievement.gameTitleID?.uppercased() == titleIDKey {
-                return true
+            if let achievementTitleID = achievement.gameTitleID?.uppercased() {
+                return achievementTitleID == titleIDKey
             }
             if let gameTitle = achievement.gameTitle,
                normalizedTitle(gameTitle) == titleKey {
