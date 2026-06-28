@@ -2,8 +2,6 @@ import SwiftUI
 import UIKit
 
 struct ProfileSocialMessagesView: View {
-    @Environment(\.dismiss) private var dismiss
-
     @ObservedObject var socialStore: XBLiveSocialStore
     let legacyMessages: [InsigniaMessage]
     let legacyUnreadMessages: [InsigniaMessage]
@@ -16,19 +14,12 @@ struct ProfileSocialMessagesView: View {
     let currentUserAchievements: XBLiveAchievementsSnapshot?
     let currentUserGamesPlayed: [XBLiveGamePlayed]
     let launchGameFromInvite: (LibraryFile) -> Void
-    let closeMessages: (() -> Void)?
 
     @State private var isComposePresented = false
-    @State private var selectedConversationKey: String?
-    @State private var conversationSearchText = ""
 
     @ViewBuilder
     var body: some View {
-        #if targetEnvironment(macCatalyst)
-        desktopBody
-        #else
         mobileBody
-        #endif
     }
 
     private var mobileBody: some View {
@@ -107,25 +98,60 @@ struct ProfileSocialMessagesView: View {
         }
     }
 
-    #if targetEnvironment(macCatalyst)
-    private var desktopBody: some View {
-        HStack(spacing: 0) {
-            desktopConversationSidebar
-                .frame(width: 340)
+    private var conversations: [XBLiveSocialConversation] {
+        ProfileSocialConversationMerge.merged(
+            socialConversations: socialStore.conversations,
+            inboxMessages: socialStore.inboxMessages,
+            threadMessagesByUser: socialStore.threadMessagesByUser,
+            currentUsername: socialStore.currentUsername,
+            legacyMessages: legacyMessages,
+            legacyUnreadMessages: legacyUnreadMessages
+        )
+    }
 
-            Rectangle()
-                .fill(Color.primary.opacity(0.10))
-                .frame(width: 1)
+    private var avatarResolver: ProfileSocialAvatarResolver {
+        ProfileSocialAvatarResolver(
+            customImages: friendProfileImages,
+            friendProfiles: mergedFriendProfiles,
+            socialFriends: socialFriends
+        )
+    }
 
-            desktopThreadPane
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+    private var mergedFriendProfiles: [String: XBLiveFriendProfile] {
+        friendProfiles.merging(socialStore.messageableFriendProfiles) { existing, _ in existing }
+    }
+
+}
+
+#if targetEnvironment(macCatalyst)
+struct ProfileSocialMessagesToolbox: View {
+    @Environment(\.dukeXTheme) private var theme
+
+    @ObservedObject var socialStore: XBLiveSocialStore
+    let legacyMessages: [InsigniaMessage]
+    let legacyUnreadMessages: [InsigniaMessage]
+    let friendProfileImages: [String: UIImage]
+    let friendProfiles: [String: XBLiveFriendProfile]
+    let socialFriends: [XBLiveSocialFriend]
+    @Binding var width: Double
+    @Binding var isExpanded: Bool
+    @Binding var selectedConversationKey: String?
+    let closeMessages: () -> Void
+
+    @State private var conversationSearchText = ""
+    @State private var isComposePresented = false
+
+    private let titlebarControlHeight: CGFloat = 52
+
+    var body: some View {
+        Group {
+            if isExpanded {
+                expandedToolbox
+            } else {
+                collapsedToolboxButton
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background {
-            DukeXThemedBackgroundView(dimming: 0.18)
-        }
-        .navigationTitle("Messages")
-        .navigationBarTitleDisplayMode(.inline)
+        .animation(.spring(response: 0.26, dampingFraction: 0.88), value: isExpanded)
         .task {
             await socialStore.refreshMessages()
             normalizeSelectedConversation()
@@ -146,6 +172,8 @@ struct ProfileSocialMessagesView: View {
                     initialRecipient: nil
                 )
             }
+            .tint(theme.accentColor)
+            .accentColor(theme.accentColor)
         }
         .alert(item: $socialStore.notice) { notice in
             Alert(
@@ -156,50 +184,138 @@ struct ProfileSocialMessagesView: View {
         }
     }
 
-    private var desktopConversationSidebar: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 10) {
-                Button {
-                    closeMessagesView()
-                } label: {
-                    Label("Profile", systemImage: "chevron.left")
-                        .font(.subheadline.weight(.bold))
-                        .labelStyle(.titleAndIcon)
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 10)
-                .frame(height: 36)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay {
-                    Capsule()
-                        .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
-                }
-                .accessibilityLabel("Back to Profile")
+    private var expandedToolbox: some View {
+        VStack(spacing: 0) {
+            toolboxChrome
+
+            Divider()
+                .overlay(Color.primary.opacity(0.08))
+
+            toolboxContent
+        }
+        .frame(width: CGFloat(width))
+        .frame(maxHeight: .infinity)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(Color.black.opacity(0.20))
+                .overlay(theme.accentColor.opacity(0.045))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(theme.accentColor.opacity(0.24), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.leading, 8)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .transition(.opacity.combined(with: .move(edge: .leading)))
+    }
+
+    private var collapsedToolboxButton: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Spacer(minLength: 0)
+                toggleToolboxButton
+            }
+            .frame(height: titlebarControlHeight)
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
+            .padding(.bottom, 12)
+            .background {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .overlay(Color.black.opacity(0.20))
+                    .overlay(theme.accentColor.opacity(0.045))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(theme.accentColor.opacity(0.24), lineWidth: 1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(width: CGFloat(width))
+        .frame(maxHeight: .infinity)
+        .padding(.leading, 8)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .transition(.opacity)
+    }
+
+    private var toolboxChrome: some View {
+        VStack(spacing: 10) {
+            Color.clear
+            .frame(height: titlebarControlHeight)
+
+            HStack(spacing: 8) {
+                toggleToolboxButton
 
                 Text("Messages")
-                    .font(.title3.weight(.bold))
+                    .font(.headline.weight(.semibold))
                     .lineLimit(1)
 
-                Spacer(minLength: 0)
+                Spacer(minLength: 6)
 
                 Button {
-                    isComposePresented = true
+                    closeMessages()
                 } label: {
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 36, height: 36)
+                    Image(systemName: "chevron.left")
+                        .font(.subheadline.weight(.bold))
+                        .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
                 .background(.ultraThinMaterial, in: Circle())
                 .overlay {
                     Circle()
-                        .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
+                        .strokeBorder(theme.accentColor.opacity(0.20), lineWidth: 1)
+                }
+                .accessibilityLabel("Back to Profile")
+
+                Button {
+                    isComposePresented = true
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay {
+                    Circle()
+                        .strokeBorder(theme.accentColor.opacity(0.20), lineWidth: 1)
                 }
                 .accessibilityLabel("Compose Message")
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 14)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 4)
+        .padding(.bottom, 12)
+    }
 
+    private var toggleToolboxButton: some View {
+        Button {
+            withAnimation(.spring(response: 0.26, dampingFraction: 0.88)) {
+                isExpanded.toggle()
+            }
+        } label: {
+            Image(systemName: "sidebar.leading")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 36, height: 36)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay {
+                    Circle()
+                        .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isExpanded ? "Hide Messages Toolbox" : "Show Messages Toolbox")
+        .accessibilityHint("Collapses or reveals the XB.Live messages toolbox")
+    }
+
+    private var toolboxContent: some View {
+        VStack(spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.subheadline.weight(.semibold))
@@ -211,12 +327,13 @@ struct ProfileSocialMessagesView: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 40)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(theme.accentColor.opacity(0.16), lineWidth: 1)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
 
             if conversations.isEmpty {
                 Spacer(minLength: 0)
@@ -232,7 +349,7 @@ struct ProfileSocialMessagesView: View {
                 Spacer(minLength: 0)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 6) {
+                    LazyVStack(spacing: 8) {
                         ForEach(displayedConversations) { conversation in
                             Button {
                                 selectedConversationKey = conversation.key
@@ -265,51 +382,7 @@ struct ProfileSocialMessagesView: View {
                 }
             }
         }
-        .frame(maxHeight: .infinity)
-        .background(.black.opacity(0.10))
     }
-
-    @ViewBuilder
-    private var desktopThreadPane: some View {
-        if let conversation = selectedConversation {
-            ProfileSocialThreadView(
-                socialStore: socialStore,
-                username: conversation.username,
-                legacyMessages: legacyMessages,
-                friendProfileImages: friendProfileImages,
-                friendProfiles: friendProfiles,
-                socialFriends: socialFriends,
-                markLegacyMessageViewed: markLegacyMessageViewed,
-                installedGames: installedGames,
-                inviteEligibleGames: inviteEligibleGames,
-                currentUserAchievements: currentUserAchievements,
-                currentUserGamesPlayed: currentUserGamesPlayed,
-                launchGameFromInvite: launchGameFromInvite
-            )
-            .id(conversation.key)
-            .toolbar(.hidden, for: .navigationBar)
-        } else {
-            VStack(spacing: 12) {
-                Image(systemName: "bubble.left.and.bubble.right")
-                    .font(.system(size: 42, weight: .regular))
-                    .foregroundStyle(.secondary)
-
-                Text("Select a conversation")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-
-    private func closeMessagesView() {
-        if let closeMessages {
-            closeMessages()
-        } else {
-            dismiss()
-        }
-    }
-    #endif
 
     private var conversations: [XBLiveSocialConversation] {
         ProfileSocialConversationMerge.merged(
@@ -346,16 +419,6 @@ struct ProfileSocialMessagesView: View {
         }
     }
 
-    private var selectedConversation: XBLiveSocialConversation? {
-        guard let selectedConversationKey else {
-            return displayedConversations.first ?? conversations.first
-        }
-
-        return conversations.first { $0.key == selectedConversationKey } ??
-            displayedConversations.first ??
-            conversations.first
-    }
-
     private func normalizeSelectedConversation() {
         guard !conversations.isEmpty else {
             selectedConversationKey = nil
@@ -383,6 +446,7 @@ struct ProfileSocialMessagesView: View {
         selectedConversationKey = displayedConversations.first?.key
     }
 }
+#endif
 
 private struct ProfileSocialAvatarData {
     let image: UIImage?
@@ -2717,7 +2781,7 @@ struct ProfileXBLiveFriendDetailView: View {
                             .multilineTextAlignment(.center)
                         Text(statusLine)
                             .font(.subheadline)
-                            .foregroundStyle(isOnline ? .green : .secondary)
+                            .foregroundStyle(isOnline ? Color.accentColor : .secondary)
                             .multilineTextAlignment(.center)
                     }
                 }

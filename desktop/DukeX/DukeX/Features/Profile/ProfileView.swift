@@ -200,10 +200,7 @@ struct ProfileView: View {
                 inviteEligibleGames: inviteEligibleGames,
                 currentUserAchievements: snapshot?.achievements,
                 currentUserGamesPlayed: snapshot?.playtimeGames ?? [],
-                launchGameFromInvite: launchGameFromInvite,
-                closeMessages: {
-                    profileHeaderDestination = nil
-                }
+                launchGameFromInvite: launchGameFromInvite
             )
         case .playtime:
             ProfilePlaytimeView(
