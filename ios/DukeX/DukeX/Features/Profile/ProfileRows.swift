@@ -1872,6 +1872,19 @@ struct ProfileAchievementsView: View {
             }
             .dukeXThemedListRowBackground()
 
+            if !appAchievementGroups.isEmpty {
+                Section("Apps") {
+                    ForEach(appAchievementGroups) { group in
+                        NavigationLink {
+                            ProfileAchievementGameView(group: group)
+                        } label: {
+                            ProfileAchievementGameRow(group: group)
+                        }
+                    }
+                }
+                .dukeXThemedListRowBackground()
+            }
+
             if !xblCoreAchievementGroups.isEmpty {
                 Section("Cores") {
                     ForEach(xblCoreAchievementGroups) { group in
@@ -1905,6 +1918,11 @@ struct ProfileAchievementsView: View {
                 let isCoreAchievementGroup = coreKind != nil
                 let groupTitle = coreKind?.title ?? supportedGame?.title ?? first.gameTitle?.nilIfEmpty ?? "Unknown Game"
                 let groupTitleID = supportedGame?.titleID ?? first.gameTitleID
+                let isAppAchievementGroup = Self.isAppAchievementGroup(
+                    title: groupTitle,
+                    titleID: groupTitleID,
+                    achievements: sortedAchievements
+                )
                 let matchingPlayedGame = playedGame(for: sortedAchievements, supportedGame: supportedGame)
                 let iconDisplay = ProfileGameIconDisplayResolver.display(
                     title: groupTitle,
@@ -1923,7 +1941,8 @@ struct ProfileAchievementsView: View {
                     iconSystemImage: iconDisplay.systemImage,
                     achievements: sortedAchievements,
                     gamesPlayed: gamesPlayed,
-                    isXBLCore: isCoreAchievementGroup
+                    isXBLCore: isCoreAchievementGroup,
+                    isApp: isAppAchievementGroup
                 )
             }
             .sorted { lhs, rhs in
@@ -1937,7 +1956,11 @@ struct ProfileAchievementsView: View {
     }
 
     private var gameAchievementGroups: [ProfileAchievementGameGroup] {
-        achievementGroups.filter { !$0.isXBLCore }
+        achievementGroups.filter { !$0.isXBLCore && !$0.isApp }
+    }
+
+    private var appAchievementGroups: [ProfileAchievementGameGroup] {
+        achievementGroups.filter(\.isApp)
     }
 
     private var xblCoreAchievementGroups: [ProfileAchievementGameGroup] {
@@ -2029,6 +2052,29 @@ struct ProfileAchievementsView: View {
         return nil
     }
 
+    private static func isAppAchievementGroup(
+        title: String,
+        titleID: String?,
+        achievements: [XBLiveAchievement]
+    ) -> Bool {
+        if GameLaunchLink.normalizedTitleID(titleID) == "4D53007C" {
+            return true
+        }
+
+        let normalizedValues = ([title] + achievements.flatMap { achievement in
+            [achievement.gameTitle, achievement.category, achievement.groupID]
+        })
+            .compactMap { value -> String? in
+                guard let value = value?.nilIfEmpty else {
+                    return nil
+                }
+                return normalizedTitle(value)
+            }
+
+        return normalizedValues.contains("xboxvideochat") ||
+            normalizedValues.contains("windowsmediacenterextender")
+    }
+
     private static func coreGroupKey(for achievement: XBLiveAchievement) -> String {
         if let groupID = achievement.groupID?.nilIfEmpty {
             return groupID.lowercased()
@@ -2087,7 +2133,7 @@ private enum ProfileCoreAchievementKind {
         case .xbLive:
             return "XBLCoreAchievementIcon"
         case .dukeX:
-            return "DukeXAppIcon"
+            return "DukeXCoreAchievementIcon"
         }
     }
 
@@ -2110,6 +2156,7 @@ private struct ProfileAchievementGameGroup: Identifiable {
     let achievements: [XBLiveAchievement]
     let gamesPlayed: [XBLiveGamePlayed]
     let isXBLCore: Bool
+    let isApp: Bool
 
     var unlockedAchievements: [XBLiveAchievement] {
         achievements
@@ -2428,6 +2475,9 @@ private enum ProfileGameIconDisplayResolver {
     ) -> ProfileGameIconDisplay {
         let normalizedTitleID = GameLaunchLink.normalizedTitleID(titleID)
         let normalizedTitle = normalizedTitle(title)
+        if normalizedTitle == "testgame" {
+            return ProfileGameIconDisplay(url: nil, assetName: "TestGameAchievementIcon", systemImage: "gamecontroller")
+        }
         if normalizedTitleID == "4D53007C" || normalizedTitle == "xboxvideochat" {
             return ProfileGameIconDisplay(url: nil, assetName: "XboxVideoChatIcon", systemImage: "video.circle")
         }

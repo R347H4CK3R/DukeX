@@ -72,6 +72,8 @@ enum GameCoverTilePresentation {
 struct GameCoverTile: View {
     @Environment(\.dukeXTheme) private var theme
 
+    private static let coverAspectRatio: CGFloat = 0.70
+
     let game: LibraryFile
     let canLaunch: Bool
     let liveStatus: GameLiveStatus?
@@ -159,6 +161,8 @@ struct GameCoverTile: View {
     private var coverWithLiveStatus: some View {
         ZStack(alignment: .topTrailing) {
             cover
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
 
             if let liveStatus {
                 LiveStatusBadge(status: liveStatus)
@@ -166,7 +170,8 @@ struct GameCoverTile: View {
                     .allowsHitTesting(false)
             }
         }
-        .aspectRatio(0.70, contentMode: .fit)
+        .frame(maxWidth: .infinity)
+        .aspectRatio(Self.coverAspectRatio, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: presentation.coverCornerRadius, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: presentation.coverCornerRadius, style: .continuous)

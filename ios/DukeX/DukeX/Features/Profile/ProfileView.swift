@@ -9,6 +9,7 @@ enum DukeXDownloadCountState: Equatable {
 }
 
 private enum ProfileHeaderDestination: Hashable {
+    case activityFeed
     case achievements
     case friends
     case messages
@@ -27,6 +28,7 @@ struct ProfileView: View {
     @State private var maftyDownloadCountState = DukeXDownloadCountState.hidden
     @State private var maftyDownloadCountTask: Task<Void, Never>?
     @State private var profileHeaderDestination: ProfileHeaderDestination?
+    @StateObject private var activityFeedStore = XBLiveActivityFeedStore()
 
     let signIn: () -> Void
     let signOut: () -> Void
@@ -63,6 +65,7 @@ struct ProfileView: View {
             }
 
             await socialStore.refreshAll()
+            await activityFeedStore.refreshNewsIfNeeded(maxAge: 60)
         }
     }
 
@@ -101,56 +104,70 @@ struct ProfileView: View {
     private func profileActionPills(snapshot: InsigniaAuthenticatedSnapshot?) -> some View {
         let friends = snapshot?.friends ?? []
 
-        ProfileHeaderActionPillsRow {
-            Button {
-                profileHeaderDestination = .achievements
-            } label: {
-                ProfileHeaderActionPill(
-                    title: "Achievements",
-                    value: snapshot?.achievements?.summaryText ??
-                        snapshot?.xbProfile?.achievementCount.map(String.init) ??
-                        "Not Synced",
-                    systemImage: "medal",
-                    tint: .green
-                )
+        VStack(spacing: 4) {
+            ProfileHeaderActionPillsRow {
+                Button {
+                    profileHeaderDestination = .achievements
+                } label: {
+                    ProfileHeaderActionPill(
+                        title: "Achievements",
+                        value: snapshot?.achievements?.summaryText ??
+                            snapshot?.xbProfile?.achievementCount.map(String.init) ??
+                            "Not Synced",
+                        systemImage: "medal",
+                        tint: .green
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    profileHeaderDestination = .friends
+                } label: {
+                    ProfileHeaderActionPill(
+                        title: "Friends",
+                        value: countText(mergedFriendsCount(insigniaFriends: friends)),
+                        systemImage: "person.2",
+                        tint: .mint
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    profileHeaderDestination = .messages
+                } label: {
+                    ProfileHeaderActionPill(
+                        title: "Messages",
+                        value: unreadMessagesText(legacyMessages: snapshot?.messages ?? []),
+                        systemImage: "envelope",
+                        tint: .teal
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    profileHeaderDestination = .playtime
+                } label: {
+                    ProfileHeaderActionPill(
+                        title: "Playtime",
+                        value: playtimeSummaryText(
+                            totalMinutes: snapshot?.xbProfile?.totalMinutes,
+                            gameCount: snapshot?.playtimeGames.count ?? 0
+                        ),
+                        systemImage: "timer",
+                        tint: .yellow
+                    )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             Button {
-                profileHeaderDestination = .friends
+                profileHeaderDestination = .activityFeed
             } label: {
                 ProfileHeaderActionPill(
-                    title: "Friends",
-                    value: countText(mergedFriendsCount(insigniaFriends: friends)),
-                    systemImage: "person.2",
-                    tint: .mint
-                )
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                profileHeaderDestination = .messages
-            } label: {
-                ProfileHeaderActionPill(
-                    title: "Messages",
-                    value: unreadMessagesText(legacyMessages: snapshot?.messages ?? []),
-                    systemImage: "envelope",
-                    tint: .teal
-                )
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                profileHeaderDestination = .playtime
-            } label: {
-                ProfileHeaderActionPill(
-                    title: "Playtime",
-                    value: playtimeSummaryText(
-                        totalMinutes: snapshot?.xbProfile?.totalMinutes,
-                        gameCount: snapshot?.playtimeGames.count ?? 0
-                    ),
-                    systemImage: "timer",
-                    tint: .yellow
+                    title: "Activity Feed",
+                    value: countText(activityFeedStore.unreadArticleCount),
+                    systemImage: "sidebar.leading",
+                    tint: .blue
                 )
             }
             .buttonStyle(.plain)
@@ -163,6 +180,17 @@ struct ProfileView: View {
         snapshot: InsigniaAuthenticatedSnapshot?
     ) -> some View {
         switch destination {
+        case .activityFeed:
+            ProfileActivityFeedView(
+                feedStore: activityFeedStore,
+                profileStore: profileStore,
+                socialStore: socialStore,
+                installedGames: installedGames,
+                inviteEligibleGames: inviteEligibleGames,
+                launchGameFromInvite: launchGameFromInvite,
+                changeFriendProfileImage: changeFriendProfileImage,
+                changeSocialFriendProfileImage: changeSocialFriendProfileImage
+            )
         case .achievements:
             ProfileAchievementsView(
                 snapshot: snapshot?.achievements,

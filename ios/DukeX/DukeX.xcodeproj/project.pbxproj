@@ -67,6 +67,7 @@
 		J60000000000000000000001 /* XBLiveSocialService.swift in Sources */ = {isa = PBXBuildFile; fileRef = J60000000000000000000011 /* XBLiveSocialService.swift */; };
 		J60000000000000000000002 /* ProfileSocialRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = J60000000000000000000012 /* ProfileSocialRows.swift */; };
 		J60000000000000000000003 /* XBLiveEmulatorPresenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = J60000000000000000000013 /* XBLiveEmulatorPresenceService.swift */; };
+		K70000000000000000000001 /* ProfileActivityFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = K70000000000000000000011 /* ProfileActivityFeedView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -136,6 +137,7 @@
 		J60000000000000000000011 /* XBLiveSocialService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XBLiveSocialService.swift; sourceTree = "<group>"; };
 		J60000000000000000000012 /* ProfileSocialRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileSocialRows.swift; sourceTree = "<group>"; };
 		J60000000000000000000013 /* XBLiveEmulatorPresenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XBLiveEmulatorPresenceService.swift; sourceTree = "<group>"; };
+		K70000000000000000000011 /* ProfileActivityFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileActivityFeedView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -262,6 +264,7 @@
 				B10000000000000000000012 /* ProfileView.swift */,
 				C10000000000000000000016 /* ProfileLoginView.swift */,
 				C10000000000000000000017 /* ProfileRows.swift */,
+				K70000000000000000000011 /* ProfileActivityFeedView.swift */,
 				J60000000000000000000012 /* ProfileSocialRows.swift */,
 			);
 			path = Profile;
@@ -610,6 +613,7 @@
 					B10000000000000000000002 /* ProfileView.swift in Sources */,
 					C10000000000000000000006 /* ProfileLoginView.swift in Sources */,
 					C10000000000000000000007 /* ProfileRows.swift in Sources */,
+					K70000000000000000000001 /* ProfileActivityFeedView.swift in Sources */,
 					B1000000000000000000000A /* InsigniaProfileStore.swift in Sources */,
 					E10000000000000000000002 /* InsigniaLiveStatusStore.swift in Sources */,
 					I50000000000000000000001 /* XBLCloudSaveService.swift in Sources */,
