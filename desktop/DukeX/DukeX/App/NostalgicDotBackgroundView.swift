@@ -52,16 +52,6 @@ struct NostalgicDotBackgroundView: View {
         return ZStack {
             RadialGradient(
                 colors: [
-                    glowColors.topLeading,
-                    Color.clear
-                ],
-                center: .topLeading,
-                startRadius: 0,
-                endRadius: 460
-            )
-
-            RadialGradient(
-                colors: [
                     glowColors.accent,
                     Color.clear
                 ],
