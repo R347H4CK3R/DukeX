@@ -32,9 +32,12 @@ struct ContentView: View {
     @StateObject private var autoJIT = StikDebugAutoJITCoordinator()
     @StateObject private var profileStore = InsigniaProfileStore()
     @StateObject private var socialStore = XBLiveSocialStore()
+    @StateObject private var activityFeedStore = XBLiveActivityFeedStore()
     @StateObject private var emulatorPresence = XBLiveEmulatorPresenceCoordinator()
     @StateObject private var liveStatusStore = InsigniaLiveStatusStore()
     @StateObject private var gameMetadataStore = GameMetadataStore()
+    @AppStorage("DukeX.desktop.activityFeedWidth") private var activityFeedWidth = 340.0
+    @AppStorage("DukeX.desktop.activityFeedExpanded") private var isActivityFeedExpanded = true
     @State private var importTarget: ImportTarget?
     @State private var autoLaunchAttempted = false
     @State private var coverSelectionTarget: LibraryFile?
@@ -54,6 +57,7 @@ struct ContentView: View {
     @State private var isAutomaticCloudSaveSyncRunning = false
     @State private var activeRuntimeWasGame = false
     @State private var lastObservedRuntimeState: EmulatorCoreRuntime.RunState?
+    @State private var activityFriendTarget: ActivityFeedFriendTarget?
 
     private let tabRefreshTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
@@ -76,6 +80,23 @@ struct ContentView: View {
             )
             .sheet(isPresented: $isProfileLoginPresented) {
                 ProfileLoginView(profileStore: profileStore)
+            }
+            .sheet(item: $activityFriendTarget) { target in
+                NavigationStack {
+                    ActivityFeedFriendDetailView(
+                        username: target.username,
+                        profileStore: profileStore,
+                        socialStore: socialStore,
+                        installedGames: store.games,
+                        inviteEligibleGames: gameInviteEligibleGames,
+                        launchGameFromInvite: launchGame,
+                        changeFriendProfileImage: beginFriendProfileImageSelection,
+                        changeSocialFriendProfileImage: beginSocialFriendProfileImageSelection
+                    )
+                }
+                .frame(minWidth: 520, idealWidth: 640, minHeight: 680, idealHeight: 760)
+                .tint(theme.accentColor)
+                .accentColor(theme.accentColor)
             }
             .sheet(item: $gameMetadataTarget) { game in
                 GameMetadataEditorView(
@@ -343,11 +364,26 @@ struct ContentView: View {
 
     #if targetEnvironment(macCatalyst)
     private var desktopMainContent: some View {
-        VStack(spacing: 0) {
-            DesktopTopChrome(selectedTab: $selectedTab)
+        Group {
+            if desktopAuxiliaryToolboxIsExpanded {
+                HStack(spacing: 0) {
+                    desktopExpandedAuxiliaryToolbox
+                    desktopContentColumn
+                }
+            } else {
+                ZStack(alignment: .topLeading) {
+                    desktopContentColumn
 
-            desktopSelectedTabContent
-                .desktopSectionTopFade()
+                    DesktopCollapsedToolboxButton(
+                        title: desktopAuxiliaryToolboxTitle,
+                        action: expandDesktopAuxiliaryToolbox
+                    )
+                    .padding(.leading, 20)
+                    .padding(.top, 38)
+                    .zIndex(3)
+                    .transition(.opacity)
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
@@ -357,6 +393,42 @@ struct ContentView: View {
             CatalystWindowChromeConfigurator()
                 .frame(width: 0, height: 0)
         }
+    }
+
+    private var desktopAuxiliaryToolboxIsExpanded: Bool {
+        isActivityFeedExpanded
+    }
+
+    private var desktopAuxiliaryToolboxTitle: String {
+        "Activity Feed"
+    }
+
+    private func expandDesktopAuxiliaryToolbox() {
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.88)) {
+            isActivityFeedExpanded = true
+        }
+    }
+
+    private var desktopContentColumn: some View {
+        VStack(spacing: 0) {
+            DesktopTopChrome(selectedTab: $selectedTab)
+            desktopSelectedTabContent
+                .desktopSectionTopFade()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var desktopExpandedAuxiliaryToolbox: some View {
+        ActivityFeedView(
+            feedStore: activityFeedStore,
+            profileStore: profileStore,
+            socialStore: socialStore,
+            width: $activityFeedWidth,
+            isExpanded: $isActivityFeedExpanded,
+            openFriend: openActivityFeedFriend
+        )
+        .transition(.opacity.combined(with: .move(edge: .leading)))
     }
 
     @ViewBuilder
@@ -488,6 +560,10 @@ struct ContentView: View {
             break
         }
         refreshProfileSocialIfAuthenticated()
+    }
+
+    private func openActivityFeedFriend(_ username: String) {
+        activityFriendTarget = ActivityFeedFriendTarget(username: username)
     }
 
     private func refreshProfileSocialIfAuthenticated() {
@@ -1078,6 +1154,27 @@ private struct DesktopTopChrome: View {
         .padding(.bottom, 10)
         .frame(maxWidth: .infinity)
         .background(Color.clear)
+    }
+}
+
+private struct DesktopCollapsedToolboxButton: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "sidebar.leading")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 36, height: 36)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay {
+                    Circle()
+                        .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Show \(title)")
     }
 }
 
