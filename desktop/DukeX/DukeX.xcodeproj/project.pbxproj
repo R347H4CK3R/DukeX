@@ -526,6 +526,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = A10000000000000000000070 /* Build configuration list for PBXNativeTarget "DukeX" */;
 			buildPhases = (
+				K70000000000000000000005 /* Guard Desktop Platform */,
 				A10000000000000000000050 /* Sources */,
 				A10000000000000000000020 /* Frameworks */,
 				A10000000000000000000051 /* Resources */,
@@ -586,6 +587,25 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		K70000000000000000000005 /* Guard Desktop Platform */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Guard Desktop Platform";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"${EFFECTIVE_PLATFORM_NAME}\" != \"-maccatalyst\" ]; then\n    echo \"error: desktop/DukeX is the macOS Catalyst desktop shell only. Build ios/DukeX/DukeX.xcodeproj for iOS/iPadOS so the mobile app remains aligned with the experimental branch.\"\n    exit 1\nfi\n";
+		};
 		K70000000000000000000004 /* Embed Desktop Xemu */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
