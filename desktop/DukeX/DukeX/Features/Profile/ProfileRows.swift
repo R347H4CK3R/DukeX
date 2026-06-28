@@ -1496,7 +1496,7 @@ struct ProfileFriendDetailView: View {
                             .font(.title3.weight(.semibold))
                         Text(statusLine)
                             .font(.subheadline)
-                            .foregroundStyle(isOnline ? .green : .secondary)
+                            .foregroundStyle(isOnline ? Color.accentColor : .secondary)
                             .multilineTextAlignment(.center)
                     }
                 }
