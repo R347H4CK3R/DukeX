@@ -69,6 +69,7 @@
 		K70000000000000000000001 /* XemuDesktopLaunchPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = K70000000000000000000011 /* XemuDesktopLaunchPlan.swift */; };
 		K70000000000000000000002 /* XemuDesktopRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = K70000000000000000000012 /* XemuDesktopRuntime.swift */; };
 		K70000000000000000000003 /* XemuDesktopAliases.swift in Sources */ = {isa = PBXBuildFile; fileRef = K70000000000000000000013 /* XemuDesktopAliases.swift */; };
+		L80000000000000000000001 /* ActivityFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = L80000000000000000000011 /* ActivityFeedView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -141,6 +142,7 @@
 		K70000000000000000000011 /* XemuDesktopLaunchPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XemuDesktopLaunchPlan.swift; sourceTree = "<group>"; };
 		K70000000000000000000012 /* XemuDesktopRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XemuDesktopRuntime.swift; sourceTree = "<group>"; };
 		K70000000000000000000013 /* XemuDesktopAliases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XemuDesktopAliases.swift; sourceTree = "<group>"; };
+		L80000000000000000000011 /* ActivityFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFeedView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -205,12 +207,21 @@
 		D10000000000000000000110 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				L80000000000000000000100 /* Activity */,
 				D10000000000000000000111 /* Games */,
 				D10000000000000000000112 /* Profile */,
 				D10000000000000000000113 /* Settings */,
 				D10000000000000000000114 /* Launch */,
 			);
 			path = Features;
+			sourceTree = "<group>";
+		};
+		L80000000000000000000100 /* Activity */ = {
+			isa = PBXGroup;
+			children = (
+				L80000000000000000000011 /* ActivityFeedView.swift */,
+			);
+			path = Activity;
 			sourceTree = "<group>";
 		};
 		D10000000000000000000111 /* Games */ = {
@@ -652,6 +663,7 @@
 					J60000000000000000000001 /* XBLiveSocialService.swift in Sources */,
 					J60000000000000000000003 /* XBLiveEmulatorPresenceService.swift in Sources */,
 					J60000000000000000000002 /* ProfileSocialRows.swift in Sources */,
+					L80000000000000000000001 /* ActivityFeedView.swift in Sources */,
 					I50000000000000000000002 /* FATXHDDCloudSaveStore.swift in Sources */,
 					I50000000000000000000005 /* XboxEEPROMIdentity.swift in Sources */,
 					F20000000000000000000002 /* GameMetadataStore.swift in Sources */,
