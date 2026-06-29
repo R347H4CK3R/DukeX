@@ -280,6 +280,7 @@ struct ProfileActivityFeedView: View {
                 displayName: friend.gamertag,
                 currentGame: profile?.currentGame.activityTrimmedNonEmpty ?? friend.game.activityTrimmedNonEmpty,
                 avatarURL: profile?.avatarURL,
+                profileImage: customProfileImage(for: friend.key),
                 date: Self.onlineDate(profile: profile, fallback: snapshot?.loadedAt)
             )
         }
@@ -295,6 +296,9 @@ struct ProfileActivityFeedView: View {
                 displayName: profile?.gamertag.activityTrimmedNonEmpty ?? friend.title,
                 currentGame: profile?.currentGame.activityTrimmedNonEmpty ?? friend.currentGame.activityTrimmedNonEmpty,
                 avatarURL: profile?.avatarURL ?? friend.avatarURL,
+                profileImage: customProfileImage(for: friend.key) ??
+                    customProfileImage(for: friend.username) ??
+                    profile.flatMap { customProfileImage(for: $0.gamertag) },
                 date: Self.onlineDate(profile: profile, socialFriend: friend, fallback: snapshot?.loadedAt)
             )
         }
@@ -322,10 +326,60 @@ struct ProfileActivityFeedView: View {
                     return ProfileActivityFeedEntry.achievement(
                         username: profile.gamertag,
                         achievement: achievement,
-                        avatarURL: profile.avatarURL,
+                        iconDisplay: achievementIconDisplay(for: achievement),
+                        profileImage: customProfileImage(for: profile.gamertag),
                         date: unlockedAt
                     )
                 }
+        }
+    }
+
+    private func achievementIconDisplay(for achievement: XBLiveAchievement) -> ProfileActivityFeedIconDisplay {
+        let supportedGame = supportedGame(for: achievement)
+        let title = supportedGame?.title ?? achievement.gameTitle
+        let titleID = supportedGame?.titleID ?? achievement.gameTitleID
+        let primaryURL = XboxTitleIconCatalog.iconURL(for: titleID) ??
+            playedGame(for: achievement, supportedGame: supportedGame)?.imageURL ??
+            achievement.gameIconURL
+        return ProfileActivityFeedIconDisplayResolver.display(
+            title: title,
+            titleID: titleID,
+            achievement: achievement,
+            primaryURL: primaryURL
+        )
+    }
+
+    private func supportedGame(for achievement: XBLiveAchievement) -> InsigniaSupportedGame? {
+        guard let titleID = achievement.gameTitleID?.uppercased().activityTrimmedNonEmpty else {
+            return nil
+        }
+        return snapshot?.supportedGames.first {
+            $0.titleID.uppercased() == titleID
+        }
+    }
+
+    private func playedGame(
+        for achievement: XBLiveAchievement,
+        supportedGame: InsigniaSupportedGame?
+    ) -> XBLiveGamePlayed? {
+        let titleIDs = Set([
+            achievement.gameTitleID?.uppercased().activityTrimmedNonEmpty,
+            supportedGame?.titleID.uppercased().activityTrimmedNonEmpty
+        ].compactMap { $0 })
+        if let game = snapshot?.playtimeGames.first(where: { game in
+            guard let titleID = game.titleId?.uppercased().activityTrimmedNonEmpty else {
+                return false
+            }
+            return titleIDs.contains(titleID)
+        }) {
+            return game
+        }
+
+        guard let normalizedTitle = achievement.gameTitle.activityTrimmedNonEmpty.map(Self.normalizedTitle) else {
+            return nil
+        }
+        return snapshot?.playtimeGames.first {
+            Self.normalizedTitle($0.gameName) == normalizedTitle
         }
     }
 
@@ -470,6 +524,12 @@ struct ProfileActivityFeedView: View {
             return date
         }
         return fallback ?? Date()
+    }
+
+    private static func normalizedTitle(_ title: String) -> String {
+        title
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "", options: .regularExpression)
     }
 }
 
@@ -638,6 +698,10 @@ private struct ProfileActivityFeedThumbnail: View {
         Group {
             if let assetName = entry.assetName {
                 Image(assetName)
+                    .resizable()
+                    .scaledToFill()
+            } else if let profileImage = entry.profileImage {
+                Image(uiImage: profileImage)
                     .resizable()
                     .scaledToFill()
             } else if let url = entry.imageURL {
@@ -822,6 +886,7 @@ private struct ProfileActivityFeedEntry: Identifiable {
     let tint: Color
     let imageURL: URL?
     let assetName: String?
+    let profileImage: UIImage?
     let systemImage: String
     let article: XBLiveNewsArticle?
     let friendUsername: String?
@@ -837,6 +902,7 @@ private struct ProfileActivityFeedEntry: Identifiable {
             tint: .green,
             imageURL: article.absoluteHeroImageURL,
             assetName: nil,
+            profileImage: nil,
             systemImage: "newspaper",
             article: article,
             friendUsername: nil
@@ -848,6 +914,7 @@ private struct ProfileActivityFeedEntry: Identifiable {
         displayName: String,
         currentGame: String?,
         avatarURL: URL?,
+        profileImage: UIImage?,
         date: Date
     ) -> ProfileActivityFeedEntry {
         ProfileActivityFeedEntry(
@@ -860,6 +927,7 @@ private struct ProfileActivityFeedEntry: Identifiable {
             tint: .mint,
             imageURL: avatarURL,
             assetName: nil,
+            profileImage: profileImage,
             systemImage: "person.crop.circle.fill",
             article: nil,
             friendUsername: username
@@ -869,12 +937,12 @@ private struct ProfileActivityFeedEntry: Identifiable {
     static func achievement(
         username: String,
         achievement: XBLiveAchievement,
-        avatarURL: URL?,
+        iconDisplay: ProfileActivityFeedIconDisplay,
+        profileImage: UIImage?,
         date: Date
     ) -> ProfileActivityFeedEntry {
         let gameTitle = achievement.gameTitle?.activityTrimmedNonEmpty ?? "XB.Live"
         let scoreText = achievement.score.map { " - \($0)G" } ?? ""
-        let assetName = localAchievementAssetName(for: achievement)
         return ProfileActivityFeedEntry(
             id: "achievement-\(username.activityNormalizedKey)-\(achievement.id)",
             kind: .achievement,
@@ -883,36 +951,65 @@ private struct ProfileActivityFeedEntry: Identifiable {
             date: date,
             categoryTitle: "Achievement",
             tint: .yellow,
-            imageURL: assetName == nil ? (achievement.iconURL ?? achievement.gameIconURL ?? avatarURL) : nil,
-            assetName: assetName,
-            systemImage: "medal.fill",
+            imageURL: iconDisplay.assetName == nil ? iconDisplay.url : nil,
+            assetName: iconDisplay.assetName,
+            profileImage: iconDisplay.assetName == nil && iconDisplay.url == nil ? profileImage : nil,
+            systemImage: iconDisplay.systemImage,
             article: nil,
             friendUsername: nil
         )
     }
+}
 
-    private static func localAchievementAssetName(for achievement: XBLiveAchievement) -> String? {
+private struct ProfileActivityFeedIconDisplay {
+    let url: URL?
+    let assetName: String?
+    let systemImage: String
+}
+
+private enum ProfileActivityFeedIconDisplayResolver {
+    static func display(
+        title: String?,
+        titleID: String?,
+        achievement: XBLiveAchievement,
+        primaryURL: URL?
+    ) -> ProfileActivityFeedIconDisplay {
+        let normalizedTitleID = GameLaunchLink.normalizedTitleID(titleID)
         let normalizedValues = [
+            title,
             achievement.gameTitle,
             achievement.category,
             achievement.groupID
         ]
-            .compactMap { $0?.activityTrimmedNonEmpty?.activityNormalizedTitle }
+            .compactMap { value -> String? in
+                guard let value = value?.activityTrimmedNonEmpty else {
+                    return nil
+                }
+                return normalizedTitle(value)
+            }
 
         if normalizedValues.contains("testgame") {
-            return "TestGameAchievementIcon"
+            return ProfileActivityFeedIconDisplay(url: nil, assetName: "TestGameAchievementIcon", systemImage: "gamecontroller")
         }
         if normalizedValues.contains("dukexcore") {
-            return "DukeXCoreAchievementIcon"
+            return ProfileActivityFeedIconDisplay(url: nil, assetName: "DukeXCoreAchievementIcon", systemImage: "gamecontroller")
         }
         if normalizedValues.contains("xblcore") || normalizedValues.contains("xblivecore") {
-            return "XBLCoreAchievementIcon"
+            return ProfileActivityFeedIconDisplay(url: nil, assetName: "XBLCoreAchievementIcon", systemImage: "network")
         }
-        if GameLaunchLink.normalizedTitleID(achievement.gameTitleID) == "4D53007C" ||
-            normalizedValues.contains("xboxvideochat") {
-            return "XboxVideoChatIcon"
+        if normalizedTitleID == "4D53007C" || normalizedValues.contains("xboxvideochat") {
+            return ProfileActivityFeedIconDisplay(url: nil, assetName: "XboxVideoChatIcon", systemImage: "video.circle")
         }
-        return nil
+        if normalizedTitleID == "FFFE0000" || normalizedValues.contains("xboxlivedashboard") {
+            return ProfileActivityFeedIconDisplay(url: nil, assetName: "XboxLiveDashboardIcon", systemImage: "network")
+        }
+        return ProfileActivityFeedIconDisplay(url: primaryURL, assetName: nil, systemImage: "medal.fill")
+    }
+
+    private static func normalizedTitle(_ title: String) -> String {
+        title
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "", options: .regularExpression)
     }
 }
 

@@ -70,6 +70,17 @@ final class XBLiveActivityFeedStore: ObservableObject {
 
     private var articleDetails: [String: XBLiveNewsArticle] = [:]
     private var lastNewsRefreshAt: Date?
+    private let diskCache = XBLiveActivityFeedDiskCache()
+
+    init() {
+        if let cached = diskCache.load() {
+            articles = cached.articles.sorted {
+                ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast)
+            }
+            articleDetails = cached.articleDetails
+            lastNewsRefreshAt = cached.lastNewsRefreshAt
+        }
+    }
 
     func refreshNewsIfNeeded(maxAge: TimeInterval = 300) async {
         if let lastNewsRefreshAt,
@@ -96,6 +107,8 @@ final class XBLiveActivityFeedStore: ObservableObject {
                 ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast)
             }
             lastNewsRefreshAt = Date()
+            persistNewsCache()
+            preloadArticleImages(from: articles)
         } catch {
             newsError = error.localizedDescription
         }
@@ -109,9 +122,32 @@ final class XBLiveActivityFeedStore: ObservableObject {
         do {
             let detail = try await Self.fetchArticleDetail(slug: article.slug).article
             articleDetails[article.slug] = detail
+            persistNewsCache()
+            preloadArticleImages(from: [detail])
             return detail
         } catch {
             return article
+        }
+    }
+
+    private func persistNewsCache() {
+        diskCache.save(
+            XBLiveActivityFeedCachedPayload(
+                articles: articles,
+                articleDetails: articleDetails,
+                lastNewsRefreshAt: lastNewsRefreshAt
+            )
+        )
+    }
+
+    private func preloadArticleImages(from articles: [XBLiveNewsArticle]) {
+        let urls = articles.compactMap(\.absoluteHeroImageURL)
+        guard !urls.isEmpty else {
+            return
+        }
+
+        Task {
+            await XBLiveActivityImageCache.shared.preload(urls: urls)
         }
     }
 
@@ -140,6 +176,115 @@ final class XBLiveActivityFeedStore: ObservableObject {
 
         let decoder = JSONDecoder()
         return try decoder.decode(type, from: data)
+    }
+}
+
+private struct XBLiveActivityFeedCachedPayload: Codable {
+    let articles: [XBLiveNewsArticle]
+    let articleDetails: [String: XBLiveNewsArticle]
+    let lastNewsRefreshAt: Date?
+}
+
+private struct XBLiveActivityFeedDiskCache {
+    private let payloadURL: URL
+
+    init(fileManager: FileManager = .default) {
+        let baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first ??
+            URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let directoryURL = baseURL
+            .appendingPathComponent("DukeX", isDirectory: true)
+            .appendingPathComponent("ActivityFeed", isDirectory: true)
+        try? fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        payloadURL = directoryURL.appendingPathComponent("news-cache.json")
+    }
+
+    func load() -> XBLiveActivityFeedCachedPayload? {
+        guard let data = try? Data(contentsOf: payloadURL) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(XBLiveActivityFeedCachedPayload.self, from: data)
+    }
+
+    func save(_ payload: XBLiveActivityFeedCachedPayload) {
+        guard let data = try? JSONEncoder().encode(payload) else {
+            return
+        }
+        try? data.write(to: payloadURL, options: [.atomic])
+    }
+}
+
+@MainActor
+private final class XBLiveActivityImageCache {
+    static let shared = XBLiveActivityImageCache()
+
+    private var inMemoryImages: [URL: UIImage] = [:]
+    private let directoryURL: URL
+    private let fileManager: FileManager
+
+    private init(fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+        let baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first ??
+            URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        directoryURL = baseURL
+            .appendingPathComponent("DukeX", isDirectory: true)
+            .appendingPathComponent("ActivityFeed", isDirectory: true)
+            .appendingPathComponent("Images", isDirectory: true)
+        try? fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+    }
+
+    func image(for url: URL) async -> UIImage? {
+        if let image = inMemoryImages[url] {
+            return image
+        }
+
+        let fileURL = cacheFileURL(for: url)
+        if let data = try? Data(contentsOf: fileURL),
+           let image = UIImage(data: data) {
+            inMemoryImages[url] = image
+            return image
+        }
+
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 30
+            request.cachePolicy = .returnCacheDataElseLoad
+            request.setValue("DukeX macOS Activity Feed", forHTTPHeaderField: "User-Agent")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse,
+               !(200..<300).contains(httpResponse.statusCode) {
+                return nil
+            }
+            guard let image = UIImage(data: data) else {
+                return nil
+            }
+
+            inMemoryImages[url] = image
+            try? data.write(to: fileURL, options: [.atomic])
+            return image
+        } catch {
+            return nil
+        }
+    }
+
+    func preload(urls: [URL]) async {
+        for url in urls {
+            _ = await image(for: url)
+        }
+    }
+
+    private func cacheFileURL(for url: URL) -> URL {
+        let fileName = Self.cacheFileName(for: url)
+        return directoryURL.appendingPathComponent(fileName)
+    }
+
+    private static func cacheFileName(for url: URL) -> String {
+        let encoded = Data(url.absoluteString.utf8).base64EncodedString()
+        let safeName = encoded
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "=", with: "")
+        return "\(safeName).img"
     }
 }
 
@@ -175,7 +320,7 @@ struct ActivityFeedView: View {
         }
         .animation(.spring(response: 0.26, dampingFraction: 0.88), value: isExpanded)
         .task {
-            await feedStore.refreshNewsIfNeeded(maxAge: 60)
+            await feedStore.refreshNewsIfNeeded(maxAge: 900)
         }
         .onReceive(refreshTimer) { _ in
             Task {
@@ -377,6 +522,7 @@ struct ActivityFeedView: View {
                 displayName: friend.gamertag,
                 currentGame: profile?.currentGame.activityTrimmedNonEmpty ?? friend.game.activityTrimmedNonEmpty,
                 avatarURL: profile?.avatarURL,
+                profileImage: customProfileImage(for: friend.key),
                 date: Self.onlineDate(profile: profile, fallback: snapshot?.loadedAt)
             )
             entriesByKey[friend.key] = entry
@@ -393,6 +539,9 @@ struct ActivityFeedView: View {
                 displayName: profile?.gamertag.activityTrimmedNonEmpty ?? friend.title,
                 currentGame: profile?.currentGame.activityTrimmedNonEmpty ?? friend.currentGame.activityTrimmedNonEmpty,
                 avatarURL: profile?.avatarURL ?? friend.avatarURL,
+                profileImage: customProfileImage(for: friend.key) ??
+                    customProfileImage(for: friend.username) ??
+                    profile.flatMap { customProfileImage(for: $0.gamertag) },
                 date: Self.onlineDate(profile: profile, socialFriend: friend, fallback: snapshot?.loadedAt)
             )
             entriesByKey[friend.key] = entry
@@ -421,11 +570,65 @@ struct ActivityFeedView: View {
                     return ActivityFeedEntry.achievement(
                         username: profile.gamertag,
                         achievement: achievement,
-                        avatarURL: profile.avatarURL,
+                        iconDisplay: achievementIconDisplay(for: achievement),
+                        profileImage: customProfileImage(for: profile.gamertag),
                         date: unlockedAt
                     )
                 }
         }
+    }
+
+    private func achievementIconDisplay(for achievement: XBLiveAchievement) -> ActivityFeedIconDisplay {
+        let supportedGame = supportedGame(for: achievement)
+        let title = supportedGame?.title ?? achievement.gameTitle
+        let titleID = supportedGame?.titleID ?? achievement.gameTitleID
+        let primaryURL = XboxTitleIconCatalog.iconURL(for: titleID) ??
+            playedGame(for: achievement, supportedGame: supportedGame)?.imageURL ??
+            achievement.gameIconURL
+        return ActivityFeedIconDisplayResolver.display(
+            title: title,
+            titleID: titleID,
+            achievement: achievement,
+            primaryURL: primaryURL
+        )
+    }
+
+    private func supportedGame(for achievement: XBLiveAchievement) -> InsigniaSupportedGame? {
+        guard let titleID = achievement.gameTitleID?.uppercased().activityTrimmedNonEmpty else {
+            return nil
+        }
+        return profileStore.authenticatedSnapshot?.supportedGames.first {
+            $0.titleID.uppercased() == titleID
+        }
+    }
+
+    private func playedGame(
+        for achievement: XBLiveAchievement,
+        supportedGame: InsigniaSupportedGame?
+    ) -> XBLiveGamePlayed? {
+        let titleIDs = Set([
+            achievement.gameTitleID?.uppercased().activityTrimmedNonEmpty,
+            supportedGame?.titleID.uppercased().activityTrimmedNonEmpty
+        ].compactMap { $0 })
+        if let game = profileStore.authenticatedSnapshot?.playtimeGames.first(where: { game in
+            guard let titleID = game.titleId?.uppercased().activityTrimmedNonEmpty else {
+                return false
+            }
+            return titleIDs.contains(titleID)
+        }) {
+            return game
+        }
+
+        guard let normalizedTitle = achievement.gameTitle.activityTrimmedNonEmpty.map(Self.normalizedTitle) else {
+            return nil
+        }
+        return profileStore.authenticatedSnapshot?.playtimeGames.first {
+            Self.normalizedTitle($0.gameName) == normalizedTitle
+        }
+    }
+
+    private func customProfileImage(for key: String) -> UIImage? {
+        profileStore.friendProfileImages[key.activityNormalizedKey]
     }
 
     private func handleSelection(_ entry: ActivityFeedEntry) {
@@ -467,6 +670,12 @@ struct ActivityFeedView: View {
             return XBLiveActivityTimestamp.date(from: timestamp)
         }
         return fallback ?? Date()
+    }
+
+    private static func normalizedTitle(_ title: String) -> String {
+        title
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "", options: .regularExpression)
     }
 }
 
@@ -579,18 +788,10 @@ private struct ActivityArticleReaderView: View {
     @ViewBuilder
     private var heroImage: some View {
         if let url = resolvedArticle.absoluteHeroImageURL {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFit()
-                default:
-                    ActivityArticleImagePlaceholder()
-                }
+            ActivityFeedCachedImage(url: url, contentMode: .fit, placeholderAspectRatio: 16.0 / 9.0) {
+                ActivityArticleImagePlaceholder()
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 360)
             .background(Color.black.opacity(0.22))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {
@@ -873,16 +1074,13 @@ private struct ActivityFeedThumbnail: View {
                 Image(imageAssetName)
                     .resizable()
                     .scaledToFill()
+            } else if let profileImage = entry.profileImage {
+                Image(uiImage: profileImage)
+                    .resizable()
+                    .scaledToFill()
             } else if let imageURL = entry.imageURL {
-                AsyncImage(url: imageURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    default:
-                        placeholder
-                    }
+                ActivityFeedCachedImage(url: imageURL, contentMode: .fill, placeholderAspectRatio: nil) {
+                    placeholder
                 }
             } else {
                 placeholder
@@ -902,6 +1100,45 @@ private struct ActivityFeedThumbnail: View {
             Image(systemName: entry.systemImage)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(entry.tint)
+        }
+    }
+}
+
+private struct ActivityFeedCachedImage<Placeholder: View>: View {
+    let url: URL
+    let contentMode: ContentMode
+    let placeholderAspectRatio: CGFloat?
+    @ViewBuilder let placeholder: Placeholder
+
+    @State private var image: UIImage?
+    @State private var loadTaskURL: URL?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(image.activityAspectRatio, contentMode: contentMode)
+            } else {
+                placeholderView
+            }
+        }
+        .task(id: url) {
+            guard loadTaskURL != url || image == nil else {
+                return
+            }
+            loadTaskURL = url
+            image = await XBLiveActivityImageCache.shared.image(for: url)
+        }
+    }
+
+    @ViewBuilder
+    private var placeholderView: some View {
+        if let placeholderAspectRatio {
+            placeholder
+                .aspectRatio(placeholderAspectRatio, contentMode: .fit)
+        } else {
+            placeholder
         }
     }
 }
@@ -971,6 +1208,7 @@ private struct ActivityFeedEntry: Identifiable {
     let date: Date
     let imageURL: URL?
     let imageAssetName: String?
+    let profileImage: UIImage?
     let systemImage: String
     let tint: Color
     let article: XBLiveNewsArticle?
@@ -990,6 +1228,7 @@ private struct ActivityFeedEntry: Identifiable {
             date: article.publishedDate ?? .distantPast,
             imageURL: article.absoluteHeroImageURL,
             imageAssetName: nil,
+            profileImage: nil,
             systemImage: "newspaper",
             tint: Color.accentColor,
             article: article,
@@ -1002,6 +1241,7 @@ private struct ActivityFeedEntry: Identifiable {
         displayName: String,
         currentGame: String?,
         avatarURL: URL?,
+        profileImage: UIImage?,
         date: Date
     ) -> ActivityFeedEntry {
         ActivityFeedEntry(
@@ -1013,6 +1253,7 @@ private struct ActivityFeedEntry: Identifiable {
             date: date,
             imageURL: avatarURL,
             imageAssetName: nil,
+            profileImage: profileImage,
             systemImage: "person.crop.circle.badge.checkmark",
             tint: .green,
             article: nil,
@@ -1023,7 +1264,8 @@ private struct ActivityFeedEntry: Identifiable {
     static func achievement(
         username: String,
         achievement: XBLiveAchievement,
-        avatarURL: URL?,
+        iconDisplay: ActivityFeedIconDisplay,
+        profileImage: UIImage?,
         date: Date
     ) -> ActivityFeedEntry {
         let score = achievement.score.map { "\($0)G" }
@@ -1034,7 +1276,6 @@ private struct ActivityFeedEntry: Identifiable {
             .compactMap { $0 }
             .joined(separator: " - ")
             .activityTrimmedNonEmpty
-        let localAssetName = Self.localAchievementAssetName(for: achievement)
 
         return ActivityFeedEntry(
             id: "achievement-\(username.activityNormalizedKey)-\(achievement.id)-\(Int(date.timeIntervalSince1970))",
@@ -1043,17 +1284,33 @@ private struct ActivityFeedEntry: Identifiable {
             subtitle: subtitle,
             categoryTitle: "Achievement",
             date: date,
-            imageURL: localAssetName == nil ? (achievement.iconURL ?? achievement.gameIconURL ?? avatarURL) : nil,
-            imageAssetName: localAssetName,
-            systemImage: "medal",
+            imageURL: iconDisplay.assetName == nil ? iconDisplay.url : nil,
+            imageAssetName: iconDisplay.assetName,
+            profileImage: iconDisplay.assetName == nil && iconDisplay.url == nil ? profileImage : nil,
+            systemImage: iconDisplay.systemImage,
             tint: .yellow,
             article: nil,
             friendUsername: username
         )
     }
+}
 
-    private static func localAchievementAssetName(for achievement: XBLiveAchievement) -> String? {
+private struct ActivityFeedIconDisplay {
+    let url: URL?
+    let assetName: String?
+    let systemImage: String
+}
+
+private enum ActivityFeedIconDisplayResolver {
+    static func display(
+        title: String?,
+        titleID: String?,
+        achievement: XBLiveAchievement,
+        primaryURL: URL?
+    ) -> ActivityFeedIconDisplay {
+        let normalizedTitleID = GameLaunchLink.normalizedTitleID(titleID)
         let normalizedValues = [
+            title,
             achievement.groupID,
             achievement.gameTitle,
             achievement.category
@@ -1066,15 +1323,21 @@ private struct ActivityFeedEntry: Identifiable {
             }
 
         if normalizedValues.contains("testgame") {
-            return "TestGameAchievementIcon"
+            return ActivityFeedIconDisplay(url: nil, assetName: "TestGameAchievementIcon", systemImage: "gamecontroller")
         }
         if normalizedValues.contains("dukexcore") {
-            return "DukeXCoreAchievementIcon"
+            return ActivityFeedIconDisplay(url: nil, assetName: "DukeXCoreAchievementIcon", systemImage: "gamecontroller")
         }
         if normalizedValues.contains("xblcore") || normalizedValues.contains("xblivecore") {
-            return "XBLCoreAchievementIcon"
+            return ActivityFeedIconDisplay(url: nil, assetName: "XBLCoreAchievementIcon", systemImage: "network")
         }
-        return nil
+        if normalizedTitleID == "4D53007C" || normalizedValues.contains("xboxvideochat") {
+            return ActivityFeedIconDisplay(url: nil, assetName: "XboxVideoChatIcon", systemImage: "video.circle")
+        }
+        if normalizedTitleID == "FFFE0000" || normalizedValues.contains("xboxlivedashboard") {
+            return ActivityFeedIconDisplay(url: nil, assetName: "XboxLiveDashboardIcon", systemImage: "network")
+        }
+        return ActivityFeedIconDisplay(url: primaryURL, assetName: nil, systemImage: "medal")
     }
 
     private static func normalizedTitle(_ title: String) -> String {
@@ -1235,5 +1498,14 @@ private extension String {
 
     var activityNormalizedKey: String {
         trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+}
+
+private extension UIImage {
+    var activityAspectRatio: CGFloat {
+        guard size.width > 0, size.height > 0 else {
+            return 16.0 / 9.0
+        }
+        return size.width / size.height
     }
 }
