@@ -27,6 +27,7 @@ struct ProfileView: View {
     @State private var maftyDownloadCountState = DukeXDownloadCountState.hidden
     @State private var maftyDownloadCountTask: Task<Void, Never>?
     @State private var profileHeaderDestination: ProfileHeaderDestination?
+    @State private var selectedEvent: XBLiveEvent?
 
     let signIn: () -> Void
     let signOut: () -> Void
@@ -53,6 +54,19 @@ struct ProfileView: View {
             if let destination = profileHeaderDestination {
                 profileHeaderDestinationView(destination, snapshot: profileStore.authenticatedSnapshot)
             }
+        }
+        .sheet(item: $selectedEvent) { event in
+            NavigationStack {
+                ProfileEventDetailView(event: event)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") {
+                                selectedEvent = nil
+                            }
+                        }
+                    }
+            }
+            .frame(minWidth: 780, idealWidth: 860, minHeight: 720, idealHeight: 780)
         }
         .task(id: profileStore.session?.gamertag) {
             guard profileStore.session?.isAuthenticated == true else {
@@ -222,11 +236,12 @@ struct ProfileView: View {
                 ProfileEmptyRow(title: eventMode.emptyTitle, systemImage: "calendar")
             } else {
                 ForEach(events) { event in
-                    NavigationLink {
-                        ProfileEventDetailView(event: event)
+                    Button {
+                        selectedEvent = event
                     } label: {
                         ProfileEventRow(event: event)
                     }
+                    .buttonStyle(.plain)
                 }
             }
 
