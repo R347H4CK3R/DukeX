@@ -1350,11 +1350,7 @@ struct ProfilePlaytimeView: View {
     }
 
     private static func playTimeText(_ minutes: Double) -> String {
-        let hours = minutes / 60.0
-        if hours >= 10 {
-            return "\(Int(hours.rounded())) hr"
-        }
-        return String(format: "%.1f hr", hours)
+        ProfilePlaytimeFormatter.text(from: minutes)
     }
 
     private static func normalizedTimestamp(_ timestamp: Double?) -> Double? {
@@ -1362,6 +1358,16 @@ struct ProfilePlaytimeView: View {
             return nil
         }
         return timestamp > 9_999_999_999 ? timestamp / 1_000.0 : timestamp
+    }
+}
+
+enum ProfilePlaytimeFormatter {
+    static func text(from minutes: Double) -> String {
+        let hours = minutes / 60.0
+        if hours >= 10 {
+            return "\(Int(hours.rounded())) hr"
+        }
+        return String(format: "%.1f hr", hours)
     }
 }
 
@@ -1419,11 +1425,7 @@ struct ProfilePlaytimeGameRow: View {
     }
 
     private static func playTimeText(_ minutes: Double) -> String {
-        let hours = minutes / 60.0
-        if hours >= 10 {
-            return "\(Int(hours.rounded())) hr"
-        }
-        return String(format: "%.1f hr", hours)
+        ProfilePlaytimeFormatter.text(from: minutes)
     }
 
     private static func lastPlayedDate(from timestamp: Double?) -> Date? {
@@ -1724,11 +1726,7 @@ struct ProfileFriendDetailView: View {
     }
 
     private func playTimeText(_ minutes: Double) -> String {
-        let hours = minutes / 60.0
-        if hours >= 10 {
-            return "\(Int(hours.rounded())) hr"
-        }
-        return String(format: "%.1f hr", hours)
+        ProfilePlaytimeFormatter.text(from: minutes)
     }
 
     private var effectiveProfile: XBLiveFriendProfile? {
@@ -2273,7 +2271,7 @@ private struct ProfileAchievementProgress: Equatable {
     let label: String?
 
     var displayPercent: Int {
-        min(max(Int((fractionComplete * 100).rounded()), 1), 99)
+        min(max(Int((fractionComplete * 100).rounded(.down)), 1), 99)
     }
 }
 
@@ -2293,9 +2291,11 @@ private enum ProfileAchievementProgressResolver {
     ) -> ProfileAchievementProgress? {
         guard !achievement.isUnlockedForDisplay,
               let progress = resolvedProgress(for: achievement, gamesPlayed: gamesPlayed),
-              progress.fractionComplete > 0,
-              progress.fractionComplete < 1 else {
+              progress.fractionComplete > 0 else {
             return nil
+        }
+        guard progress.fractionComplete < 1 else {
+            return ProfileAchievementProgress(fractionComplete: 0.999, label: progress.label)
         }
         return progress
     }

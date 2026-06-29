@@ -501,7 +501,9 @@ struct XBLiveGamePlayed: Codable, Identifiable, Equatable {
             "lastSeenAt",
             "last_seen_at"
         ])
-        totalMinutes = minutes ?? seconds.map { $0 / 60.0 } ?? hours.map { $0 * 60.0 }
+        totalMinutes = minutes.map { max(0, $0.rounded(.down)) }
+            ?? seconds.map { max(0, ($0 / 60.0).rounded(.down)) }
+            ?? hours.map { max(0, ($0 * 60.0).rounded(.down)) }
     }
 
     enum CodingKeys: String, CodingKey {
@@ -2107,7 +2109,9 @@ enum XBLiveService {
                     "play_time_hours"
                 ])
 
-                totalMinutes = minutes ?? seconds.map { $0 / 60.0 } ?? hours.map { $0 * 60.0 }
+                totalMinutes = minutes.map { max(0, $0.rounded(.down)) }
+                    ?? seconds.map { max(0, ($0 / 60.0).rounded(.down)) }
+                    ?? hours.map { max(0, ($0 * 60.0).rounded(.down)) }
                 lastState = container.flexibleString(for: [
                     "lastState",
                     "last_state",

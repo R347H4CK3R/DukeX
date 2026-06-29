@@ -1953,11 +1953,7 @@ private struct ProfileSocialGameInviteStats {
     }
 
     fileprivate static func playtimeText(_ minutes: Double) -> String {
-        let hours = minutes / 60.0
-        if hours >= 10 {
-            return "\(Int(hours.rounded())) hr"
-        }
-        return String(format: "%.1f hr", hours)
+        ProfilePlaytimeFormatter.text(from: minutes)
     }
 }
 
@@ -3079,11 +3075,7 @@ struct ProfileXBLiveFriendDetailView: View {
     }
 
     private func playTimeText(_ minutes: Double) -> String {
-        let hours = minutes / 60.0
-        if hours >= 10 {
-            return "\(Int(hours.rounded())) hr"
-        }
-        return String(format: "%.1f hr", hours)
+        ProfilePlaytimeFormatter.text(from: minutes)
     }
 
     private var effectiveProfile: XBLiveFriendProfile? {
