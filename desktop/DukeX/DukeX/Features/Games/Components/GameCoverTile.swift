@@ -16,7 +16,7 @@ enum GameCoverTilePresentation {
         13.2
     }
 
-    var titleMinHeight: CGFloat {
+    var titleHeight: CGFloat {
         34
     }
 
@@ -67,7 +67,11 @@ struct GameCoverTile: View {
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .lineSpacing(0)
-                    .frame(maxWidth: .infinity, minHeight: presentation.titleMinHeight, alignment: .top)
+                    .frame(maxWidth: .infinity,
+                           minHeight: presentation.titleHeight,
+                           maxHeight: presentation.titleHeight,
+                           alignment: .top)
+                    .clipped()
             }
             .buttonStyle(.plain)
             .disabled(!canLaunch)
@@ -123,24 +127,27 @@ struct GameCoverTile: View {
 
     @ViewBuilder
     private var coverWithLiveStatus: some View {
-        ZStack(alignment: .topTrailing) {
-            cover
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
+        Color.clear
+            .aspectRatio(Self.coverAspectRatio, contentMode: .fit)
+            .overlay {
+                ZStack(alignment: .topTrailing) {
+                    cover
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
 
-            if let liveStatus {
-                LiveStatusBadge(status: liveStatus)
-                    .padding(presentation.liveStatusPadding)
-                    .allowsHitTesting(false)
+                    if let liveStatus {
+                        LiveStatusBadge(status: liveStatus)
+                            .padding(presentation.liveStatusPadding)
+                            .allowsHitTesting(false)
+                    }
+                }
             }
-        }
-        .frame(maxWidth: .infinity)
-        .aspectRatio(Self.coverAspectRatio, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: presentation.coverCornerRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: presentation.coverCornerRadius, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-        }
+            .frame(maxWidth: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: presentation.coverCornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: presentation.coverCornerRadius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            }
     }
 
     @ViewBuilder

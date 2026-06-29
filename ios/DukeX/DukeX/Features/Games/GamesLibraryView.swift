@@ -20,6 +20,7 @@ struct GamesLibraryView: View {
 
     private let statusRefreshTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
     private let controllerInputPollTimer = Timer.publish(every: 0.08, on: .main, in: .common).autoconnect()
+    private let libraryHorizontalPadding: CGFloat = 20
     private let controllerLandscapePageSize = 5
     private let controllerLandscapeTileSpacing: CGFloat = 18
     private let controllerLandscapeTileScale: CGFloat = 1.06
@@ -201,7 +202,11 @@ struct GamesLibraryView: View {
                     }
                 } else {
                     let activeColumnCount = gameLibraryColumnCount(for: size)
-                    LazyVGrid(columns: GameLibraryGridMetrics.columns(for: activeColumnCount),
+                    let availableGridWidth = size.width - (libraryHorizontalPadding * 2)
+                    let tileWidth = GameLibraryGridMetrics.tileWidth(for: activeColumnCount,
+                                                                     availableWidth: availableGridWidth)
+                    LazyVGrid(columns: GameLibraryGridMetrics.columns(for: activeColumnCount,
+                                                                      availableWidth: availableGridWidth),
                               alignment: .center,
                               spacing: GameLibraryGridMetrics.spacing(for: activeColumnCount) + 6) {
                         ForEach(displayedGames) { game in
@@ -221,11 +226,12 @@ struct GamesLibraryView: View {
                                 toggleFavorite: { toggleFavorite(game) },
                                 requestRemoveGame: { requestRemoveGame(game) }
                             )
+                            .frame(width: tileWidth)
                         }
                     }
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, libraryHorizontalPadding)
             .padding(.top, 18)
             .padding(.bottom, 28)
         }

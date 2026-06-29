@@ -20,4 +20,20 @@ enum GameLibraryGridMetrics {
             count: columnCount
         )
     }
+
+    static func tileWidth(for columnCount: Int, availableWidth: CGFloat) -> CGFloat {
+        let safeColumnCount = max(columnCount, 1)
+        let totalSpacing = CGFloat(max(safeColumnCount - 1, 0)) * spacing(for: safeColumnCount)
+        let rawWidth = (availableWidth - totalSpacing) / CGFloat(safeColumnCount)
+        return max(1, floor(rawWidth))
+    }
+
+    static func columns(for columnCount: Int, availableWidth: CGFloat) -> [GridItem] {
+        let safeColumnCount = max(columnCount, 1)
+        let width = tileWidth(for: safeColumnCount, availableWidth: availableWidth)
+        return Array(
+            repeating: GridItem(.fixed(width), spacing: spacing(for: safeColumnCount), alignment: .top),
+            count: safeColumnCount
+        )
+    }
 }
