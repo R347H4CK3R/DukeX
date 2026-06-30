@@ -6,16 +6,15 @@
   <p>
     <img src="https://img.shields.io/badge/status-update%20v1.0.2-8f95c4?style=flat-square" alt="Status: update v1.0.2">
     <img src="https://img.shields.io/badge/platform-iOS%2016%2B%20arm64%20%7C%20macOS-111827?style=flat-square" alt="Platform: iOS 16+ arm64 and macOS">
-    <img src="https://img.shields.io/badge/renderer-MoltenVK%20%2B%20Metal-1f6feb?style=flat-square" alt="Renderer: MoltenVK and Metal">
+    <img src="https://img.shields.io/badge/iOS%20renderer-MoltenVK%20%2B%20Metal-1f6feb?style=flat-square" alt="iOS renderer: MoltenVK and Metal">
     <img src="https://img.shields.io/badge/JIT-version%20aware-2f855a?style=flat-square" alt="JIT: version aware">
   </p>
 </div>
 
 DukeX is an experimental iOS and macOS frontend for [xemu](https://xemu.app).
-The iOS build embeds the xemu core in a native Swift shell, while the macOS
-build packages a nested Xemu fork inside a Mac Catalyst desktop experience.
-Both builds pair DukeX's modern interface with the Vulkan renderer through
-MoltenVK and native Metal presentation.
+The iOS build embeds the xemu core in a native Swift shell and presents the
+Vulkan renderer through MoltenVK and native Metal presentation. The macOS build
+packages a nested desktop Xemu fork inside a Mac Catalyst DukeX experience.
 
 > DukeX does not include Xbox system files, game images, or signing
 > certificates. Users and testers are required to provide their own legally
@@ -29,8 +28,9 @@ MoltenVK and native Metal presentation.
   macOS DMG is also available through GitHub Releases.
 - Runtime: TCG with version-aware JIT setup; iOS 26 or later uses the
   StikDebug Universal.js flow.
-- Graphics: xemu Vulkan renderer through MoltenVK with a native Metal
-  presenter and AirPlay display support.
+- Graphics: iOS uses the xemu Vulkan renderer through MoltenVK with a native
+  Metal presenter and AirPlay display support; macOS uses the bundled desktop
+  Xemu presentation path inside the DukeX shell.
 - Interface: native SwiftUI library, profile, settings, Activity Feed, and
   controller-focused landscape experiences.
 - Networking: Insignia-oriented NAT defaults plus XB.Live profile, Rich
@@ -45,7 +45,7 @@ MoltenVK and native Metal presentation.
 | Game library | Cover artwork, automatic cover art retrieval for supported titles, game launch, dashboard launch, favorites/title/live/recent sorting, portrait and landscape column options, controller landscape mode on iOS, long-press actions, native launch links, and Insignia live indicators for supported titles. |
 | File management | User-accessible `BIOS`, `ROMs`, `Covers`, `GameConfigs`, and `ShaderCaches` folders through iOS file sharing. |
 | JIT workflow | Optional automatic StikDebug handoff for the iOS 26+ Universal.js JIT flow. |
-| Display | MoltenVK-backed Metal presenter with portrait and landscape-aware sizing, rendering stability work, expanded AirPlay support, and external-display handling. |
+| Display | iOS MoltenVK-backed Metal presenter with portrait and landscape-aware sizing, rendering stability work, expanded AirPlay support, and external-display handling; macOS presentation through the bundled desktop Xemu runtime. |
 | Input | Controller support through iOS GameController APIs plus customizable touch controls through `.manicskin`, `.deltaskin`, and `.gammaskin` layouts. |
 | Online setup | Insignia-focused NAT defaults, editable network settings, XB.Live profile integration, Rich Presence, playtime tracking, friends, messages, community event tracking, and supported cloud sync. |
 | Profile | App-side profile tab with XB.Live identity, Activity Feed, achievement, friends, message, event, game-invite, and cloud-sync support. |
@@ -89,7 +89,7 @@ experimental software.
 
 - macOS with Xcode 26 or newer and the iPhoneOS SDK.
 - Xcode Mac Catalyst support for the desktop shell.
-- MoltenVK iOS framework and headers, supplied locally and not committed.
+- MoltenVK iOS framework and headers for the iOS build, supplied locally and not committed.
 - vcpkg `arm64-ios` dependency prefix used by the embedded xemu core.
 - Meson, Ninja, Python, and the standard xemu/QEMU build toolchain.
 - Apple signing assets only when creating signed device builds or sideload
