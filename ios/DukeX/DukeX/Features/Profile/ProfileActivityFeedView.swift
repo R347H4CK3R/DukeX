@@ -69,10 +69,18 @@ final class XBLiveActivityFeedStore: ObservableObject {
     private var lastNewsRefreshAt: Date?
     private let defaults: UserDefaults
     private let readDefaultsKey = "DukeXActivityFeedReadArticleSlugs"
+    private let diskCache = XBLiveActivityFeedDiskCache()
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         readArticleSlugs = Set(defaults.stringArray(forKey: readDefaultsKey) ?? [])
+        if let cached = diskCache.load() {
+            articles = cached.articles.sorted {
+                ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast)
+            }
+            articleDetails = cached.articleDetails
+            lastNewsRefreshAt = cached.lastNewsRefreshAt
+        }
     }
 
     var unreadArticleCount: Int {
@@ -104,6 +112,8 @@ final class XBLiveActivityFeedStore: ObservableObject {
                 ($0.publishedDate ?? .distantPast) > ($1.publishedDate ?? .distantPast)
             }
             lastNewsRefreshAt = Date()
+            persistNewsCache()
+            preloadArticleImages(from: articles)
         } catch {
             newsError = error.localizedDescription
         }
@@ -117,6 +127,8 @@ final class XBLiveActivityFeedStore: ObservableObject {
         do {
             let detail = try await Self.fetchArticleDetail(slug: article.slug).article
             articleDetails[article.slug] = detail
+            persistNewsCache()
+            preloadArticleImages(from: [detail])
             return detail
         } catch {
             return article
@@ -131,6 +143,27 @@ final class XBLiveActivityFeedStore: ObservableObject {
 
         readArticleSlugs.formUnion(articleSlugs)
         defaults.set(readArticleSlugs.sorted(), forKey: readDefaultsKey)
+    }
+
+    private func persistNewsCache() {
+        diskCache.save(
+            XBLiveActivityFeedCachedPayload(
+                articles: articles,
+                articleDetails: articleDetails,
+                lastNewsRefreshAt: lastNewsRefreshAt
+            )
+        )
+    }
+
+    private func preloadArticleImages(from articles: [XBLiveNewsArticle]) {
+        let urls = articles.compactMap(\.absoluteHeroImageURL)
+        guard !urls.isEmpty else {
+            return
+        }
+
+        Task {
+            await ProfileActivityFeedImageLoader.preload(urls: urls)
+        }
     }
 
     private static func fetchNewsResponse() async throws -> XBLiveNewsArticlesResponse {
@@ -157,6 +190,40 @@ final class XBLiveActivityFeedStore: ObservableObject {
         }
 
         return try JSONDecoder().decode(type, from: data)
+    }
+}
+
+private struct XBLiveActivityFeedCachedPayload: Codable {
+    let articles: [XBLiveNewsArticle]
+    let articleDetails: [String: XBLiveNewsArticle]
+    let lastNewsRefreshAt: Date?
+}
+
+private struct XBLiveActivityFeedDiskCache {
+    private let payloadURL: URL
+
+    init(fileManager: FileManager = .default) {
+        let baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first ??
+            URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let directoryURL = baseURL
+            .appendingPathComponent("DukeX", isDirectory: true)
+            .appendingPathComponent("ActivityFeed", isDirectory: true)
+        try? fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        payloadURL = directoryURL.appendingPathComponent("news-cache.json")
+    }
+
+    func load() -> XBLiveActivityFeedCachedPayload? {
+        guard let data = try? Data(contentsOf: payloadURL) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(XBLiveActivityFeedCachedPayload.self, from: data)
+    }
+
+    func save(_ payload: XBLiveActivityFeedCachedPayload) {
+        guard let data = try? JSONEncoder().encode(payload) else {
+            return
+        }
+        try? data.write(to: payloadURL, options: [.atomic])
     }
 }
 
@@ -581,9 +648,8 @@ private struct ProfileActivityArticleDetailView: View {
 
                 if let bodyText = ActivityFeedHTML.plainText(from: resolvedArticle.bodyHtml),
                    !bodyText.isEmpty {
-                    Text(bodyText)
-                        .font(.body)
-                        .lineSpacing(4)
+                    ProfileActivityArticleBodyText(bodyText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if detail == nil {
                     HStack(spacing: 10) {
@@ -606,6 +672,7 @@ private struct ProfileActivityArticleDetailView: View {
                 }
             }
             .padding(.vertical, 14)
+            .padding(.horizontal, 24)
         }
         .navigationTitle("XB.Live News")
         .navigationBarTitleDisplayMode(.inline)
@@ -622,24 +689,16 @@ private struct ProfileActivityArticleDetailView: View {
     @ViewBuilder
     private var heroImage: some View {
         if let url = resolvedArticle.absoluteHeroImageURL {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFit()
-                default:
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.accentColor.opacity(0.10))
-                        Image(systemName: "newspaper")
-                            .font(.title.weight(.semibold))
-                            .foregroundStyle(Color.accentColor)
-                    }
+            ProfileActivityFeedCachedImage(url: url, contentMode: .fit, placeholderAspectRatio: 16.0 / 9.0) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.10))
+                    Image(systemName: "newspaper")
+                        .font(.title.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(minHeight: 180)
             .background(Color.black.opacity(0.22))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {
@@ -647,6 +706,54 @@ private struct ProfileActivityArticleDetailView: View {
                     .stroke(Color.primary.opacity(0.10), lineWidth: 1)
             }
         }
+    }
+}
+
+private struct ProfileActivityArticleBodyText: UIViewRepresentable {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    func makeUIView(context: Context) -> UILabel {
+        let label = UILabel()
+        label.numberOfLines = 0
+        label.backgroundColor = .clear
+        label.adjustsFontForContentSizeCategory = true
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
+    }
+
+    func updateUIView(_ uiView: UILabel, context: Context) {
+        uiView.attributedText = Self.attributedString(from: text)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UILabel, context: Context) -> CGSize? {
+        guard let width = proposal.width, width > 0 else {
+            return nil
+        }
+
+        let size = uiView.sizeThatFits(
+            CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        )
+        return CGSize(width: width, height: ceil(size.height))
+    }
+
+    private static func attributedString(from text: String) -> NSAttributedString {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .justified
+        paragraphStyle.lineSpacing = 4
+        paragraphStyle.paragraphSpacing = 10
+
+        return NSAttributedString(
+            string: text,
+            attributes: [
+                .font: UIFont.preferredFont(forTextStyle: .body),
+                .foregroundColor: UIColor.label,
+                .paragraphStyle: paragraphStyle
+            ]
+        )
     }
 }
 
@@ -734,6 +841,40 @@ private struct ProfileActivityFeedThumbnail: View {
     }
 }
 
+private struct ProfileActivityFeedCachedImage<Placeholder: View>: View {
+    let url: URL
+    let contentMode: ContentMode
+    let placeholderAspectRatio: CGFloat?
+    @ViewBuilder let placeholder: Placeholder
+
+    @StateObject private var loader = ProfileActivityFeedImageLoader()
+
+    var body: some View {
+        Group {
+            if let image = loader.image {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(image.activityAspectRatio, contentMode: contentMode)
+            } else {
+                placeholderView
+            }
+        }
+        .task(id: url) {
+            await loader.load(url)
+        }
+    }
+
+    @ViewBuilder
+    private var placeholderView: some View {
+        if let placeholderAspectRatio {
+            placeholder
+                .aspectRatio(placeholderAspectRatio, contentMode: .fit)
+        } else {
+            placeholder
+        }
+    }
+}
+
 private struct ProfileActivityFeedCachedRemoteImage: View {
     let url: URL
 
@@ -768,32 +909,42 @@ private final class ProfileActivityFeedImageLoader: ObservableObject {
         }
 
         loadedURL = url
-
-        if let cachedImage = Self.cachedImage(for: url) {
-            image = cachedImage
-            return
-        }
-
         image = nil
+        let fetchedImage = await Self.image(for: url)
+        if loadedURL == url {
+            image = fetchedImage
+        }
+    }
+
+    static func preload(urls: [URL]) async {
+        for url in urls {
+            _ = await image(for: url)
+        }
+    }
+
+    private static func image(for url: URL) async -> UIImage? {
+        if let cachedImage = cachedImage(for: url) {
+            return cachedImage
+        }
 
         do {
             var request = URLRequest(url: url)
             request.timeoutInterval = 30
             request.cachePolicy = .returnCacheDataElseLoad
+            request.setValue("DukeX iOS Activity Feed", forHTTPHeaderField: "User-Agent")
             let (data, response) = try await URLSession.shared.data(for: request)
             if let httpResponse = response as? HTTPURLResponse,
                !(200..<300).contains(httpResponse.statusCode) {
-                return
+                return nil
             }
             guard let fetchedImage = UIImage(data: data) else {
-                return
+                return nil
             }
 
-            Self.store(data: data, image: fetchedImage, for: url)
-            if loadedURL == url {
-                image = fetchedImage
-            }
+            store(data: data, image: fetchedImage, for: url)
+            return fetchedImage
         } catch {
+            return nil
         }
     }
 
@@ -837,6 +988,15 @@ private final class ProfileActivityFeedImageLoader: ObservableObject {
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "=", with: "")
         return cacheDirectoryURL.appendingPathComponent("\(encoded).img")
+    }
+}
+
+private extension UIImage {
+    var activityAspectRatio: CGFloat {
+        guard size.width > 0, size.height > 0 else {
+            return 16.0 / 9.0
+        }
+        return size.width / size.height
     }
 }
 

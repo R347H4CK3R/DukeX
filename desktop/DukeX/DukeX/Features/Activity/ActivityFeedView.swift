@@ -730,10 +730,8 @@ private struct ActivityArticleReaderView: View {
 
                 if let bodyText = ActivityFeedHTML.plainText(from: resolvedArticle.bodyHtml),
                    !bodyText.isEmpty {
-                    Text(bodyText)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                        .lineSpacing(4)
+                    ActivityArticleBodyText(bodyText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if detail == nil {
                     HStack(spacing: 10) {
@@ -759,7 +757,8 @@ private struct ActivityArticleReaderView: View {
                     .padding(.top, 4)
                 }
             }
-            .padding(24)
+            .padding(.vertical, 24)
+            .padding(.horizontal, 32)
             .frame(maxWidth: 820, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
@@ -814,6 +813,54 @@ private struct ActivityArticleReaderView: View {
                 }
             }
         }
+    }
+}
+
+private struct ActivityArticleBodyText: UIViewRepresentable {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    func makeUIView(context: Context) -> UILabel {
+        let label = UILabel()
+        label.numberOfLines = 0
+        label.backgroundColor = .clear
+        label.adjustsFontForContentSizeCategory = true
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
+    }
+
+    func updateUIView(_ uiView: UILabel, context: Context) {
+        uiView.attributedText = Self.attributedString(from: text)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UILabel, context: Context) -> CGSize? {
+        guard let width = proposal.width, width > 0 else {
+            return nil
+        }
+
+        let size = uiView.sizeThatFits(
+            CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        )
+        return CGSize(width: width, height: ceil(size.height))
+    }
+
+    private static func attributedString(from text: String) -> NSAttributedString {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .justified
+        paragraphStyle.lineSpacing = 4
+        paragraphStyle.paragraphSpacing = 10
+
+        return NSAttributedString(
+            string: text,
+            attributes: [
+                .font: UIFont.preferredFont(forTextStyle: .body),
+                .foregroundColor: UIColor.label,
+                .paragraphStyle: paragraphStyle
+            ]
+        )
     }
 }
 
