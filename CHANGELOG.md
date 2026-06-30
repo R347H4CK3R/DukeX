@@ -5,6 +5,59 @@ entries focus on user-visible behavior and port-specific runtime changes.
 
 ## Unreleased
 
+## v1.0.2 - Expanding the Xbox Experience
+
+### Added
+
+- Added the first native macOS release, built with Mac Catalyst and packaged
+  with a nested Xemu fork so desktop users can install DukeX as a single app.
+- Added XB.Live Rich Presence reporting so friends can see the currently
+  running title while DukeX tracks supported playtime sessions.
+- Added a full XB.Live messaging experience with threaded conversations,
+  friend messaging, unread indicators, supported game invites, and continued
+  compatibility with existing Xbox inbox messages.
+- Added expanded XB.Live social features, including friend requests, friend
+  management, online presence details, and richer community status throughout
+  the Profile experience.
+- Added the XB.Live Activity Feed across iOS and macOS, combining XB.Live news,
+  friend online status, friend achievement unlocks, and community updates in a
+  single timeline.
+- Added controller landscape mode on iOS so compatible controllers can drive a
+  controller-first library and launch experience.
+- Added deeper AirPlay and external-display handling for a more reliable
+  console-style setup on supported displays.
+
+### Changed
+
+- Updated the Achievements section with clearer Games, Apps, and Cores grouping
+  plus consistent artwork for XB.Live Core, DukeX Core, and special test titles.
+- Improved Activity Feed and article handling with cached news metadata,
+  cached article details, cached artwork, rounded image presentation, and more
+  comfortable reader margins.
+- Improved macOS event handling so events, paid events, and tournaments open in
+  focused detail windows instead of taking over the full Profile surface.
+- Improved game tile sizing and cover masking so library spacing is more even
+  across iOS and macOS.
+- Updated supported cloud-save sync paths for XB.Live console identity v2,
+  content-hash dedupe, and server-assisted cross-console restore handling.
+
+### Fixed
+
+- Fixed achievement progress rounding so time-based progress does not report
+  100% before the unlock threshold has actually been reached.
+- Fixed iOS touch-control regressions from the v1.0.2 development cycle while
+  preserving the existing iOS play interface.
+
+### Notes
+
+- iOS builds continue to support iOS 16.0 or later on Apple A14 Bionic or Apple
+  M1 hardware or newer, with iOS 16 support remaining experimental.
+- macOS builds are distributed directly through GitHub Releases as a DMG and
+  still require users to provide their own legally obtained Xbox system files
+  and games.
+- XB.Live account access is required for the new Rich Presence, messaging,
+  Activity Feed, social, and supported cloud-sync features.
+
 ## v1.0.1 - Bringing Xbox Live Back to Your Pocket
 
 ### Added

@@ -2,7 +2,7 @@
   "name": "DukeX",
   "identifier": "com.mafty.dukex.source",
   "subtitle": "Xbox Emulation on iOS",
-  "description": "DukeX is an experimental iOS-focused frontend for xemu. It embeds the xemu core in a native Swift shell, provides an iPhone-friendly library and settings experience, and presents the Vulkan renderer through MoltenVK and a native CAMetalLayer. DukeX does not include Xbox system files, game images, or signing certificates. Users and testers are required to provide their own legally obtained files. DukeX is intended solely for legitimate emulation and preservation purposes, and is not designed for use with pirated materials.",
+  "description": "DukeX is an experimental iOS-focused frontend for xemu. It embeds the xemu core in a native Swift shell, provides an iPhone-friendly library and settings experience, and presents the Vulkan renderer through MoltenVK and a native CAMetalLayer. DukeX v1.0.2 adds XB.Live Activity Feed, Rich Presence, messaging, expanded social features, controller landscape mode, and improved external display handling. DukeX does not include Xbox system files, game images, or signing certificates. Users and testers are required to provide their own legally obtained files. DukeX is intended solely for legitimate emulation and preservation purposes, and is not designed for use with pirated materials.",
   "iconURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/dukex-icon.png",
   "headerURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/landscape-online.png",
   "website": "https://github.com/MaftyManicEMU/DukeX",
@@ -16,11 +16,21 @@
       "bundleIdentifier": "com.mafty.dukex",
       "developerName": "Manic EMU Development Team",
       "subtitle": "Original Xbox emulation for iOS",
-      "localizedDescription": "DukeX is an experimental iOS-focused frontend for xemu. It embeds the xemu core in a native Swift shell, provides an iPhone-friendly library and settings experience, and presents the Vulkan renderer through MoltenVK and a native CAMetalLayer.\n\nDukeX v1.0.1 brings the Xbox experience itself back into focus with XB.Live profile integration, cloud sync groundwork, improved rendering stability, AirPlay support, customizable Touch Controls, themes, automatic cover art retrieval, and native URL scheme support for launch links and external library access.\n\nDukeX installs on iOS 16.0 or later. iOS 16 through 18 use W^X reprotection after JIT has been enabled for the process. iOS 26 or later requires StikDebug with Universal.js assigned to the DukeX bundle identifier. Supported hardware starts at Apple A14 Bionic or Apple M1 and newer.\n\nDukeX does not include Xbox system files, game images, or signing certificates. Users and testers are required to provide their own legally obtained files. DukeX is intended solely for legitimate emulation and preservation purposes, and is not designed for use with pirated materials.",
+      "localizedDescription": "DukeX is an experimental iOS-focused frontend for xemu. It embeds the xemu core in a native Swift shell, provides an iPhone-friendly library and settings experience, and presents the Vulkan renderer through MoltenVK and a native CAMetalLayer.\n\nDukeX v1.0.2 expands the Xbox experience with XB.Live Activity Feed, Rich Presence and playtime tracking, threaded messaging, friend requests and presence, controller landscape mode, improved AirPlay and external display support, refined achievements, and smoother news reading. A native macOS release is also available separately through GitHub Releases.\n\nDukeX installs on iOS 16.0 or later. iOS 16 through 18 use W^X reprotection after JIT has been enabled for the process. iOS 26 or later requires StikDebug with Universal.js assigned to the DukeX bundle identifier. Supported hardware starts at Apple A14 Bionic or Apple M1 and newer.\n\nDukeX does not include Xbox system files, game images, or signing certificates. Users and testers are required to provide their own legally obtained files. DukeX is intended solely for legitimate emulation and preservation purposes, and is not designed for use with pirated materials.",
       "iconURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/dukex-icon.png",
       "tintColor": "#8FCA39",
       "category": "games",
       "versions": [
+        {
+          "version": "1.0.2",
+          "buildVersion": "102",
+          "marketingVersion": "DukeX v1.0.2",
+          "date": "2026-06-30",
+          "localizedDescription": "- First native macOS release is available separately through GitHub Releases as a drag-to-Applications DMG.\n- XB.Live Rich Presence and playtime tracking let friends see what you are playing while DukeX tracks supported sessions.\n- XB.Live messaging now supports threaded conversations, friend messaging, unread indicators, supported game invites, and existing Xbox inbox messages.\n- Expanded social features add friend requests, friend management, and richer presence details.\n- New Activity Feed combines XB.Live news, friend online status, friend achievement unlocks, and community updates.\n- Controller landscape mode brings a controller-first browsing and launch experience on iOS.\n- Expanded AirPlay and external display handling improves big-screen play.\n- Achievements, news article reading, cloud-save sync metadata, and game tile spacing have been refined.\n- DukeX does not include Xbox system files, game images, BIOS files, or copyrighted content.",
+          "downloadURL": "https://github.com/MaftyManicEMU/DukeX/releases/download/v1.0.2/DukeX.v1.0.2.ipa",
+          "size": 18466795,
+          "minOSVersion": "16.0"
+        },
         {
           "version": "1.0.1",
           "buildVersion": "101",
@@ -45,6 +55,8 @@
       "appPermissions": {
         "entitlements": [],
         "privacy": {
+          "NSBluetoothAlwaysUsageDescription": "DukeX uses Bluetooth to read connected game controller battery information.",
+          "NSBluetoothPeripheralUsageDescription": "DukeX uses Bluetooth to read connected game controller battery information.",
           "NSCameraUsageDescription": "DukeX can use the front camera to test Xbox Video Chat camera peripheral emulation.",
           "NSMicrophoneUsageDescription": "DukeX can use the microphone to test Xbox Live Communicator support.",
           "NSMotionUsageDescription": "DukeX can use device tilt to subtly move animated theme backgrounds."
@@ -86,6 +98,16 @@
     }
   ],
   "news": [
+    {
+      "title": "DukeX v1.0.2",
+      "identifier": "dukex-1.0.2",
+      "caption": "DukeX v1.0.2 expands the Xbox experience with a native macOS release, XB.Live Activity Feed, Rich Presence, messaging, social features, controller landscape mode, and improved external display support.",
+      "date": "2026-06-30",
+      "tintColor": "#8FCA39",
+      "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/landscape-online.png",
+      "notify": false,
+      "appID": "com.mafty.dukex"
+    },
     {
       "title": "DukeX v1.0.1",
       "identifier": "dukex-1.0.1",
