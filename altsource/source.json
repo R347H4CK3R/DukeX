@@ -28,7 +28,7 @@
           "date": "2026-06-30",
           "localizedDescription": "- First native macOS release is available separately through GitHub Releases as a drag-to-Applications DMG.\n- XB.Live Rich Presence and playtime tracking let friends see what you are playing while DukeX tracks supported sessions.\n- XB.Live messaging now supports threaded conversations, friend messaging, unread indicators, supported game invites, and existing Xbox inbox messages.\n- Expanded social features add friend requests, friend management, and richer presence details.\n- New Activity Feed combines XB.Live news, friend online status, friend achievement unlocks, and community updates.\n- Controller landscape mode brings a controller-first browsing and launch experience on iOS.\n- Expanded AirPlay and external display handling improves big-screen play.\n- Achievements, news article reading, cloud-save sync metadata, and game tile spacing have been refined.\n- DukeX does not include Xbox system files, game images, BIOS files, or copyrighted content.",
           "downloadURL": "https://github.com/MaftyManicEMU/DukeX/releases/download/v1.0.2/DukeX.v1.0.2.ipa",
-          "size": 20372879,
+          "size": 20345841,
           "minOSVersion": "16.0"
         },
         {
