@@ -31,11 +31,6 @@ entries focus on user-visible behavior and port-specific runtime changes.
 
 - Updated the Achievements section with clearer Games, Apps, and Cores grouping
   plus consistent artwork for XB.Live Core, DukeX Core, and special test titles.
-- Improved Activity Feed and article handling with cached news metadata,
-  cached article details, cached artwork, rounded image presentation, and more
-  comfortable reader margins.
-- Improved macOS event handling so events, paid events, and tournaments open in
-  focused detail windows instead of taking over the full Profile surface.
 - Improved game tile sizing and cover masking so library spacing is more even
   across iOS and macOS.
 - Updated supported cloud-save sync paths for XB.Live console identity v2,

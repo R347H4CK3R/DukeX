@@ -107,26 +107,6 @@
       "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/landscape-online.png",
       "notify": false,
       "appID": "com.mafty.dukex"
-    },
-    {
-      "title": "DukeX v1.0.1",
-      "identifier": "dukex-1.0.1",
-      "caption": "XB.Live profile integration, cloud sync groundwork, Touch Controls, AirPlay, cover art, themes, URL scheme support, and rendering improvements arrive in v1.0.1.",
-      "date": "2026-06-07",
-      "tintColor": "#8FCA39",
-      "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/landscape-online.png",
-      "notify": false,
-      "appID": "com.mafty.dukex"
-    },
-    {
-      "title": "DukeX v1.0.0",
-      "identifier": "dukex-1.0.0",
-      "caption": "Initial DukeX release with Games tab sorting, favorites, orientation-specific library columns, refreshed AltSource assets, and the current iOS 16+/iOS 26+ JIT workflows.",
-      "date": "2026-05-18",
-      "tintColor": "#8FCA39",
-      "imageURL": "https://raw.githubusercontent.com/MaftyManicEMU/DukeX/master/altsource/assets/landscape-screenshots.png",
-      "notify": false,
-      "appID": "com.mafty.dukex"
     }
   ]
 }
