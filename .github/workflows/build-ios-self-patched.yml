@@ -1,0 +1,92 @@
+name: Build Self-Patched DukeX iOS IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    timeout-minutes: 120
+
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      IOS_DEPLOYMENT_TARGET: "16.0"
+
+    steps:
+      - name: Checkout DukeX
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Apply lifecycle fix
+        run: python3 .github/scripts/apply_dukex_background_fix.py
+
+      - name: Verify lifecycle fix
+        run: |
+          grep -n "xemu_ios_set_application_active" ui/xemu.c
+          grep -n "loadSetApplicationActive" ios/DukeX/DukeX/Runtime/Core/EmulatorCoreRuntime.swift
+          grep -n "UIApplication.willResignActiveNotification" ios/DukeX/DukeX/Runtime/Core/EmulatorCoreRuntime.swift
+
+      - name: Install build tools
+        run: |
+          brew install cmake ninja meson pkg-config autoconf automake libtool nasm
+
+      - name: Bootstrap vcpkg
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/vcpkg"
+          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+
+      - name: Install iOS dependencies
+        run: |
+          "$RUNNER_TEMP/vcpkg/vcpkg" install             glib:arm64-ios             pixman:arm64-ios             libslirp:arm64-ios             sdl3:arm64-ios             zlib:arm64-ios
+
+      - name: Download MoltenVK
+        run: |
+          curl -fsSL https://api.github.com/repos/KhronosGroup/MoltenVK/releases/latest > "$RUNNER_TEMP/mvk.json"
+          ASSET_URL=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(a["browser_download_url"] for a in d["assets"] if a["name"].endswith((".tar",".tar.gz",".zip"))))' "$RUNNER_TEMP/mvk.json")
+          curl -fL "$ASSET_URL" -o "$RUNNER_TEMP/mvk.pkg"
+          mkdir -p "$RUNNER_TEMP/mvk"
+          if file "$RUNNER_TEMP/mvk.pkg" | grep -qi zip; then
+            unzip -q "$RUNNER_TEMP/mvk.pkg" -d "$RUNNER_TEMP/mvk"
+          else
+            tar -xf "$RUNNER_TEMP/mvk.pkg" -C "$RUNNER_TEMP/mvk"
+          fi
+          MOLTENVK_ROOT=$(find "$RUNNER_TEMP/mvk" -type f -path '*/include/vulkan/vulkan.h' -print -quit | sed 's#/include/vulkan/vulkan.h##')
+          MOLTENVK_FRAMEWORK=$(find "$RUNNER_TEMP/mvk" -type d -name 'MoltenVK.framework' -print -quit)
+          test -n "$MOLTENVK_ROOT"
+          test -n "$MOLTENVK_FRAMEWORK"
+          echo "MOLTENVK_ROOT=$MOLTENVK_ROOT" >> "$GITHUB_ENV"
+          echo "MOLTENVK_FRAMEWORK=$MOLTENVK_FRAMEWORK" >> "$GITHUB_ENV"
+
+      - name: Build embedded iOS core
+        run: |
+          chmod +x ios/scripts/build-core-ios.sh
+          ios/scripts/build-core-ios.sh
+          test -f build-ios-arm64/libxemu-ios-core.dylib
+
+      - name: Build unsigned app
+        run: |
+          xcodebuild             -project ios/DukeX/DukeX.xcodeproj             -scheme DukeX             -configuration Release             -sdk iphoneos             -destination "generic/platform=iOS"             -derivedDataPath "$RUNNER_TEMP/DukeXDerivedData"             CODE_SIGNING_ALLOWED=NO             CODE_SIGNING_REQUIRED=NO             CODE_SIGN_IDENTITY=""             build
+          APP="$RUNNER_TEMP/DukeXDerivedData/Build/Products/Release-iphoneos/DukeX.app"
+          test -d "$APP"
+          echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir Payload
+          cp -R "$APP_PATH" Payload/DukeX.app
+          find Payload -name '._*' -delete || true
+          xattr -cr Payload || true
+          ditto -c -k --sequesterRsrc --keepParent Payload DukeX-self-patched-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: DukeX-self-patched-unsigned-ipa
+          path: DukeX-self-patched-unsigned.ipa
+          retention-days: 14
