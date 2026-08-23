@@ -41,6 +41,34 @@ jobs:
           "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
           echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
 
+      - name: Patch libiconv for iOS
+        run: |
+          PORT="$RUNNER_TEMP/vcpkg/ports/libiconv/portfile.cmake"
+
+          echo "Original libiconv port:"
+          grep -n "enable-relocatable" "$PORT" || true
+
+          # Relocatable support causes libiconv to build iconv.wrapper for the
+          # iOS target. That wrapper currently fails to link because GNU
+          # relocation code references the missing memeq symbol.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path(__import__("os").environ["RUNNER_TEMP"]) / "vcpkg/ports/libiconv/portfile.cmake"
+          s = p.read_text()
+
+          s = s.replace(
+              '"--enable-relocatable"',
+              '"--disable-relocatable"'
+          )
+
+          p.write_text(s)
+          print(f"Patched {p}")
+          PY
+
+          echo "Patched libiconv port:"
+          grep -n "relocatable" "$PORT" || true
+
       - name: Install iOS dependencies
         run: |
           "$RUNNER_TEMP/vcpkg/vcpkg" install             glib:arm64-ios             pixman:arm64-ios             libslirp:arm64-ios             sdl3:arm64-ios             zlib:arm64-ios
