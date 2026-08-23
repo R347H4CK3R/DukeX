@@ -45,31 +45,40 @@ jobs:
         run: |
           PORT="$RUNNER_TEMP/vcpkg/ports/libiconv/portfile.cmake"
 
-          echo "Original libiconv port:"
-          grep -n "enable-relocatable" "$PORT" || true
+          echo "Original libiconv relocatable block:"
+          grep -n -A2 -B1 "enable-relocatable" "$PORT" || true
 
-          # Relocatable support causes libiconv to build iconv.wrapper for the
-          # iOS target. That wrapper currently fails to link because GNU
-          # relocation code references the missing memeq symbol.
           python3 - <<'PY'
           from pathlib import Path
+          import os
 
-          p = Path(__import__("os").environ["RUNNER_TEMP"]) / "vcpkg/ports/libiconv/portfile.cmake"
+          p = Path(os.environ["RUNNER_TEMP"]) / "vcpkg/ports/libiconv/portfile.cmake"
           s = p.read_text()
 
-          s = s.replace(
-              '"--enable-relocatable"',
-              '"--disable-relocatable"'
-          )
+          old = """if (NOT VCPKG_TARGET_IS_ANDROID)
+              vcpkg_list(APPEND OPTIONS --enable-relocatable)
+          endif()"""
 
-          p.write_text(s)
-          print(f"Patched {p}")
+          new = """if (NOT VCPKG_TARGET_IS_ANDROID AND NOT VCPKG_TARGET_IS_IOS)
+              vcpkg_list(APPEND OPTIONS --enable-relocatable)
+          endif()"""
+
+          if old not in s:
+              raise SystemExit(
+                  "Expected libiconv relocatable block not found; "
+                  "refusing to continue with an unpatched port"
+              )
+
+          p.write_text(s.replace(old, new, 1))
+          print("Patched libiconv: relocatable wrapper disabled for iOS")
           PY
 
-          echo "Patched libiconv port:"
-          grep -n "relocatable" "$PORT" || true
+          echo "Patched libiconv relocatable block:"
+          grep -n -A2 -B1 "enable-relocatable" "$PORT" || true
 
-      - name: Install iOS dependencies
+          grep -q \
+            'NOT VCPKG_TARGET_IS_ANDROID AND NOT VCPKG_TARGET_IS_IOS' \
+            "$PORT"      - name: Install iOS dependencies
         run: |
           "$RUNNER_TEMP/vcpkg/vcpkg" install             glib:arm64-ios             pixman:arm64-ios             libslirp:arm64-ios             sdl3:arm64-ios             zlib:arm64-ios
 
