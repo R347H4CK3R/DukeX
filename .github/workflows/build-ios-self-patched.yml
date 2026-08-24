@@ -2,6 +2,14 @@ name: Build Self-Patched DukeX iOS IPA
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/build-ios-self-patched.yml'
+      - '.github/scripts/apply_dukex_background_fix.py'
+      - 'ios/**'
+      - 'ui/xemu.c'
 
 permissions:
   contents: read
