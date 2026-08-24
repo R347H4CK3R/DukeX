@@ -46,6 +46,7 @@ COMMON_FLAGS=(
   "-isysroot" "${SDKROOT}"
   "-miphoneos-version-min=${IOS_DEPLOYMENT_TARGET}"
   "-I${MOLTENVK_ROOT}/include"
+  "-include" "getopt.h"
   "-DVK_ENABLE_BETA_EXTENSIONS=1"
   "-DVK_USE_PLATFORM_METAL_EXT=1"
   "-DXBOX"
@@ -78,10 +79,6 @@ export PKG_CONFIG_PATH="${PKG_CONFIG_LIBDIR}"
 export PKG_CONFIG_SYSROOT_DIR="/"
 export AR RANLIB NM STRIP PKG_CONFIG CMAKE
 
-# xemu's generated configuration headers use Python's yaml module during Ninja.
-# Create an isolated host interpreter and explicitly tell QEMU/xemu configure to
-# use it. Merely prepending PATH is not sufficient because configure records the
-# selected Python interpreter in the generated Meson/Ninja build files.
 SYSTEM_PYTHON="$(command -v python3)"
 HOST_PYTHON_VENV="${BUILD_DIR}/host-python-venv"
 "${SYSTEM_PYTHON}" -m venv "${HOST_PYTHON_VENV}"
