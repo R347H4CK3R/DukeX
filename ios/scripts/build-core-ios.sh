@@ -102,6 +102,7 @@ cd "${BUILD_DIR}"
   --disable-bsd-user \
   --disable-linux-user \
   --disable-werror \
+  --disable-pcap \
   --enable-slirp \
   --disable-slirp-smbd \
   --disable-capstone \
