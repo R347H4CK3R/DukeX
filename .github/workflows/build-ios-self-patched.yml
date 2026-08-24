@@ -119,7 +119,8 @@ jobs:
             libslirp:arm64-ios \
             sdl3:arm64-ios \
             zlib:arm64-ios \
-            libepoxy:arm64-ios
+            libepoxy:arm64-ios \
+            libpcap:arm64-ios
 
       - name: Download MoltenVK
         env:
