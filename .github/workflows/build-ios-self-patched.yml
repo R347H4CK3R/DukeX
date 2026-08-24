@@ -52,10 +52,14 @@ jobs:
       - name: Patch vcpkg iOS ports and linker flags
         run: |
           ICONV_PORT="$RUNNER_TEMP/vcpkg/ports/libiconv/portfile.cmake"
+          EPOXY_PORT="$RUNNER_TEMP/vcpkg/ports/libepoxy/portfile.cmake"
           IOS_TRIPLET="$RUNNER_TEMP/vcpkg/triplets/community/arm64-ios.cmake"
 
           echo "Original libiconv relocatable block:"
           grep -n -A2 -B1 "enable-relocatable" "$ICONV_PORT" || true
+
+          echo "Original libepoxy Apple target block:"
+          grep -n -A3 -B1 "VCPKG_TARGET_IS_WINDOWS OR VCPKG_TARGET_IS_OSX" "$EPOXY_PORT" || true
 
           python3 - <<'PY'
           from pathlib import Path
@@ -79,6 +83,20 @@ jobs:
               )
           iconv.write_text(s.replace(old, new, 1))
 
+          # libepoxy's upstream vcpkg port only recognizes macOS as an Apple
+          # target. iOS otherwise falls into the generic Unix branch, enabling
+          # GLX/X11. Use the same no-GLX/no-EGL/no-X11 configuration on iOS.
+          epoxy = root / "ports/libepoxy/portfile.cmake"
+          e = epoxy.read_text()
+          old_epoxy = "if (VCPKG_TARGET_IS_WINDOWS OR VCPKG_TARGET_IS_OSX)"
+          new_epoxy = "if (VCPKG_TARGET_IS_WINDOWS OR VCPKG_TARGET_IS_OSX OR VCPKG_TARGET_IS_IOS)"
+          if old_epoxy not in e:
+              raise SystemExit(
+                  "Expected libepoxy Apple target condition not found; "
+                  "refusing to continue with an unpatched port"
+              )
+          epoxy.write_text(e.replace(old_epoxy, new_epoxy, 1))
+
           # gettext-libintl uses CoreFoundation APIs on Apple platforms. vcpkg's
           # CMake wrapper adds the framework for CMake consumers, but GLib is
           # built with Meson/pkg-config, so the framework is otherwise omitted.
@@ -99,11 +117,15 @@ jobs:
               triplet.write_text(t)
 
           print("Patched libiconv for iOS")
+          print("Patched libepoxy to disable GLX/EGL/X11 on iOS")
           print("Added CoreFoundation to arm64-ios vcpkg linker flags")
           PY
 
           echo "Patched libiconv relocatable block:"
           grep -n -A2 -B1 "enable-relocatable" "$ICONV_PORT" || true
+
+          echo "Patched libepoxy Apple target block:"
+          grep -n -A3 -B1 "VCPKG_TARGET_IS_IOS" "$EPOXY_PORT" || true
 
           echo "Patched arm64-ios triplet:"
           cat "$IOS_TRIPLET"
@@ -111,6 +133,7 @@ jobs:
           grep -q \
             'NOT VCPKG_TARGET_IS_ANDROID AND NOT VCPKG_TARGET_IS_IOS' \
             "$ICONV_PORT"
+          grep -q 'VCPKG_TARGET_IS_OSX OR VCPKG_TARGET_IS_IOS' "$EPOXY_PORT"
           grep -q 'CoreFoundation' "$IOS_TRIPLET"
 
       - name: Install iOS dependencies
@@ -120,7 +143,8 @@ jobs:
             pixman:arm64-ios \
             libslirp:arm64-ios \
             sdl3:arm64-ios \
-            zlib:arm64-ios
+            zlib:arm64-ios \
+            libepoxy:arm64-ios
 
       - name: Download MoltenVK
         run: |
