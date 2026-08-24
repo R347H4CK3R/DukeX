@@ -61,6 +61,7 @@ jobs:
         run: |
           ICONV_PORT="$RUNNER_TEMP/vcpkg/ports/libiconv/portfile.cmake"
           EPOXY_PORT="$RUNNER_TEMP/vcpkg/ports/libepoxy/portfile.cmake"
+          PCAP_PORT="$RUNNER_TEMP/vcpkg/ports/libpcap/portfile.cmake"
           IOS_TRIPLET="$RUNNER_TEMP/vcpkg/triplets/community/arm64-ios.cmake"
 
           echo "Original libiconv relocatable block:"
@@ -94,6 +95,16 @@ jobs:
               raise SystemExit("Expected libepoxy Apple target condition not found; refusing to continue with an unpatched port")
           epoxy.write_text(e.replace(old_epoxy, new_epoxy, 1))
 
+          # iOS does not expose a supported live packet-capture backend. Build
+          # libpcap with its null backend so xemu can still link/use pcap file APIs.
+          pcap = root / "ports/libpcap/portfile.cmake"
+          p = pcap.read_text()
+          needle = "vcpkg_cmake_configure(\n"
+          if needle not in p:
+              raise SystemExit("Unexpected libpcap port layout")
+          p = p.replace(needle, needle + "    OPTIONS\n        -DPCAP_TYPE=null\n", 1)
+          pcap.write_text(p)
+
           triplet = root / "triplets/community/arm64-ios.cmake"
           t = triplet.read_text()
           marker = 'set(VCPKG_CMAKE_SYSTEM_NAME iOS)'
@@ -109,6 +120,7 @@ jobs:
 
           grep -q 'NOT VCPKG_TARGET_IS_ANDROID AND NOT VCPKG_TARGET_IS_IOS' "$ICONV_PORT"
           grep -q 'VCPKG_TARGET_IS_OSX OR VCPKG_TARGET_IS_IOS' "$EPOXY_PORT"
+          grep -q -- '-DPCAP_TYPE=null' "$PCAP_PORT"
           grep -q 'CoreFoundation' "$IOS_TRIPLET"
 
       - name: Install iOS dependencies
