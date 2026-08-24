@@ -78,9 +78,16 @@ jobs:
 
           grep -q \
             'NOT VCPKG_TARGET_IS_ANDROID AND NOT VCPKG_TARGET_IS_IOS' \
-            "$PORT"      - name: Install iOS dependencies
+            "$PORT"
+
+      - name: Install iOS dependencies
         run: |
-          "$RUNNER_TEMP/vcpkg/vcpkg" install             glib:arm64-ios             pixman:arm64-ios             libslirp:arm64-ios             sdl3:arm64-ios             zlib:arm64-ios
+          "$RUNNER_TEMP/vcpkg/vcpkg" install \
+            glib:arm64-ios \
+            pixman:arm64-ios \
+            libslirp:arm64-ios \
+            sdl3:arm64-ios \
+            zlib:arm64-ios
 
       - name: Download MoltenVK
         run: |
@@ -108,7 +115,17 @@ jobs:
 
       - name: Build unsigned app
         run: |
-          xcodebuild             -project ios/DukeX/DukeX.xcodeproj             -scheme DukeX             -configuration Release             -sdk iphoneos             -destination "generic/platform=iOS"             -derivedDataPath "$RUNNER_TEMP/DukeXDerivedData"             CODE_SIGNING_ALLOWED=NO             CODE_SIGNING_REQUIRED=NO             CODE_SIGN_IDENTITY=""             build
+          xcodebuild \
+            -project ios/DukeX/DukeX.xcodeproj \
+            -scheme DukeX \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$RUNNER_TEMP/DukeXDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
           APP="$RUNNER_TEMP/DukeXDerivedData/Build/Products/Release-iphoneos/DukeX.app"
           test -d "$APP"
           echo "APP_PATH=$APP" >> "$GITHUB_ENV"
