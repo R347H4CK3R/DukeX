@@ -95,8 +95,6 @@ jobs:
               raise SystemExit("Expected libepoxy Apple target condition not found; refusing to continue with an unpatched port")
           epoxy.write_text(e.replace(old_epoxy, new_epoxy, 1))
 
-          # iOS does not expose a supported live packet-capture backend. Build
-          # libpcap with its null backend so xemu can still link/use pcap file APIs.
           pcap = root / "ports/libpcap/portfile.cmake"
           p = pcap.read_text()
           needle = "vcpkg_cmake_configure(\n"
@@ -132,7 +130,8 @@ jobs:
             sdl3:arm64-ios \
             zlib:arm64-ios \
             libepoxy:arm64-ios \
-            libpcap:arm64-ios
+            libpcap:arm64-ios \
+            libsamplerate:arm64-ios
 
       - name: Download MoltenVK
         env:
