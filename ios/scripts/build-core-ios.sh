@@ -79,14 +79,20 @@ export PKG_CONFIG_SYSROOT_DIR="/"
 export AR RANLIB NM STRIP PKG_CONFIG CMAKE
 
 # xemu's generated configuration headers use Python's yaml module during Ninja.
-# Use an isolated host virtual environment so the dependency is available even
-# when the runner's system/Homebrew Python is externally managed.
-HOST_PYTHON="$(command -v python3)"
+# Create an isolated host interpreter and explicitly tell QEMU/xemu configure to
+# use it. Merely prepending PATH is not sufficient because configure records the
+# selected Python interpreter in the generated Meson/Ninja build files.
+SYSTEM_PYTHON="$(command -v python3)"
 HOST_PYTHON_VENV="${BUILD_DIR}/host-python-venv"
-"${HOST_PYTHON}" -m venv "${HOST_PYTHON_VENV}"
-"${HOST_PYTHON_VENV}/bin/python" -m pip install --disable-pip-version-check PyYAML
+"${SYSTEM_PYTHON}" -m venv "${HOST_PYTHON_VENV}"
+HOST_PYTHON="${HOST_PYTHON_VENV}/bin/python"
+"${HOST_PYTHON}" -m pip install --disable-pip-version-check PyYAML
+"${HOST_PYTHON}" -c 'import yaml; print("PyYAML ready:", yaml.__version__)'
 export PATH="${HOST_PYTHON_VENV}/bin:${PATH}"
-python3 -c 'import yaml; print("PyYAML ready:", yaml.__version__)'
+export PYTHON="${HOST_PYTHON}"
+export PYTHON3="${HOST_PYTHON}"
+printf 'Using host Python: %s\n' "${PYTHON}"
+"${PYTHON}" -c 'import sys, yaml; print("Python:", sys.executable); print("PyYAML:", yaml.__version__)'
 
 printf 'Using host CMake for Meson subprojects: %s\n' "${CMAKE}"
 "${CMAKE}" --version
