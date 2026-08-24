@@ -5,6 +5,7 @@ from pathlib import Path
 root = Path.cwd()
 xemu_path = root / "ui" / "xemu.c"
 swift_path = root / "ios" / "DukeX" / "DukeX" / "Runtime" / "Core" / "EmulatorCoreRuntime.swift"
+fatx_path = root / "ios" / "DukeX" / "DukeX" / "Services" / "CloudSaves" / "FATXHDDCloudSaveStore.swift"
 
 def fail(msg):
     print("ERROR:", msg, file=sys.stderr)
@@ -16,11 +17,12 @@ def replace_once(text, old, new, label):
         fail(f"{label}: expected 1 match, found {count}")
     return text.replace(old, new, 1)
 
-if not xemu_path.is_file() or not swift_path.is_file():
+if not xemu_path.is_file() or not swift_path.is_file() or not fatx_path.is_file():
     fail("DukeX source files not found")
 
 xemu = xemu_path.read_text(encoding="utf-8")
 swift = swift_path.read_text(encoding="utf-8")
+fatx = fatx_path.read_text(encoding="utf-8")
 
 if "void xemu_ios_set_application_active(int active)" not in xemu:
     xemu = replace_once(
@@ -71,7 +73,28 @@ if "loadSetApplicationActive" not in swift:
     new_loader = '        self.requestShutdown = requestShutdown\n        return requestShutdown\n    }\n\n    private func loadSetApplicationActive() -> XemuSetApplicationActive? {\n        if let setApplicationActive { return setApplicationActive }\n        guard let handle else { return nil }\n        guard let symbol = dlsym(handle, "xemu_ios_set_application_active") else {\n            NSLog("xemu_ios_set_application_active is not available; background GPU protection disabled")\n            return nil\n        }\n        NSLog("Resolved xemu_ios_set_application_active")\n        let setter = unsafeBitCast(symbol, to: XemuSetApplicationActive.self)\n        setApplicationActive = setter\n        return setter\n    }\n\n    private func loadRequestSystemReset() -> QemuSystemResetRequest? {'
     swift = replace_once(swift, old_loader, new_loader, "swift symbol loader")
 
+old_fat_timestamp = '''        let year = max(1980, components.year ?? 1980)
+        let date = UInt16(((year - 1980) << 9) | ((components.month ?? 1) << 5) | (components.day ?? 1))
+        let time = UInt16(((components.hour ?? 0) << 11) | ((components.minute ?? 0) << 5) | ((components.second ?? 0) / 2))
+        return (date, time)'''
+new_fat_timestamp = '''        let year = max(1980, components.year ?? 1980)
+        let yearBits = UInt16(year - 1980)
+        let monthBits = UInt16(components.month ?? 1)
+        let dayBits = UInt16(components.day ?? 1)
+        let hourBits = UInt16(components.hour ?? 0)
+        let minuteBits = UInt16(components.minute ?? 0)
+        let secondBits = UInt16((components.second ?? 0) / 2)
+
+        let date = (yearBits << 9) | (monthBits << 5) | dayBits
+        let time = (hourBits << 11) | (minuteBits << 5) | secondBits
+        return (date, time)'''
+if old_fat_timestamp in fatx:
+    fatx = replace_once(fatx, old_fat_timestamp, new_fat_timestamp, "FATX timestamp type-check fix")
+elif new_fat_timestamp not in fatx:
+    fail("FATX timestamp block not found; refusing to continue with an unpatched compiler issue")
+
 xemu_path.write_text(xemu, encoding="utf-8")
 swift_path.write_text(swift, encoding="utf-8")
+fatx_path.write_text(fatx, encoding="utf-8")
 
 print("Self-patch applied or already present.")
