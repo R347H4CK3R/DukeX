@@ -66,8 +66,6 @@ jobs:
           import os
 
           root = Path(os.environ["RUNNER_TEMP"]) / "vcpkg"
-
-          # libiconv's relocatable wrapper is not suitable for the iOS target.
           iconv = root / "ports/libiconv/portfile.cmake"
           s = iconv.read_text()
           old = """if (NOT VCPKG_TARGET_IS_ANDROID)
@@ -77,62 +75,31 @@ jobs:
               vcpkg_list(APPEND OPTIONS --enable-relocatable)
           endif()"""
           if old not in s:
-              raise SystemExit(
-                  "Expected libiconv relocatable block not found; "
-                  "refusing to continue with an unpatched port"
-              )
+              raise SystemExit("Expected libiconv relocatable block not found; refusing to continue with an unpatched port")
           iconv.write_text(s.replace(old, new, 1))
 
-          # libepoxy's upstream vcpkg port only recognizes macOS as an Apple
-          # target. iOS otherwise falls into the generic Unix branch, enabling
-          # GLX/X11. Use the same no-GLX/no-EGL/no-X11 configuration on iOS.
           epoxy = root / "ports/libepoxy/portfile.cmake"
           e = epoxy.read_text()
           old_epoxy = "if (VCPKG_TARGET_IS_WINDOWS OR VCPKG_TARGET_IS_OSX)"
           new_epoxy = "if (VCPKG_TARGET_IS_WINDOWS OR VCPKG_TARGET_IS_OSX OR VCPKG_TARGET_IS_IOS)"
           if old_epoxy not in e:
-              raise SystemExit(
-                  "Expected libepoxy Apple target condition not found; "
-                  "refusing to continue with an unpatched port"
-              )
+              raise SystemExit("Expected libepoxy Apple target condition not found; refusing to continue with an unpatched port")
           epoxy.write_text(e.replace(old_epoxy, new_epoxy, 1))
 
-          # gettext-libintl uses CoreFoundation APIs on Apple platforms. vcpkg's
-          # CMake wrapper adds the framework for CMake consumers, but GLib is
-          # built with Meson/pkg-config, so the framework is otherwise omitted.
-          # Put it in the iOS triplet so every Meson/CMake executable or shared
-          # library that consumes static libintl gets the required framework.
           triplet = root / "triplets/community/arm64-ios.cmake"
           t = triplet.read_text()
           marker = 'set(VCPKG_CMAKE_SYSTEM_NAME iOS)'
           if marker not in t:
               raise SystemExit("Unexpected arm64-ios triplet layout")
           if "CoreFoundation" not in t:
-              t += (
-                  '\n# Static gettext-libintl calls CoreFoundation on Apple targets.\n'
-                  'set(VCPKG_LINKER_FLAGS "${VCPKG_LINKER_FLAGS} -framework CoreFoundation")\n'
-                  'set(VCPKG_LINKER_FLAGS_DEBUG "${VCPKG_LINKER_FLAGS_DEBUG} -framework CoreFoundation")\n'
-                  'set(VCPKG_LINKER_FLAGS_RELEASE "${VCPKG_LINKER_FLAGS_RELEASE} -framework CoreFoundation")\n'
-              )
+              t += ('\n# Static gettext-libintl calls CoreFoundation on Apple targets.\n'
+                    'set(VCPKG_LINKER_FLAGS "${VCPKG_LINKER_FLAGS} -framework CoreFoundation")\n'
+                    'set(VCPKG_LINKER_FLAGS_DEBUG "${VCPKG_LINKER_FLAGS_DEBUG} -framework CoreFoundation")\n'
+                    'set(VCPKG_LINKER_FLAGS_RELEASE "${VCPKG_LINKER_FLAGS_RELEASE} -framework CoreFoundation")\n')
               triplet.write_text(t)
-
-          print("Patched libiconv for iOS")
-          print("Patched libepoxy to disable GLX/EGL/X11 on iOS")
-          print("Added CoreFoundation to arm64-ios vcpkg linker flags")
           PY
 
-          echo "Patched libiconv relocatable block:"
-          grep -n -A2 -B1 "enable-relocatable" "$ICONV_PORT" || true
-
-          echo "Patched libepoxy Apple target block:"
-          grep -n -A3 -B1 "VCPKG_TARGET_IS_IOS" "$EPOXY_PORT" || true
-
-          echo "Patched arm64-ios triplet:"
-          cat "$IOS_TRIPLET"
-
-          grep -q \
-            'NOT VCPKG_TARGET_IS_ANDROID AND NOT VCPKG_TARGET_IS_IOS' \
-            "$ICONV_PORT"
+          grep -q 'NOT VCPKG_TARGET_IS_ANDROID AND NOT VCPKG_TARGET_IS_IOS' "$ICONV_PORT"
           grep -q 'VCPKG_TARGET_IS_OSX OR VCPKG_TARGET_IS_IOS' "$EPOXY_PORT"
           grep -q 'CoreFoundation' "$IOS_TRIPLET"
 
@@ -147,10 +114,26 @@ jobs:
             libepoxy:arm64-ios
 
       - name: Download MoltenVK
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -fsSL https://api.github.com/repos/KhronosGroup/MoltenVK/releases/latest > "$RUNNER_TEMP/mvk.json"
-          ASSET_URL=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(a["browser_download_url"] for a in d["assets"] if a["name"].endswith((".tar",".tar.gz",".zip"))))' "$RUNNER_TEMP/mvk.json")
-          curl -fL "$ASSET_URL" -o "$RUNNER_TEMP/mvk.pkg"
+          curl --retry 5 --retry-all-errors -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/KhronosGroup/MoltenVK/releases/latest \
+            -o "$RUNNER_TEMP/mvk.json"
+
+          ASSET_API_URL=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(a["url"] for a in d["assets"] if a["name"].endswith((".tar",".tar.gz",".zip"))))' "$RUNNER_TEMP/mvk.json")
+          ASSET_NAME=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(a["name"] for a in d["assets"] if a["name"].endswith((".tar",".tar.gz",".zip"))))' "$RUNNER_TEMP/mvk.json")
+          echo "Downloading MoltenVK asset: $ASSET_NAME"
+
+          curl --retry 5 --retry-all-errors -fL \
+            -H "Accept: application/octet-stream" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$ASSET_API_URL" -o "$RUNNER_TEMP/mvk.pkg"
+
           mkdir -p "$RUNNER_TEMP/mvk"
           if file "$RUNNER_TEMP/mvk.pkg" | grep -qi zip; then
             unzip -q "$RUNNER_TEMP/mvk.pkg" -d "$RUNNER_TEMP/mvk"
