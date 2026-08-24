@@ -39,6 +39,7 @@ RANLIB="$(xcrun --sdk "${SDK_NAME}" --find ranlib)"
 NM="$(xcrun --sdk "${SDK_NAME}" --find nm)"
 STRIP="$(xcrun --sdk "${SDK_NAME}" --find strip)"
 PKG_CONFIG="${PKG_CONFIG:-pkg-config}"
+CMAKE="${CMAKE:-$(command -v cmake)}"
 TARGET="arm64-apple-ios${IOS_DEPLOYMENT_TARGET}"
 COMMON_FLAGS=(
   "-target" "${TARGET}"
@@ -75,7 +76,10 @@ EOF
 export PKG_CONFIG_LIBDIR="${VULKAN_PKG_CONFIG_DIR}:${VCPKG_PREFIX}/lib/pkgconfig:${VCPKG_PREFIX}/debug/lib/pkgconfig"
 export PKG_CONFIG_PATH="${PKG_CONFIG_LIBDIR}"
 export PKG_CONFIG_SYSROOT_DIR="/"
-export AR RANLIB NM STRIP PKG_CONFIG
+export AR RANLIB NM STRIP PKG_CONFIG CMAKE
+
+printf 'Using host CMake for Meson subprojects: %s\n' "${CMAKE}"
+"${CMAKE}" --version
 
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
