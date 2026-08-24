@@ -41,44 +41,69 @@ jobs:
           "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
           echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
 
-      - name: Patch libiconv for iOS
+      - name: Patch vcpkg iOS ports and linker flags
         run: |
-          PORT="$RUNNER_TEMP/vcpkg/ports/libiconv/portfile.cmake"
+          ICONV_PORT="$RUNNER_TEMP/vcpkg/ports/libiconv/portfile.cmake"
+          IOS_TRIPLET="$RUNNER_TEMP/vcpkg/triplets/community/arm64-ios.cmake"
 
           echo "Original libiconv relocatable block:"
-          grep -n -A2 -B1 "enable-relocatable" "$PORT" || true
+          grep -n -A2 -B1 "enable-relocatable" "$ICONV_PORT" || true
 
           python3 - <<'PY'
           from pathlib import Path
           import os
 
-          p = Path(os.environ["RUNNER_TEMP"]) / "vcpkg/ports/libiconv/portfile.cmake"
-          s = p.read_text()
+          root = Path(os.environ["RUNNER_TEMP"]) / "vcpkg"
 
+          # libiconv's relocatable wrapper is not suitable for the iOS target.
+          iconv = root / "ports/libiconv/portfile.cmake"
+          s = iconv.read_text()
           old = """if (NOT VCPKG_TARGET_IS_ANDROID)
               vcpkg_list(APPEND OPTIONS --enable-relocatable)
           endif()"""
-
           new = """if (NOT VCPKG_TARGET_IS_ANDROID AND NOT VCPKG_TARGET_IS_IOS)
               vcpkg_list(APPEND OPTIONS --enable-relocatable)
           endif()"""
-
           if old not in s:
               raise SystemExit(
                   "Expected libiconv relocatable block not found; "
                   "refusing to continue with an unpatched port"
               )
+          iconv.write_text(s.replace(old, new, 1))
 
-          p.write_text(s.replace(old, new, 1))
-          print("Patched libiconv: relocatable wrapper disabled for iOS")
+          # gettext-libintl uses CoreFoundation APIs on Apple platforms. vcpkg's
+          # CMake wrapper adds the framework for CMake consumers, but GLib is
+          # built with Meson/pkg-config, so the framework is otherwise omitted.
+          # Put it in the iOS triplet so every Meson/CMake executable or shared
+          # library that consumes static libintl gets the required framework.
+          triplet = root / "triplets/community/arm64-ios.cmake"
+          t = triplet.read_text()
+          marker = 'set(VCPKG_CMAKE_SYSTEM_NAME iOS)'
+          if marker not in t:
+              raise SystemExit("Unexpected arm64-ios triplet layout")
+          if "CoreFoundation" not in t:
+              t += (
+                  '\n# Static gettext-libintl calls CoreFoundation on Apple targets.\n'
+                  'set(VCPKG_LINKER_FLAGS "${VCPKG_LINKER_FLAGS} -framework CoreFoundation")\n'
+                  'set(VCPKG_LINKER_FLAGS_DEBUG "${VCPKG_LINKER_FLAGS_DEBUG} -framework CoreFoundation")\n'
+                  'set(VCPKG_LINKER_FLAGS_RELEASE "${VCPKG_LINKER_FLAGS_RELEASE} -framework CoreFoundation")\n'
+              )
+              triplet.write_text(t)
+
+          print("Patched libiconv for iOS")
+          print("Added CoreFoundation to arm64-ios vcpkg linker flags")
           PY
 
           echo "Patched libiconv relocatable block:"
-          grep -n -A2 -B1 "enable-relocatable" "$PORT" || true
+          grep -n -A2 -B1 "enable-relocatable" "$ICONV_PORT" || true
+
+          echo "Patched arm64-ios triplet:"
+          cat "$IOS_TRIPLET"
 
           grep -q \
             'NOT VCPKG_TARGET_IS_ANDROID AND NOT VCPKG_TARGET_IS_IOS' \
-            "$PORT"
+            "$ICONV_PORT"
+          grep -q 'CoreFoundation' "$IOS_TRIPLET"
 
       - name: Install iOS dependencies
         run: |
