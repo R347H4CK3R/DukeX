@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# CI trigger: build the corrected iOS IPA from the current head.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 SOURCE_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
