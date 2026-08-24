@@ -78,6 +78,16 @@ export PKG_CONFIG_PATH="${PKG_CONFIG_LIBDIR}"
 export PKG_CONFIG_SYSROOT_DIR="/"
 export AR RANLIB NM STRIP PKG_CONFIG CMAKE
 
+# xemu's generated configuration headers use Python's yaml module during Ninja.
+# Use an isolated host virtual environment so the dependency is available even
+# when the runner's system/Homebrew Python is externally managed.
+HOST_PYTHON="$(command -v python3)"
+HOST_PYTHON_VENV="${BUILD_DIR}/host-python-venv"
+"${HOST_PYTHON}" -m venv "${HOST_PYTHON_VENV}"
+"${HOST_PYTHON_VENV}/bin/python" -m pip install --disable-pip-version-check PyYAML
+export PATH="${HOST_PYTHON_VENV}/bin:${PATH}"
+python3 -c 'import yaml; print("PyYAML ready:", yaml.__version__)'
+
 printf 'Using host CMake for Meson subprojects: %s\n' "${CMAKE}"
 "${CMAKE}" --version
 
