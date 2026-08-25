@@ -150,4 +150,9 @@ swift_path.write_text(swift, encoding="utf-8")
 fatx_path.write_text(fatx, encoding="utf-8")
 jit_path.write_text(jit, encoding="utf-8")
 
+diag_path = root / ".github" / "scripts" / "apply_ios_vulkan_diagnostics.py"
+if not diag_path.is_file():
+    fail("iOS Vulkan diagnostics patch script not found")
+exec(compile(diag_path.read_text(encoding="utf-8"), str(diag_path), "exec"), {"__name__": "__main__"})
+
 print("Self-patch applied or already present.")
