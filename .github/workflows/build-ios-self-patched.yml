@@ -46,6 +46,8 @@ jobs:
           grep -n "xemu_ios_set_application_active" ui/xemu.c
           grep -n "loadSetApplicationActive" ios/DukeX/DukeX/Runtime/Core/EmulatorCoreRuntime.swift
           grep -n "UIApplication.willResignActiveNotification" ios/DukeX/DukeX/Runtime/Core/EmulatorCoreRuntime.swift
+          grep -n "vkCreateInstance returned" hw/xbox/nv2a/pgraph/vk/instance.c
+          grep -n "available Vulkan instance extensions" hw/xbox/nv2a/pgraph/vk/instance.c
 
       - name: Install build tools
         run: |
