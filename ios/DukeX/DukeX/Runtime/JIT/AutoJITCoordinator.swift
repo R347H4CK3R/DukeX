@@ -94,7 +94,7 @@ final class StikDebugAutoJITCoordinator: ObservableObject {
                     self.clearPending()
                     onFailure(UserMessage(
                         title: "StikDebug Not Opened",
-                        detail: "iOS could not open the stikjit://enable-jit URL. Confirm StikDebug is installed and closed before testing."
+                        detail: "iOS could not open the stikdebug://enable-jit URL. Confirm StikDebug is installed and closed before testing."
                     ))
                 }
             }
@@ -208,10 +208,11 @@ final class StikDebugAutoJITCoordinator: ObservableObject {
 
     private func makeStikDebugURL(bundleID: String, scriptName: String?) -> URL? {
         var components = URLComponents()
-        components.scheme = "stikjit"
+        components.scheme = "stikdebug"
         components.host = "enable-jit"
         var queryItems = [
-            URLQueryItem(name: "bundle-id", value: bundleID)
+            URLQueryItem(name: "bundle-id", value: bundleID),
+            URLQueryItem(name: "pid", value: String(ProcessInfo.processInfo.processIdentifier))
         ]
         if let scriptName {
             queryItems.append(URLQueryItem(name: "script-name", value: scriptName))
