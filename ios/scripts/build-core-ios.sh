@@ -48,6 +48,7 @@ STRIP="$(xcrun --sdk "${SDK_NAME}" --find strip)"
 PKG_CONFIG="${PKG_CONFIG:-pkg-config}"
 CMAKE="${CMAKE:-$(command -v cmake)}"
 TARGET="arm64-apple-ios${IOS_DEPLOYMENT_TARGET}"
+MOLTENVK_FRAMEWORK_DIR="$(dirname "${MOLTENVK_FRAMEWORK}")"
 COMMON_FLAGS=(
   "-target" "${TARGET}"
   "-isysroot" "${SDKROOT}"
@@ -61,6 +62,8 @@ COMMON_FLAGS=(
 COMMON_LDFLAGS=(
   "${COMMON_FLAGS[@]}"
   "-framework" "CoreFoundation"
+  "-F${MOLTENVK_FRAMEWORK_DIR}"
+  "-Wl,-rpath,@loader_path/Frameworks"
 )
 EXTRA_CONFIGURE_ARGS=()
 if [[ -n "${XEMU_IOS_CONFIGURE_ARGS:-}" ]]; then
@@ -101,6 +104,7 @@ printf 'Using host Python: %s\n' "${PYTHON}"
 printf 'Using host CMake for Meson subprojects: %s\n' "${CMAKE}"
 "${CMAKE}" --version
 printf 'MoltenVK framework will be packaged for runtime loading: %s\n' "${MOLTENVK_FRAMEWORK}"
+printf 'Embedding core rpath: @loader_path/Frameworks\n'
 
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
