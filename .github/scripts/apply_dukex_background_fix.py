@@ -6,6 +6,7 @@ root = Path.cwd()
 xemu_path = root / "ui" / "xemu.c"
 swift_path = root / "ios" / "DukeX" / "DukeX" / "Runtime" / "Core" / "EmulatorCoreRuntime.swift"
 fatx_path = root / "ios" / "DukeX" / "DukeX" / "Services" / "CloudSaves" / "FATXHDDCloudSaveStore.swift"
+jit_path = root / "tcg" / "ios-jit.c"
 
 def fail(msg):
     print("ERROR:", msg, file=sys.stderr)
@@ -17,12 +18,13 @@ def replace_once(text, old, new, label):
         fail(f"{label}: expected 1 match, found {count}")
     return text.replace(old, new, 1)
 
-if not xemu_path.is_file() or not swift_path.is_file() or not fatx_path.is_file():
+if not xemu_path.is_file() or not swift_path.is_file() or not fatx_path.is_file() or not jit_path.is_file():
     fail("DukeX source files not found")
 
 xemu = xemu_path.read_text(encoding="utf-8")
 swift = swift_path.read_text(encoding="utf-8")
 fatx = fatx_path.read_text(encoding="utf-8")
+jit = jit_path.read_text(encoding="utf-8")
 
 if "void xemu_ios_set_application_active(int active)" not in xemu:
     xemu = replace_once(
@@ -93,8 +95,59 @@ if old_fat_timestamp in fatx:
 elif new_fat_timestamp not in fatx:
     fail("FATX timestamp block not found; refusing to continue with an unpatched compiler issue")
 
+# Prevent an unhandled Universal.js BRK from killing DukeX with SIGTRAP.
+# On iOS 26+ the BRK must be intercepted by the StikDebug/Universal.js broker.
+# If no debugger is attached, fail JIT setup cleanly and emit a useful log instead.
+if "xemu_ios_universal_jit_debugger_attached" not in jit:
+    jit = replace_once(
+        jit,
+        '#include <TargetConditionals.h>\n#include <libkern/OSCacheControl.h>',
+        '#include <TargetConditionals.h>\n#include <libkern/OSCacheControl.h>\n#include <sys/sysctl.h>',
+        "Universal.js debugger sysctl include",
+    )
+
+    helper_anchor = '''#if XEMU_IOS_UNIVERSAL_JIT_BRK
+__attribute__((noinline, optnone, naked, used))
+static void *jit26_prepare_region(void *addr, size_t len)
+'''
+    helper_replacement = '''#if XEMU_IOS_UNIVERSAL_JIT_BRK
+static bool xemu_ios_universal_jit_debugger_attached(void)
+{
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid() };
+    struct kinfo_proc info;
+    size_t info_size = sizeof(info);
+
+    memset(&info, 0, sizeof(info));
+    if (sysctl(mib, 4, &info, &info_size, NULL, 0) != 0) {
+        return false;
+    }
+    return (info.kp_proc.p_flag & P_TRACED) != 0;
+}
+
+__attribute__((noinline, optnone, naked, used))
+static void *jit26_prepare_region(void *addr, size_t len)
+'''
+    jit = replace_once(jit, helper_anchor, helper_replacement, "Universal.js debugger helper")
+
+    prepare_anchor = '''    fprintf(stderr, "xemu-ios: Universal.js preparing JIT region %p (%zu bytes)\\n",
+            addr, size);
+    prepared_addr = jit26_prepare_region(addr, size);
+'''
+    prepare_replacement = '''    if (!xemu_ios_universal_jit_debugger_attached()) {
+        warn_report("Universal.js broker not attached; refusing to issue BRK for JIT region %p (size %zu)",
+                    addr, size);
+        return NULL;
+    }
+
+    fprintf(stderr, "xemu-ios: Universal.js debugger broker attached; preparing JIT region %p (%zu bytes)\\n",
+            addr, size);
+    prepared_addr = jit26_prepare_region(addr, size);
+'''
+    jit = replace_once(jit, prepare_anchor, prepare_replacement, "Universal.js pre-BRK guard")
+
 xemu_path.write_text(xemu, encoding="utf-8")
 swift_path.write_text(swift, encoding="utf-8")
 fatx_path.write_text(fatx, encoding="utf-8")
+jit_path.write_text(jit, encoding="utf-8")
 
 print("Self-patch applied or already present.")
