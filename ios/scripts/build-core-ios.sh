@@ -8,6 +8,7 @@ IOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-16.0}"
 SDK_NAME="${SDK_NAME:-iphoneos}"
 VCPKG_PREFIX="${XEMU_IOS_VCPKG_PREFIX:-${VCPKG_ROOT:-}/installed/arm64-ios}"
 MOLTENVK_ROOT="${MOLTENVK_ROOT:-}"
+MOLTENVK_FRAMEWORK="${MOLTENVK_FRAMEWORK:-}"
 XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-sigaltstack}"
 
 for path in "${SOURCE_DIR}" "${BUILD_DIR}"; do
@@ -31,6 +32,12 @@ if [[ -z "${MOLTENVK_ROOT}" || ! -f "${MOLTENVK_ROOT}/include/vulkan/vulkan.h" ]
   exit 1
 fi
 
+if [[ -z "${MOLTENVK_FRAMEWORK}" || ! -f "${MOLTENVK_FRAMEWORK}/MoltenVK" ]]; then
+  printf 'Missing MoltenVK iOS framework. Set MOLTENVK_FRAMEWORK.\n' >&2
+  printf 'Expected: %s\n' "${MOLTENVK_FRAMEWORK:-<unset>}/MoltenVK" >&2
+  exit 1
+fi
+
 SDKROOT="$(xcrun --sdk "${SDK_NAME}" --show-sdk-path)"
 CLANG="$(xcrun --sdk "${SDK_NAME}" --find clang)"
 CLANGXX="$(xcrun --sdk "${SDK_NAME}" --find clang++)"
@@ -41,6 +48,7 @@ STRIP="$(xcrun --sdk "${SDK_NAME}" --find strip)"
 PKG_CONFIG="${PKG_CONFIG:-pkg-config}"
 CMAKE="${CMAKE:-$(command -v cmake)}"
 TARGET="arm64-apple-ios${IOS_DEPLOYMENT_TARGET}"
+MOLTENVK_FRAMEWORK_DIR="$(dirname "${MOLTENVK_FRAMEWORK}")"
 COMMON_FLAGS=(
   "-target" "${TARGET}"
   "-isysroot" "${SDKROOT}"
@@ -54,6 +62,9 @@ COMMON_FLAGS=(
 COMMON_LDFLAGS=(
   "${COMMON_FLAGS[@]}"
   "-framework" "CoreFoundation"
+  "-F${MOLTENVK_FRAMEWORK_DIR}"
+  "-framework" "MoltenVK"
+  "-Wl,-rpath,@loader_path/Frameworks"
 )
 EXTRA_CONFIGURE_ARGS=()
 if [[ -n "${XEMU_IOS_CONFIGURE_ARGS:-}" ]]; then
@@ -93,6 +104,8 @@ printf 'Using host Python: %s\n' "${PYTHON}"
 
 printf 'Using host CMake for Meson subprojects: %s\n' "${CMAKE}"
 "${CMAKE}" --version
+printf 'Linking MoltenVK framework from: %s\n' "${MOLTENVK_FRAMEWORK}"
+printf 'Embedding core rpath: @loader_path/Frameworks\n'
 
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
