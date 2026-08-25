@@ -38,6 +38,7 @@
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>manicemu</string>
+		<string>stikdebug</string>
 	</array>
 	<key>LSSupportsGameMode</key>
 	<true/>
