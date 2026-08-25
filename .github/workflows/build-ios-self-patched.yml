@@ -161,9 +161,15 @@ jobs:
             tar -xf "$RUNNER_TEMP/mvk.pkg" -C "$RUNNER_TEMP/mvk"
           fi
           MOLTENVK_ROOT=$(find "$RUNNER_TEMP/mvk" -type f -path '*/include/vulkan/vulkan.h' -print -quit | sed 's#/include/vulkan/vulkan.h##')
-          MOLTENVK_FRAMEWORK=$(find "$RUNNER_TEMP/mvk" -type d -name 'MoltenVK.framework' -print -quit)
+          MOLTENVK_FRAMEWORK=$(find "$RUNNER_TEMP/mvk" -type d -name 'MoltenVK.framework' -path '*iOS*' -print -quit)
+          if [ -z "$MOLTENVK_FRAMEWORK" ]; then
+            MOLTENVK_FRAMEWORK=$(find "$RUNNER_TEMP/mvk" -type d -name 'MoltenVK.framework' -print -quit)
+          fi
           test -n "$MOLTENVK_ROOT"
           test -n "$MOLTENVK_FRAMEWORK"
+          test -f "$MOLTENVK_FRAMEWORK/MoltenVK"
+          echo "MoltenVK framework: $MOLTENVK_FRAMEWORK"
+          file "$MOLTENVK_FRAMEWORK/MoltenVK"
           echo "MOLTENVK_ROOT=$MOLTENVK_ROOT" >> "$GITHUB_ENV"
           echo "MOLTENVK_FRAMEWORK=$MOLTENVK_FRAMEWORK" >> "$GITHUB_ENV"
 
@@ -188,7 +194,34 @@ jobs:
             build
           APP="$RUNNER_TEMP/DukeXDerivedData/Build/Products/Release-iphoneos/DukeX.app"
           test -d "$APP"
+
+          # volk loads Vulkan at runtime, so merely using MoltenVK headers while
+          # compiling the core is not enough. Put the iOS MoltenVK framework in
+          # the application bundle where the runtime loader can find it.
+          mkdir -p "$APP/Frameworks"
+          rm -rf "$APP/Frameworks/MoltenVK.framework"
+          ditto "$MOLTENVK_FRAMEWORK" "$APP/Frameworks/MoltenVK.framework"
+          test -f "$APP/Frameworks/MoltenVK.framework/MoltenVK"
+
+          echo "Embedded frameworks:"
+          find "$APP/Frameworks" -maxdepth 2 -type f -print
+          echo "MoltenVK binary:"
+          file "$APP/Frameworks/MoltenVK.framework/MoltenVK"
+          echo "MoltenVK load commands:"
+          otool -l "$APP/Frameworks/MoltenVK.framework/MoltenVK" | grep -A3 -E 'LC_ID_DYLIB|LC_BUILD_VERSION' || true
+          echo "Core Vulkan/MoltenVK references:"
+          strings "$APP/libxemu-ios-core.dylib" 2>/dev/null | grep -Ei 'MoltenVK|libvulkan|vkCreateInstance' | head -50 || true
+
           echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+
+      - name: Verify packaged Vulkan runtime
+        run: |
+          test -f "$APP_PATH/Frameworks/MoltenVK.framework/MoltenVK"
+          if ! file "$APP_PATH/Frameworks/MoltenVK.framework/MoltenVK" | grep -q 'arm64'; then
+            echo "MoltenVK framework does not contain arm64" >&2
+            exit 1
+          fi
+          echo "MoltenVK runtime is present in the app bundle."
 
       - name: Package unsigned IPA
         run: |
