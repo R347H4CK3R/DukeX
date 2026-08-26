@@ -41,8 +41,58 @@ if "loadSetApplicationActive" not in swift:
     new_task = '            Task { @MainActor in\n                let notificationCenter = NotificationCenter.default\n                let resignObserver = notificationCenter.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in setApplicationActive?(0) }\n                let backgroundObserver = notificationCenter.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in setApplicationActive?(0) }\n                let activeObserver = notificationCenter.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in setApplicationActive?(1) }\n                setApplicationActive?(UIApplication.shared.applicationState == .active ? 1 : 0)\n                defer {\n                    notificationCenter.removeObserver(resignObserver)\n                    notificationCenter.removeObserver(backgroundObserver)\n                    notificationCenter.removeObserver(activeObserver)\n                }\n                await XboxPeripheralPermissionPrimer.shared.prepareIfNeeded('
     swift = replace_once(swift, old_task, new_task, "swift lifecycle observers")
     old_loader = '        self.requestShutdown = requestShutdown\n        return requestShutdown\n    }\n\n    private func loadRequestSystemReset() -> QemuSystemResetRequest? {'
-    new_loader = '        self.requestShutdown = requestShutdown\n        return requestShutdown\n    }\n\n    private func loadSetApplicationActive() -> XemuSetApplicationActive? {\n        if let setApplicationActive { return setApplicationActive }\n        guard let handle else { return nil }\n        guard let symbol = dlsym(handle, "xemu_ios_set_application_active") else {\n            NSLog("xemu_ios_set_application_active is not available; background GPU protection disabled")\n            return nil\n        }\n        NSLog("Resolved xemu_ios_set_application_active")\n        let setter = unsafeBitCast(symbol, to: XemuSetApplicationActive.self)\n        setApplicationActive = setter\n        return setter\n    }\n\n    private func loadRequestSystemReset() -> QemuSystemResetRequest? {'
+    new_loader = '        self.requestShutdown = requestShutdown\n        return requestShutdown\n    }\n\n    private func loadSetApplicationActive() -> XemuSetApplicationActive? {\n        if let setApplicationActive { return setApplicationActive }\n        guard let handle else { return nil }\n        guard let symbol = dlsym(handle, "xemu_ios_set_application_active") else {\n            NSLog("xemu_ios_set_application_active is not available; background GPU protection disabled")\n            return nil\n        }\n        NSLog("Resolved xemu_ios_set_application_active")\n        let setter = unsafeBitCast(symbol, to: XemuSetApplicationActive.self)\n        setApplicationActive = setter\n        return setter\n    }\n\n    private func loadRequestSystemReset() -> QemuSystemSystemResetRequest? {'
+    # Keep the exact original type name; split out to make accidental substitutions obvious.
+    new_loader = new_loader.replace('QemuSystemSystemResetRequest', 'QemuSystemResetRequest')
     swift = replace_once(swift, old_loader, new_loader, "swift symbol loader")
+
+# xemu_ios_main is a long-lived blocking emulator loop. UIKit/Metal presenter setup
+# must stay on the MainActor, but the core loop itself must not occupy the main
+# thread or iOS can terminate LiveContainer for a blown CoreAnimation fence.
+if "DukeX.XemuCore.Execution" not in swift:
+    swift = replace_once(
+        swift,
+        '    private static let qemuShutdownCauseGuestReset: Int32 = 7\n',
+        '    private static let qemuShutdownCauseGuestReset: Int32 = 7\n    private static let coreExecutionQueue = DispatchQueue(label: "DukeX.XemuCore.Execution", qos: .userInitiated)\n',
+        "swift core execution queue"
+    )
+    swift = replace_once(
+        swift,
+        '                let status = Self.invoke(\n',
+        '                let status = await Self.invoke(\n',
+        "swift async core invocation"
+    )
+    swift = replace_once(
+        swift,
+        '        session: NativeMetalPresenterSession\n    ) -> Int32 {',
+        '        session: NativeMetalPresenterSession\n    ) async -> Int32 {',
+        "swift async invoke signature"
+    )
+    old_entry = '''        var mutableArgv = argv
+        NativeMetalDiagnostics.log("CORE_ENTRY", "calling xemu_ios_main argc=\\(arguments.count) mainThread=\\(Thread.isMainThread ? 1 : 0)")
+        XboxCameraDiagnosticLog.write("calling xemu_ios_main argc=\\(arguments.count)")
+        return mutableArgv.withUnsafeMutableBufferPointer { buffer in
+            let status = entryPoint(Int32(arguments.count), buffer.baseAddress)
+            NativeMetalDiagnostics.log("CORE_ENTRY", "xemu_ios_main returned status=\\(status)")
+            XboxCameraDiagnosticLog.write("xemu_ios_main returned status=\\(status)")
+            return status
+        }'''
+    new_entry = '''        NativeMetalDiagnostics.log("CORE_ENTRY", "dispatching xemu_ios_main argc=\\(arguments.count) mainThread=\\(Thread.isMainThread ? 1 : 0)")
+        XboxCameraDiagnosticLog.write("dispatching xemu_ios_main argc=\\(arguments.count)")
+        return await withCheckedContinuation { continuation in
+            coreExecutionQueue.async {
+                var mutableArgv = argv
+                NativeMetalDiagnostics.log("CORE_ENTRY", "calling xemu_ios_main argc=\\(arguments.count) mainThread=\\(Thread.isMainThread ? 1 : 0)")
+                XboxCameraDiagnosticLog.write("calling xemu_ios_main argc=\\(arguments.count)")
+                let status = mutableArgv.withUnsafeMutableBufferPointer { buffer in
+                    entryPoint(Int32(arguments.count), buffer.baseAddress)
+                }
+                NativeMetalDiagnostics.log("CORE_ENTRY", "xemu_ios_main returned status=\\(status)")
+                XboxCameraDiagnosticLog.write("xemu_ios_main returned status=\\(status)")
+                continuation.resume(returning: status)
+            }
+        }'''
+    swift = replace_once(swift, old_entry, new_entry, "swift off-main xemu entry")
 
 old_fat_timestamp = '''        let year = max(1980, components.year ?? 1980)
         let date = UInt16(((year - 1980) << 9) | ((components.month ?? 1) << 5) | (components.day ?? 1))
