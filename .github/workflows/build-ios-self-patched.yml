@@ -71,6 +71,7 @@ jobs:
           EPOXY_PORT="$RUNNER_TEMP/vcpkg/ports/libepoxy/portfile.cmake"
           PCAP_PORT="$RUNNER_TEMP/vcpkg/ports/libpcap/portfile.cmake"
           IOS_TRIPLET="$RUNNER_TEMP/vcpkg/triplets/community/arm64-ios.cmake"
+          SDL_PATCH="$RUNNER_TEMP/vcpkg/ports/sdl3/dukex-ios-uikit-main-thread.patch"
 
           echo "Original libiconv relocatable block:"
           grep -n -A2 -B1 "enable-relocatable" "$ICONV_PORT" || true
@@ -122,12 +123,28 @@ jobs:
                     'set(VCPKG_LINKER_FLAGS_DEBUG "${VCPKG_LINKER_FLAGS_DEBUG} -framework CoreFoundation")\n'
                     'set(VCPKG_LINKER_FLAGS_RELEASE "${VCPKG_LINKER_FLAGS_RELEASE} -framework CoreFoundation")\n')
               triplet.write_text(t)
+
+          patch = root / "ports/sdl3/dukex-ios-uikit-main-thread.patch"
+          text = patch.read_text()
+          replacements = {
+              "@@ -129,6 +129,16 @@": "@@ -129,4 +129,16 @@",
+              "@@ -229,6 +239,14 @@": "@@ -229,4 +241,11 @@",
+              "@@ -249,6 +267,14 @@": "@@ -249,4 +268,11 @@",
+              "@@ -318,6 +344,14 @@": "@@ -318,4 +344,11 @@",
+          }
+          for old_hunk, new_hunk in replacements.items():
+              if old_hunk not in text:
+                  raise SystemExit(f"Expected SDL patch hunk header not found: {old_hunk}")
+              text = text.replace(old_hunk, new_hunk, 1)
+          patch.write_text(text)
           PY
 
           grep -q 'NOT VCPKG_TARGET_IS_ANDROID AND NOT VCPKG_TARGET_IS_IOS' "$ICONV_PORT"
           grep -q 'VCPKG_TARGET_IS_OSX OR VCPKG_TARGET_IS_IOS' "$EPOXY_PORT"
           grep -q -- '-DPCAP_TYPE=null' "$PCAP_PORT"
           grep -q 'CoreFoundation' "$IOS_TRIPLET"
+          grep -q '@@ -129,4 +129,16 @@' "$SDL_PATCH"
+          grep -q '@@ -229,4 +241,11 @@' "$SDL_PATCH"
 
       - name: Install iOS dependencies
         run: |
