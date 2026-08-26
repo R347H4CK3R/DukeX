@@ -161,13 +161,18 @@ jobs:
             tar -xf "$RUNNER_TEMP/mvk.pkg" -C "$RUNNER_TEMP/mvk"
           fi
           MOLTENVK_ROOT=$(find "$RUNNER_TEMP/mvk" -type f -path '*/include/vulkan/vulkan.h' -print -quit | sed 's#/include/vulkan/vulkan.h##')
-          MOLTENVK_FRAMEWORK=$(find "$RUNNER_TEMP/mvk" -type d -name 'MoltenVK.framework' -path '*iOS*' -print -quit)
+          MOLTENVK_FRAMEWORK=$(find "$RUNNER_TEMP/mvk" -type d -path '*/MoltenVK.xcframework/ios-arm64/MoltenVK.framework' -print -quit)
           if [ -z "$MOLTENVK_FRAMEWORK" ]; then
-            MOLTENVK_FRAMEWORK=$(find "$RUNNER_TEMP/mvk" -type d -name 'MoltenVK.framework' -print -quit)
+            echo "Could not find the iOS device arm64 MoltenVK framework. Available slices:" >&2
+            find "$RUNNER_TEMP/mvk" -type d -name 'MoltenVK.framework' -print >&2
+            exit 1
           fi
           test -n "$MOLTENVK_ROOT"
-          test -n "$MOLTENVK_FRAMEWORK"
           test -f "$MOLTENVK_FRAMEWORK/MoltenVK"
+          case "$MOLTENVK_FRAMEWORK" in
+            */ios-arm64/MoltenVK.framework) ;;
+            *) echo "Refusing non-iOS-device MoltenVK slice: $MOLTENVK_FRAMEWORK" >&2; exit 1 ;;
+          esac
           echo "MoltenVK framework: $MOLTENVK_FRAMEWORK"
           file "$MOLTENVK_FRAMEWORK/MoltenVK"
           echo "MOLTENVK_ROOT=$MOLTENVK_ROOT" >> "$GITHUB_ENV"
@@ -195,9 +200,6 @@ jobs:
           APP="$RUNNER_TEMP/DukeXDerivedData/Build/Products/Release-iphoneos/DukeX.app"
           test -d "$APP"
 
-          # volk loads Vulkan at runtime, so merely using MoltenVK headers while
-          # compiling the core is not enough. Put the iOS MoltenVK framework in
-          # the application bundle where the runtime loader can find it.
           mkdir -p "$APP/Frameworks"
           rm -rf "$APP/Frameworks/MoltenVK.framework"
           ditto "$MOLTENVK_FRAMEWORK" "$APP/Frameworks/MoltenVK.framework"
@@ -221,7 +223,11 @@ jobs:
             echo "MoltenVK framework does not contain arm64" >&2
             exit 1
           fi
-          echo "MoltenVK runtime is present in the app bundle."
+          if ! otool -l "$APP_PATH/Frameworks/MoltenVK.framework/MoltenVK" | grep -A4 LC_BUILD_VERSION | grep -q 'platform 2'; then
+            echo "MoltenVK framework is not built for iOS device" >&2
+            exit 1
+          fi
+          echo "MoltenVK iOS runtime is present in the app bundle."
 
       - name: Package unsigned IPA
         run: |
