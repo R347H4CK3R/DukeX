@@ -63,6 +63,7 @@ COMMON_LDFLAGS=(
   "${COMMON_FLAGS[@]}"
   "-framework" "CoreFoundation"
   "-F${MOLTENVK_FRAMEWORK_DIR}"
+  "-Wl,-needed_framework,MoltenVK"
   "-Wl,-rpath,@loader_path/Frameworks"
 )
 EXTRA_CONFIGURE_ARGS=()
@@ -76,11 +77,12 @@ mkdir -p "${VULKAN_PKG_CONFIG_DIR}"
 cat > "${VULKAN_PKG_CONFIG_DIR}/vulkan.pc" <<EOF
 prefix=${MOLTENVK_ROOT}
 includedir=\${prefix}/include
+frameworkdir=${MOLTENVK_FRAMEWORK_DIR}
 
 Name: vulkan
-Description: MoltenVK headers for iOS runtime loading through volk
+Description: MoltenVK Vulkan implementation for iOS
 Version: 1.3.0
-Libs:
+Libs: -F\${frameworkdir} -Wl,-needed_framework,MoltenVK
 Cflags: -I\${includedir} -DVK_ENABLE_BETA_EXTENSIONS=1 -DVK_USE_PLATFORM_METAL_EXT=1
 EOF
 
@@ -103,7 +105,7 @@ printf 'Using host Python: %s\n' "${PYTHON}"
 
 printf 'Using host CMake for Meson subprojects: %s\n' "${CMAKE}"
 "${CMAKE}" --version
-printf 'MoltenVK framework will be packaged for runtime loading: %s\n' "${MOLTENVK_FRAMEWORK}"
+printf 'MoltenVK framework will be force-linked for iOS runtime loading: %s\n' "${MOLTENVK_FRAMEWORK}"
 printf 'Embedding core rpath: @loader_path/Frameworks\n'
 
 mkdir -p "${BUILD_DIR}"
