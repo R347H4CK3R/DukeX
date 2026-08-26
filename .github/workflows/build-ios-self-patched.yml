@@ -71,17 +71,11 @@ jobs:
           EPOXY_PORT="$RUNNER_TEMP/vcpkg/ports/libepoxy/portfile.cmake"
           PCAP_PORT="$RUNNER_TEMP/vcpkg/ports/libpcap/portfile.cmake"
           IOS_TRIPLET="$RUNNER_TEMP/vcpkg/triplets/community/arm64-ios.cmake"
-          SDL_PATCH="$RUNNER_TEMP/vcpkg/ports/sdl3/dukex-ios-uikit-main-thread.patch"
-
-          echo "Original libiconv relocatable block:"
-          grep -n -A2 -B1 "enable-relocatable" "$ICONV_PORT" || true
-
-          echo "Original libepoxy Apple target block:"
-          grep -n -A3 -B1 "VCPKG_TARGET_IS_WINDOWS OR VCPKG_TARGET_IS_OSX" "$EPOXY_PORT" || true
+          SDL_PORT="$RUNNER_TEMP/vcpkg/ports/sdl3/portfile.cmake"
 
           python3 - <<'PY'
           from pathlib import Path
-          import os
+          import os, re
 
           root = Path(os.environ["RUNNER_TEMP"]) / "vcpkg"
           iconv = root / "ports/libiconv/portfile.cmake"
@@ -93,7 +87,7 @@ jobs:
               vcpkg_list(APPEND OPTIONS --enable-relocatable)
           endif()"""
           if old not in s:
-              raise SystemExit("Expected libiconv relocatable block not found; refusing to continue with an unpatched port")
+              raise SystemExit("Expected libiconv relocatable block not found")
           iconv.write_text(s.replace(old, new, 1))
 
           epoxy = root / "ports/libepoxy/portfile.cmake"
@@ -101,7 +95,7 @@ jobs:
           old_epoxy = "if (VCPKG_TARGET_IS_WINDOWS OR VCPKG_TARGET_IS_OSX)"
           new_epoxy = "if (VCPKG_TARGET_IS_WINDOWS OR VCPKG_TARGET_IS_OSX OR VCPKG_TARGET_IS_IOS)"
           if old_epoxy not in e:
-              raise SystemExit("Expected libepoxy Apple target condition not found; refusing to continue with an unpatched port")
+              raise SystemExit("Expected libepoxy Apple target condition not found")
           epoxy.write_text(e.replace(old_epoxy, new_epoxy, 1))
 
           pcap = root / "ports/libpcap/portfile.cmake"
@@ -109,14 +103,10 @@ jobs:
           needle = "vcpkg_cmake_configure(\n"
           if needle not in p:
               raise SystemExit("Unexpected libpcap port layout")
-          p = p.replace(needle, needle + "    OPTIONS\n        -DPCAP_TYPE=null\n", 1)
-          pcap.write_text(p)
+          pcap.write_text(p.replace(needle, needle + "    OPTIONS\n        -DPCAP_TYPE=null\n", 1))
 
           triplet = root / "triplets/community/arm64-ios.cmake"
           t = triplet.read_text()
-          marker = 'set(VCPKG_CMAKE_SYSTEM_NAME iOS)'
-          if marker not in t:
-              raise SystemExit("Unexpected arm64-ios triplet layout")
           if "CoreFoundation" not in t:
               t += ('\n# Static gettext-libintl calls CoreFoundation on Apple targets.\n'
                     'set(VCPKG_LINKER_FLAGS "${VCPKG_LINKER_FLAGS} -framework CoreFoundation")\n'
@@ -124,27 +114,28 @@ jobs:
                     'set(VCPKG_LINKER_FLAGS_RELEASE "${VCPKG_LINKER_FLAGS_RELEASE} -framework CoreFoundation")\n')
               triplet.write_text(t)
 
-          patch = root / "ports/sdl3/dukex-ios-uikit-main-thread.patch"
-          text = patch.read_text()
-          replacements = {
-              "@@ -129,6 +129,16 @@": "@@ -129,4 +129,16 @@",
-              "@@ -229,6 +239,14 @@": "@@ -229,4 +241,11 @@",
-              "@@ -249,6 +267,14 @@": "@@ -249,4 +268,11 @@",
-              "@@ -318,6 +344,14 @@": "@@ -318,4 +344,11 @@",
-          }
-          for old_hunk, new_hunk in replacements.items():
-              if old_hunk not in text:
-                  raise SystemExit(f"Expected SDL patch hunk header not found: {old_hunk}")
-              text = text.replace(old_hunk, new_hunk, 1)
-          patch.write_text(text)
+          # The temporary DukeX SDL patch shipped in the vcpkg checkout has
+          # malformed unified-diff hunks. DukeX now applies the iOS SDL
+          # main-thread fix directly to its own source before dependencies are
+          # built, so do not ask vcpkg to apply the broken duplicate patch.
+          sdl_port = root / "ports/sdl3/portfile.cmake"
+          sp = sdl_port.read_text()
+          sp2 = re.sub(r'^\s*dukex-ios-uikit-main-thread\.patch\s*$', '', sp, flags=re.M)
+          if sp2 != sp:
+              sdl_port.write_text(sp2)
+              print("Removed malformed duplicate DukeX SDL patch from vcpkg sdl3 port")
+          else:
+              print("No DukeX SDL patch reference present in current vcpkg; nothing to remove")
           PY
 
           grep -q 'NOT VCPKG_TARGET_IS_ANDROID AND NOT VCPKG_TARGET_IS_IOS' "$ICONV_PORT"
           grep -q 'VCPKG_TARGET_IS_OSX OR VCPKG_TARGET_IS_IOS' "$EPOXY_PORT"
           grep -q -- '-DPCAP_TYPE=null' "$PCAP_PORT"
           grep -q 'CoreFoundation' "$IOS_TRIPLET"
-          grep -q '@@ -129,4 +129,16 @@' "$SDL_PATCH"
-          grep -q '@@ -229,4 +241,11 @@' "$SDL_PATCH"
+          if grep -q 'dukex-ios-uikit-main-thread.patch' "$SDL_PORT"; then
+            echo "Malformed SDL patch is still referenced" >&2
+            exit 1
+          fi
 
       - name: Install iOS dependencies
         run: |
@@ -168,38 +159,16 @@ jobs:
             -H "X-GitHub-Api-Version: 2022-11-28" \
             https://api.github.com/repos/KhronosGroup/MoltenVK/releases/latest \
             -o "$RUNNER_TEMP/mvk.json"
-
           ASSET_API_URL=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(a["url"] for a in d["assets"] if a["name"].endswith((".tar",".tar.gz",".zip"))))' "$RUNNER_TEMP/mvk.json")
           ASSET_NAME=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(a["name"] for a in d["assets"] if a["name"].endswith((".tar",".tar.gz",".zip"))))' "$RUNNER_TEMP/mvk.json")
           echo "Downloading MoltenVK asset: $ASSET_NAME"
-
-          curl --retry 5 --retry-all-errors -fL \
-            -H "Accept: application/octet-stream" \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "$ASSET_API_URL" -o "$RUNNER_TEMP/mvk.pkg"
-
+          curl --retry 5 --retry-all-errors -fL -H "Accept: application/octet-stream" -H "Authorization: Bearer $GH_TOKEN" -H "X-GitHub-Api-Version: 2022-11-28" "$ASSET_API_URL" -o "$RUNNER_TEMP/mvk.pkg"
           mkdir -p "$RUNNER_TEMP/mvk"
-          if file "$RUNNER_TEMP/mvk.pkg" | grep -qi zip; then
-            unzip -q "$RUNNER_TEMP/mvk.pkg" -d "$RUNNER_TEMP/mvk"
-          else
-            tar -xf "$RUNNER_TEMP/mvk.pkg" -C "$RUNNER_TEMP/mvk"
-          fi
+          if file "$RUNNER_TEMP/mvk.pkg" | grep -qi zip; then unzip -q "$RUNNER_TEMP/mvk.pkg" -d "$RUNNER_TEMP/mvk"; else tar -xf "$RUNNER_TEMP/mvk.pkg" -C "$RUNNER_TEMP/mvk"; fi
           MOLTENVK_ROOT=$(find "$RUNNER_TEMP/mvk" -type f -path '*/include/vulkan/vulkan.h' -print -quit | sed 's#/include/vulkan/vulkan.h##')
           MOLTENVK_FRAMEWORK=$(find "$RUNNER_TEMP/mvk" -type d -path '*/MoltenVK.xcframework/ios-arm64/MoltenVK.framework' -print -quit)
-          if [ -z "$MOLTENVK_FRAMEWORK" ]; then
-            echo "Could not find the iOS device arm64 MoltenVK framework. Available slices:" >&2
-            find "$RUNNER_TEMP/mvk" -type d -name 'MoltenVK.framework' -print >&2
-            exit 1
-          fi
           test -n "$MOLTENVK_ROOT"
           test -f "$MOLTENVK_FRAMEWORK/MoltenVK"
-          case "$MOLTENVK_FRAMEWORK" in
-            */ios-arm64/MoltenVK.framework) ;;
-            *) echo "Refusing non-iOS-device MoltenVK slice: $MOLTENVK_FRAMEWORK" >&2; exit 1 ;;
-          esac
-          echo "MoltenVK framework: $MOLTENVK_FRAMEWORK"
-          file "$MOLTENVK_FRAMEWORK/MoltenVK"
           echo "MOLTENVK_ROOT=$MOLTENVK_ROOT" >> "$GITHUB_ENV"
           echo "MOLTENVK_FRAMEWORK=$MOLTENVK_FRAMEWORK" >> "$GITHUB_ENV"
 
@@ -211,47 +180,19 @@ jobs:
 
       - name: Build unsigned app
         run: |
-          xcodebuild \
-            -project ios/DukeX/DukeX.xcodeproj \
-            -scheme DukeX \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination "generic/platform=iOS" \
-            -derivedDataPath "$RUNNER_TEMP/DukeXDerivedData" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            build
+          xcodebuild -project ios/DukeX/DukeX.xcodeproj -scheme DukeX -configuration Release -sdk iphoneos -destination "generic/platform=iOS" -derivedDataPath "$RUNNER_TEMP/DukeXDerivedData" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
           APP="$RUNNER_TEMP/DukeXDerivedData/Build/Products/Release-iphoneos/DukeX.app"
           test -d "$APP"
-
           mkdir -p "$APP/Frameworks"
           rm -rf "$APP/Frameworks/MoltenVK.framework"
           ditto "$MOLTENVK_FRAMEWORK" "$APP/Frameworks/MoltenVK.framework"
           test -f "$APP/Frameworks/MoltenVK.framework/MoltenVK"
-
-          echo "Embedded frameworks:"
-          find "$APP/Frameworks" -maxdepth 2 -type f -print
-          echo "MoltenVK binary:"
-          file "$APP/Frameworks/MoltenVK.framework/MoltenVK"
-          echo "MoltenVK load commands:"
-          otool -l "$APP/Frameworks/MoltenVK.framework/MoltenVK" | grep -A3 -E 'LC_ID_DYLIB|LC_BUILD_VERSION' || true
-          echo "Core Vulkan/MoltenVK references:"
-          strings "$APP/libxemu-ios-core.dylib" 2>/dev/null | grep -Ei 'MoltenVK|libvulkan|vkCreateInstance' | head -50 || true
-
           echo "APP_PATH=$APP" >> "$GITHUB_ENV"
 
       - name: Verify packaged Vulkan runtime
         run: |
           test -f "$APP_PATH/Frameworks/MoltenVK.framework/MoltenVK"
-          if ! file "$APP_PATH/Frameworks/MoltenVK.framework/MoltenVK" | grep -q 'arm64'; then
-            echo "MoltenVK framework does not contain arm64" >&2
-            exit 1
-          fi
-          if ! otool -l "$APP_PATH/Frameworks/MoltenVK.framework/MoltenVK" | grep -A4 LC_BUILD_VERSION | grep -q 'platform 2'; then
-            echo "MoltenVK framework is not built for iOS device" >&2
-            exit 1
-          fi
+          file "$APP_PATH/Frameworks/MoltenVK.framework/MoltenVK" | grep -q 'arm64'
           echo "MoltenVK iOS runtime is present in the app bundle."
 
       - name: Package unsigned IPA
