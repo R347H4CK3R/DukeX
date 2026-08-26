@@ -8,6 +8,7 @@ on:
     paths:
       - '.github/workflows/build-ios-self-patched.yml'
       - '.github/scripts/apply_dukex_background_fix.py'
+      - '.github/scripts/apply_ios_sdl_mainthread_fix.py'
       - 'ios/**'
       - 'ui/xemu.c'
   pull_request:
@@ -16,6 +17,7 @@ on:
     paths:
       - '.github/workflows/build-ios-self-patched.yml'
       - '.github/scripts/apply_dukex_background_fix.py'
+      - '.github/scripts/apply_ios_sdl_mainthread_fix.py'
       - 'ios/**'
       - 'ui/xemu.c'
 
@@ -41,11 +43,17 @@ jobs:
       - name: Apply lifecycle fix
         run: python3 .github/scripts/apply_dukex_background_fix.py
 
-      - name: Verify lifecycle fix
+      - name: Apply iOS SDL main-thread fix
+        run: python3 .github/scripts/apply_ios_sdl_mainthread_fix.py
+
+      - name: Verify lifecycle and SDL fixes
         run: |
           grep -n "xemu_ios_set_application_active" ui/xemu.c
+          grep -n "xemu_ios_prepare_sdl_video" ui/xemu.c
           grep -n "loadSetApplicationActive" ios/DukeX/DukeX/Runtime/Core/EmulatorCoreRuntime.swift
+          grep -n "loadPrepareSDLVideo" ios/DukeX/DukeX/Runtime/Core/EmulatorCoreRuntime.swift
           grep -n "UIApplication.willResignActiveNotification" ios/DukeX/DukeX/Runtime/Core/EmulatorCoreRuntime.swift
+          grep -n "refusing background SDL_Init" ui/xemu.c
 
       - name: Install build tools
         run: |
