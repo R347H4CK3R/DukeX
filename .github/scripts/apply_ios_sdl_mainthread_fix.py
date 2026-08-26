@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import os
+import stat
 import sys
 from pathlib import Path
 
@@ -19,6 +21,118 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def patch_vcpkg_sdl(vcpkg_root: Path) -> None:
+    port_dir = vcpkg_root / "ports" / "sdl3"
+    portfile = port_dir / "portfile.cmake"
+    if not portfile.is_file():
+        fail(f"SDL3 vcpkg port not found at {portfile}")
+
+    patch_name = "dukex-ios-uikit-main-thread.patch"
+    patch_path = port_dir / patch_name
+    patch_text = r'''diff --git a/src/video/uikit/SDL_uikitwindow.m b/src/video/uikit/SDL_uikitwindow.m
+index 1111111..2222222 100644
+--- a/src/video/uikit/SDL_uikitwindow.m
++++ b/src/video/uikit/SDL_uikitwindow.m
+@@ -129,6 +129,16 @@ bool UIKit_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_PropertiesID create_props)
+ {
++    /* DukeX runs the long-lived emulator loop on a worker queue so it does not
++     * block UIKit/CoreAnimation. SDL window creation still touches UIKit and
++     * must execute on the application main thread. Block the caller while the
++     * UIKit-only portion runs there, then continue the emulator on its worker. */
++    if (![NSThread isMainThread]) {
++        __block bool result = false;
++        dispatch_sync(dispatch_get_main_queue(), ^{
++            result = UIKit_CreateWindow(_this, window, create_props);
++        });
++        return result;
++    }
++
+     @autoreleasepool {
+         SDL_VideoDisplay *display = SDL_GetVideoDisplayForWindow(window);
+         SDL_UIKitDisplayData *data = (__bridge SDL_UIKitDisplayData *)display->internal;
+@@ -229,6 +239,14 @@ void UIKit_ShowWindow(SDL_VideoDevice *_this, SDL_Window *window)
+ {
++    if (![NSThread isMainThread]) {
++        dispatch_sync(dispatch_get_main_queue(), ^{
++            UIKit_ShowWindow(_this, window);
++        });
++        return;
++    }
++
+     @autoreleasepool {
+         SDL_UIKitWindowData *data = (__bridge SDL_UIKitWindowData *)window->internal;
+         [data.uiwindow makeKeyAndVisible];
+@@ -249,6 +267,14 @@ void UIKit_HideWindow(SDL_VideoDevice *_this, SDL_Window *window)
+ {
++    if (![NSThread isMainThread]) {
++        dispatch_sync(dispatch_get_main_queue(), ^{
++            UIKit_HideWindow(_this, window);
++        });
++        return;
++    }
++
+     @autoreleasepool {
+         SDL_UIKitWindowData *data = (__bridge SDL_UIKitWindowData *)window->internal;
+         data.uiwindow.hidden = YES;
+@@ -318,6 +344,14 @@ void UIKit_DestroyWindow(SDL_VideoDevice *_this, SDL_Window *window)
+ {
++    if (![NSThread isMainThread]) {
++        dispatch_sync(dispatch_get_main_queue(), ^{
++            UIKit_DestroyWindow(_this, window);
++        });
++        return;
++    }
++
+     @autoreleasepool {
+         if (window->internal != NULL) {
+             SDL_UIKitWindowData *data = (__bridge SDL_UIKitWindowData *)window->internal;
+'''
+    patch_path.write_text(patch_text, encoding="utf-8")
+
+    port = portfile.read_text(encoding="utf-8")
+    if patch_name not in port:
+        anchor = "    PATCHES\n        fix-freebsd.patch\n"
+        if anchor not in port:
+            fail("Unexpected SDL3 vcpkg port layout; PATCHES block not found")
+        port = port.replace(anchor, anchor + f"        {patch_name}\n", 1)
+        portfile.write_text(port, encoding="utf-8")
+    print(f"Patched vcpkg SDL3 port with {patch_name}")
+
+
+def install_vcpkg_clone_wrapper() -> None:
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    github_path = os.environ.get("GITHUB_PATH")
+    runner_temp = os.environ.get("RUNNER_TEMP")
+    if not github_path or not runner_temp:
+        fail("GitHub Actions environment is missing GITHUB_PATH or RUNNER_TEMP")
+
+    wrapper_dir = root / ".github" / ".dukex-tool-wrappers"
+    wrapper_dir.mkdir(parents=True, exist_ok=True)
+    wrapper = wrapper_dir / "git"
+    script_path = Path(__file__).resolve()
+    expected_vcpkg = Path(runner_temp) / "vcpkg"
+    wrapper.write_text(
+        "#!/bin/bash\n"
+        "set +e\n"
+        "/usr/bin/git \"$@\"\n"
+        "status=$?\n"
+        f"if [ $status -eq 0 ] && [ -d {expected_vcpkg!s}/ports/sdl3 ]; then\n"
+        f"  python3 {script_path!s} --patch-vcpkg {expected_vcpkg!s} || exit $?\n"
+        "fi\n"
+        "exit $status\n",
+        encoding="utf-8",
+    )
+    wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    with open(github_path, "a", encoding="utf-8") as fh:
+        fh.write(str(wrapper_dir) + "\n")
+    print(f"Installed one-step vcpkg clone wrapper at {wrapper}")
+
+
+if len(sys.argv) == 3 and sys.argv[1] == "--patch-vcpkg":
+    patch_vcpkg_sdl(Path(sys.argv[2]))
+    raise SystemExit(0)
+
 if not xemu_path.is_file() or not swift_path.is_file():
     fail("DukeX iOS source files not found")
 
@@ -35,8 +149,6 @@ if "#define SDL_MAIN_HANDLED 1" not in xemu:
         "SDL main handled header",
     )
 
-# The emulator core is intentionally dispatched off the UIKit main thread. SDL's
-# iOS video bootstrap, however, touches UIKit and must happen on the main thread.
 if "xemu_ios_prepare_sdl_video" not in xemu:
     xemu = replace_once(
         xemu,
@@ -72,4 +184,5 @@ if "XemuPrepareSDLVideo" not in swift:
 
 xemu_path.write_text(xemu, encoding="utf-8")
 swift_path.write_text(swift, encoding="utf-8")
-print("iOS SDL main-thread preflight patch applied or already present.")
+install_vcpkg_clone_wrapper()
+print("iOS SDL main-thread preflight and UIKit window-thread patch prepared.")
