@@ -79,6 +79,16 @@ export PKG_CONFIG_PATH="${PKG_CONFIG_LIBDIR}"
 export PKG_CONFIG_SYSROOT_DIR="/"
 export AR RANLIB NM STRIP PKG_CONFIG CMAKE
 
+# Meson's CMake dependency fallback invokes CMake with the host compiler unless
+# the target flags are also present in the conventional compiler environment.
+# Keep those probes on arm64 iPhoneOS instead of accidentally linking macOS.
+printf -v IOS_CFLAGS '%q ' "${COMMON_FLAGS[@]}"
+printf -v IOS_LDFLAGS '%q ' "${COMMON_LDFLAGS[@]}"
+export CFLAGS="${IOS_CFLAGS}${CFLAGS:-}"
+export CXXFLAGS="${IOS_CFLAGS}${CXXFLAGS:-}"
+export OBJCFLAGS="${IOS_CFLAGS}${OBJCFLAGS:-}"
+export LDFLAGS="${IOS_LDFLAGS}${LDFLAGS:-}"
+
 printf 'Using host CMake for Meson subprojects: %s\n' "${CMAKE}"
 "${CMAKE}" --version
 
