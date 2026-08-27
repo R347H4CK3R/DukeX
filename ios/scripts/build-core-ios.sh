@@ -113,6 +113,38 @@ printf 'MoltenVK framework will be force-linked for iOS runtime loading: %s\n' "
 printf 'Embedding core rpath: @loader_path/Frameworks\n'
 printf 'Using iOS coroutine backend: %s\n' "${XEMU_IOS_COROUTINE_BACKEND}"
 
+# The current iOS startup path pre-creates 640 coroutines before qemu_init().
+# On the ucontext backend the first qemu_coroutine_new() is aborting on-device,
+# so compile this build with the priming default disabled. Normal coroutine
+# creation remains available later through QEMU's regular code paths.
+"${SYSTEM_PYTHON}" - "${SOURCE_DIR}/ui/xemu.c" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text(encoding="utf-8")
+old = '''    if (!value || !*value) {
+        return 640;
+    }'''
+new = '''    if (!value || !*value) {
+        return 0;
+    }'''
+if old not in s:
+    raise SystemExit("Expected iOS coroutine prime default block not found")
+s = s.replace(old, new, 1)
+old2 = '''    if (end == value || parsed > 4096) {
+        return 640;
+    }'''
+new2 = '''    if (end == value || parsed > 4096) {
+        return 0;
+    }'''
+if old2 not in s:
+    raise SystemExit("Expected iOS coroutine prime fallback block not found")
+p.write_text(s.replace(old2, new2, 1), encoding="utf-8")
+print("Disabled DukeX iOS coroutine pre-prime default for this build")
+PY
+
+grep -A14 -n "static unsigned int ios_coroutine_prime_count" "${SOURCE_DIR}/ui/xemu.c"
+
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
