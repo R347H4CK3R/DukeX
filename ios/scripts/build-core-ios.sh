@@ -9,7 +9,11 @@ SDK_NAME="${SDK_NAME:-iphoneos}"
 VCPKG_PREFIX="${XEMU_IOS_VCPKG_PREFIX:-${VCPKG_ROOT:-}/installed/arm64-ios}"
 MOLTENVK_ROOT="${MOLTENVK_ROOT:-}"
 MOLTENVK_FRAMEWORK="${MOLTENVK_FRAMEWORK:-}"
-XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-sigaltstack}"
+# Avoid QEMU's SIGUSR2/sigaltstack bootstrap on iOS. Under LiveContainer/
+# StikDebug the first coroutine can hang before the trampoline completes.
+# ucontext does not depend on process-wide signal delivery and is therefore
+# the safer backend for the embedded iOS core.
+XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-ucontext}"
 
 for path in "${SOURCE_DIR}" "${BUILD_DIR}"; do
   case "${path}" in
@@ -107,6 +111,7 @@ printf 'Using host CMake for Meson subprojects: %s\n' "${CMAKE}"
 "${CMAKE}" --version
 printf 'MoltenVK framework will be force-linked for iOS runtime loading: %s\n' "${MOLTENVK_FRAMEWORK}"
 printf 'Embedding core rpath: @loader_path/Frameworks\n'
+printf 'Using iOS coroutine backend: %s\n' "${XEMU_IOS_COROUTINE_BACKEND}"
 
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
