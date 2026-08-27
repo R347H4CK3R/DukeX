@@ -214,12 +214,28 @@ Coroutine *qemu_coroutine_new(void)
      * called.
      */
     coTS->tr_called = 0;
+#ifdef CONFIG_IOS
+    /*
+     * On iOS the long-lived emulator runs on a DispatchQueue-backed pthread.
+     * LiveContainer/StikDebug can leave SIGUSR2 pending while sigsuspend()
+     * waits, which deadlocks the very first coroutine bootstrap.  Deliver the
+     * signal synchronously on this thread instead: raise() does not return
+     * until our handler has run, and SA_ONSTACK still switches to the freshly
+     * installed coroutine stack.  Restore the original mask below exactly as
+     * the generic path does.
+     */
+    pthread_sigmask(SIG_UNBLOCK, &sigs, NULL);
+    if (raise(SIGUSR2) != 0 || !coTS->tr_called) {
+        abort();
+    }
+#else
     pthread_kill(pthread_self(), SIGUSR2);
     sigfillset(&sigs);
     sigdelset(&sigs, SIGUSR2);
     while (!coTS->tr_called) {
         sigsuspend(&sigs);
     }
+#endif
 
     /*
      * Inform the system that we are back off the signal stack by
@@ -300,4 +316,3 @@ bool qemu_in_coroutine(void)
 
     return s && s->current->caller;
 }
-
