@@ -34,22 +34,15 @@ void xemu_ios_coroutine_prime_global_pool(unsigned int count)
 
 coroutine_path.write_text(source[:start] + replacement + source[end:])
 
-# 2) Remove the startup call entirely from ui/xemu.c. This is stronger than
-# merely making the primer a no-op and guarantees qemu_init() is reached without
-# touching the coroutine priming path at all.
+# 2) Remove the startup call entirely from ui/xemu.c. Keep the count helper in
+# place because ios/scripts/build-core-ios.sh still patches its defaults to zero
+# as a compatibility check. Since nothing calls the helper, no priming occurs.
 ui_path = Path("ui/xemu.c")
 ui = ui_path.read_text()
 call = "    xemu_ios_coroutine_prime_global_pool(ios_coroutine_prime_count());\n"
 if call not in ui:
     raise SystemExit("iOS coroutine prime startup call was not found")
 ui = ui.replace(call, "    IOS_LOG(\"coroutine priming skipped; entering qemu_init directly\");\n", 1)
-
-# Remove the now-unused helper to avoid unused-function warnings in strict builds.
-helper_start = ui.find("static unsigned int ios_coroutine_prime_count(void)\n{")
-helper_next = ui.find("\nstatic void ios_log_gl_error", helper_start)
-if helper_start < 0 or helper_next < 0:
-    raise SystemExit("iOS coroutine prime count helper was not found")
-ui = ui[:helper_start] + ui[helper_next + 1:]
 ui_path.write_text(ui)
 
 patched_coroutine = coroutine_path.read_text()
@@ -59,11 +52,11 @@ block_end = patched_coroutine.find("\n#endif", block_start)
 block = patched_coroutine[block_start:block_end]
 if "qemu_coroutine_new();" in block:
     raise SystemExit("eager coroutine creation is still present in iOS primer")
-if "xemu_ios_coroutine_prime_global_pool(" in patched_ui:
+if "xemu_ios_coroutine_prime_global_pool(ios_coroutine_prime_count())" in patched_ui:
     raise SystemExit("iOS startup still references coroutine primer")
-if "ios_coroutine_prime_count" in patched_ui:
-    raise SystemExit("unused iOS coroutine prime count helper remains")
+if "ios_coroutine_prime_count" not in patched_ui:
+    raise SystemExit("iOS coroutine count compatibility helper is missing")
 if "coroutine priming skipped; entering qemu_init directly" not in patched_ui:
     raise SystemExit("direct qemu_init startup marker missing")
 
-print("Patched iOS startup: coroutine priming path fully bypassed; qemu_init entered directly")
+print("Patched iOS startup: coroutine priming call bypassed; compatibility helper retained")
