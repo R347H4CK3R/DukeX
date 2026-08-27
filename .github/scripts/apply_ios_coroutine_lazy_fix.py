@@ -22,15 +22,15 @@ replacement = r'''#ifdef CONFIG_IOS
 void xemu_ios_coroutine_prime_global_pool(unsigned int count)
 {
     /*
-     * Do not eagerly create the global coroutine cache on iOS.  Coroutine
-     * construction switches stacks/contexts and must happen from QEMU's
-     * normal execution path instead of the UIKit startup path.  The regular
-     * qemu_coroutine_create() path below already creates a coroutine lazily
-     * when the local/global pools are empty and recycles it afterwards.
+     * iOS must not eagerly instantiate even a single coroutine from the
+     * UIKit startup path. qemu_coroutine_new() switches coroutine context and
+     * aborts before guest startup on this path. Keep the compatibility entry
+     * point, but intentionally make it a no-op and let QEMU create coroutines
+     * lazily from its normal execution path when the pools are empty.
      */
     fprintf(stderr,
             "xemu_ios: coroutine global pool prime disabled "
-            "(requested=%u); using lazy creation\n",
+            "(requested=%u); zero eager coroutines, using lazy creation\n",
             count);
     fflush(stderr);
 }
@@ -44,7 +44,7 @@ block_end = patched.find("\n#endif", block_start)
 block = patched[block_start:block_end]
 if "qemu_coroutine_new();" in block:
     raise SystemExit("eager coroutine creation is still present in iOS primer")
-if "using lazy creation" not in block:
-    raise SystemExit("lazy coroutine marker missing after patch")
+if "zero eager coroutines" not in block:
+    raise SystemExit("zero-eager coroutine marker missing after patch")
 
-print("Patched iOS coroutine primer: eager global pool creation disabled")
+print("Patched iOS coroutine primer: zero eager coroutine creation; lazy path only")
