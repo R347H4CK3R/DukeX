@@ -33,7 +33,7 @@ def patch_vcpkg_sdl(vcpkg_root: Path) -> None:
 index 1111111..2222222 100644
 --- a/src/video/uikit/SDL_uikitwindow.m
 +++ b/src/video/uikit/SDL_uikitwindow.m
-@@ -129,6 +129,16 @@ bool UIKit_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_PropertiesID create_props)
+@@ -129,4 +129,16 @@ bool UIKit_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_PropertiesID create_props)
  {
 +    /* DukeX runs the long-lived emulator loop on a worker queue so it does not
 +     * block UIKit/CoreAnimation. SDL window creation still touches UIKit and
@@ -50,7 +50,7 @@ index 1111111..2222222 100644
      @autoreleasepool {
          SDL_VideoDisplay *display = SDL_GetVideoDisplayForWindow(window);
          SDL_UIKitDisplayData *data = (__bridge SDL_UIKitDisplayData *)display->internal;
-@@ -229,6 +239,14 @@ void UIKit_ShowWindow(SDL_VideoDevice *_this, SDL_Window *window)
+@@ -229,4 +241,11 @@ void UIKit_ShowWindow(SDL_VideoDevice *_this, SDL_Window *window)
  {
 +    if (![NSThread isMainThread]) {
 +        dispatch_sync(dispatch_get_main_queue(), ^{
@@ -62,7 +62,7 @@ index 1111111..2222222 100644
      @autoreleasepool {
          SDL_UIKitWindowData *data = (__bridge SDL_UIKitWindowData *)window->internal;
          [data.uiwindow makeKeyAndVisible];
-@@ -249,6 +267,14 @@ void UIKit_HideWindow(SDL_VideoDevice *_this, SDL_Window *window)
+@@ -249,4 +268,11 @@ void UIKit_HideWindow(SDL_VideoDevice *_this, SDL_Window *window)
  {
 +    if (![NSThread isMainThread]) {
 +        dispatch_sync(dispatch_get_main_queue(), ^{
@@ -74,7 +74,7 @@ index 1111111..2222222 100644
      @autoreleasepool {
          SDL_UIKitWindowData *data = (__bridge SDL_UIKitWindowData *)window->internal;
          data.uiwindow.hidden = YES;
-@@ -318,6 +344,14 @@ void UIKit_DestroyWindow(SDL_VideoDevice *_this, SDL_Window *window)
+@@ -318,4 +344,11 @@ void UIKit_DestroyWindow(SDL_VideoDevice *_this, SDL_Window *window)
  {
 +    if (![NSThread isMainThread]) {
 +        dispatch_sync(dispatch_get_main_queue(), ^{
