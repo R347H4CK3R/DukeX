@@ -9,6 +9,7 @@ on:
       - '.github/workflows/build-ios-self-patched.yml'
       - '.github/scripts/apply_dukex_background_fix.py'
       - '.github/scripts/apply_ios_sdl_mainthread_fix.py'
+      - '.github/scripts/apply_ios_coroutine_lazy_fix.py'
       - 'ios/**'
       - 'ui/xemu.c'
   pull_request:
@@ -18,6 +19,7 @@ on:
       - '.github/workflows/build-ios-self-patched.yml'
       - '.github/scripts/apply_dukex_background_fix.py'
       - '.github/scripts/apply_ios_sdl_mainthread_fix.py'
+      - '.github/scripts/apply_ios_coroutine_lazy_fix.py'
       - 'ios/**'
       - 'ui/xemu.c'
 
@@ -46,7 +48,10 @@ jobs:
       - name: Apply iOS SDL main-thread fix
         run: python3 .github/scripts/apply_ios_sdl_mainthread_fix.py
 
-      - name: Verify lifecycle and SDL fixes
+      - name: Apply iOS lazy coroutine fix
+        run: python3 .github/scripts/apply_ios_coroutine_lazy_fix.py
+
+      - name: Verify lifecycle, SDL, and coroutine fixes
         run: |
           grep -n "xemu_ios_set_application_active" ui/xemu.c
           grep -n "xemu_ios_prepare_sdl_video" ui/xemu.c
@@ -54,6 +59,11 @@ jobs:
           grep -n "loadPrepareSDLVideo" ios/DukeX/DukeX/Runtime/Core/EmulatorCoreRuntime.swift
           grep -n "UIApplication.willResignActiveNotification" ios/DukeX/DukeX/Runtime/Core/EmulatorCoreRuntime.swift
           grep -n "refusing background SDL_Init" ui/xemu.c
+          grep -n "coroutine global pool prime disabled" util/qemu-coroutine.c
+          if sed -n '/void xemu_ios_coroutine_prime_global_pool/,/^#endif/p' util/qemu-coroutine.c | grep -q 'qemu_coroutine_new();'; then
+            echo "Eager coroutine creation is still present in iOS primer" >&2
+            exit 1
+          fi
 
       - name: Install build tools
         run: |
