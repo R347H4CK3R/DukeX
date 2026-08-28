@@ -45,126 +45,180 @@ elif "coroutine priming skipped; entering qemu_init directly" not in ui:
     raise SystemExit("iOS coroutine prime startup call was not found")
 ui_path.write_text(ui)
 
-# 3) IMPORTANT: iPhoneOS must use ucontext. Accept either older configurable
-# form or the hard-forced form, then normalize to the hard-forced form so an
-# environment variable cannot switch the build back to sigaltstack.
+# 3) iPhoneOS 27 returns ENOTSUP from getcontext(), so ucontext cannot be used.
+# Select QEMU's sigaltstack backend. The iOS branch in that backend uses a
+# synchronous raise(SIGUSR2), avoiding the pthread_kill path that was rejected
+# in LiveContainer/StikDebug while still entering on SA_ONSTACK.
 build_path = Path("ios/scripts/build-core-ios.sh")
 build = build_path.read_text()
-forced = 'XEMU_IOS_COROUTINE_BACKEND="ucontext"'
-old_forms = (
-    'XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-sigaltstack}"',
+for old in (
+    'XEMU_IOS_COROUTINE_BACKEND="ucontext"',
     'XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-ucontext}"',
-)
-if forced not in build:
-    for old in old_forms:
-        if old in build:
-            build = build.replace(old, forced, 1)
-            break
-    else:
-        raise SystemExit("unexpected iOS coroutine backend configuration")
+    'XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-sigaltstack}"',
+):
+    if old in build:
+        build = build.replace(old, 'XEMU_IOS_COROUTINE_BACKEND="sigaltstack"', 1)
+        break
+if 'XEMU_IOS_COROUTINE_BACKEND="sigaltstack"' not in build:
+    raise SystemExit("unexpected iOS coroutine backend configuration")
+build = build.replace('--with-coroutine="ucontext"', '--with-coroutine="sigaltstack"')
+
+old_verify = '''# Refuse to package a core that accidentally contains the iOS sigaltstack
+# bootstrap again. The ucontext diagnostic marker is injected by the workflow
+# patch and proves the intended backend was linked into the dylib. Avoid
+# strings|grep pipelines here because pipefail can turn grep -q's early exit
+# into a false negative when strings receives SIGPIPE.
+CORE_DYLIB="${BUILD_DIR}/libxemu-ios-core.dylib"
+if [[ -f "${CORE_DYLIB}" ]]; then
+  CORE_STRINGS="${BUILD_DIR}/.dukex-core-strings.txt"
+  strings "${CORE_DYLIB}" > "${CORE_STRINGS}"
+  if ! grep -q 'xemu_ios: ucontext coroutine new: enter' "${CORE_STRINGS}"; then
+    printf 'ERROR: built iOS core does not contain the ucontext coroutine backend marker.\\n' >&2
+    rm -f "${CORE_STRINGS}"
+    exit 1
+  fi
+  if grep -q 'coroutine sigaltstack pthread_kill failed' "${CORE_STRINGS}"; then
+    printf 'ERROR: sigaltstack coroutine bootstrap leaked into the iOS core.\\n' >&2
+    rm -f "${CORE_STRINGS}"
+    exit 1
+  fi
+  rm -f "${CORE_STRINGS}"
+  printf 'Verified iOS core coroutine backend: ucontext only.\\n'
+fi
+'''
+new_verify = '''# Verify that the iOS-safe sigaltstack backend, not ucontext, was linked.
+# Avoid strings|grep pipelines here because pipefail can turn grep -q's early
+# exit into a false negative when strings receives SIGPIPE.
+CORE_DYLIB="${BUILD_DIR}/libxemu-ios-core.dylib"
+if [[ -f "${CORE_DYLIB}" ]]; then
+  CORE_STRINGS="${BUILD_DIR}/.dukex-core-strings.txt"
+  strings "${CORE_DYLIB}" > "${CORE_STRINGS}"
+  if ! grep -q 'xemu_ios: sigaltstack coroutine new: enter' "${CORE_STRINGS}"; then
+    printf 'ERROR: built iOS core does not contain the sigaltstack coroutine backend marker.\\n' >&2
+    rm -f "${CORE_STRINGS}"
+    exit 1
+  fi
+  if grep -q 'xemu_ios: ucontext coroutine new: enter' "${CORE_STRINGS}"; then
+    printf 'ERROR: unsupported ucontext coroutine backend leaked into the iOS core.\\n' >&2
+    rm -f "${CORE_STRINGS}"
+    exit 1
+  fi
+  rm -f "${CORE_STRINGS}"
+  printf 'Verified iOS core coroutine backend: sigaltstack synchronous bootstrap.\\n'
+fi
+'''
+if old_verify in build:
+    build = build.replace(old_verify, new_verify, 1)
+elif "Verified iOS core coroutine backend: sigaltstack synchronous bootstrap." not in build:
+    raise SystemExit("unexpected iOS core coroutine verification block")
 build_path.write_text(build)
 
-# 4) Add high-resolution checkpoints around every operation involved in the
-# first ucontext coroutine creation. This converts any future silent abort/hang
-# into a precise device log location.
-uc_path = Path("util/coroutine-ucontext.c")
-uc = uc_path.read_text()
+# 4) Instrument the sigaltstack bootstrap. Do NOT rewrite raise() to kill() or
+# pthread_kill(): iOS rejected the pthread-targeted delivery and getcontext is
+# unsupported. raise() is synchronous and executes the SA_ONSTACK handler on
+# the creating thread before returning.
+sig_path = Path("util/coroutine-sigaltstack.c")
+sig = sig_path.read_text()
 
-if "xemu_ios: ucontext coroutine new: enter" not in uc:
-    uc = uc.replace(
+if "xemu_ios: sigaltstack coroutine new: enter" not in sig:
+    sig = sig.replace(
         "Coroutine *qemu_coroutine_new(void)\n{\n",
         "Coroutine *qemu_coroutine_new(void)\n{\n#ifdef CONFIG_IOS\n"
-        "    fprintf(stderr, \"xemu_ios: ucontext coroutine new: enter thread=%p\\n\", (void *)pthread_self());\n"
+        "    fprintf(stderr, \"xemu_ios: sigaltstack coroutine new: enter thread=%p\\n\", (void *)pthread_self());\n"
         "    fflush(stderr);\n#endif\n",
         1)
 
-uc = replace_once(uc,
-    "    if (getcontext(&uc) == -1) {\n        abort();\n    }",
-    "    if (getcontext(&uc) == -1) {\n#ifdef CONFIG_IOS\n"
-    "        fprintf(stderr, \"xemu_ios: ucontext getcontext failed: %d (%s)\\n\", errno, strerror(errno));\n"
-    "        fflush(stderr);\n#endif\n"
-    "        abort();\n    }\n#ifdef CONFIG_IOS\n"
-    "    fprintf(stderr, \"xemu_ios: ucontext getcontext ok\\n\");\n"
-    "    fflush(stderr);\n#endif",
-    "ucontext getcontext")
-
-if "xemu_ios: ucontext stack allocated" not in uc:
-    uc = uc.replace(
+if "xemu_ios: sigaltstack stack allocated" not in sig:
+    sig = sig.replace(
         "    co->stack = qemu_alloc_stack(&co->stack_size);\n",
         "    co->stack = qemu_alloc_stack(&co->stack_size);\n#ifdef CONFIG_IOS\n"
-        "    fprintf(stderr, \"xemu_ios: ucontext stack allocated: co=%p stack=%p size=%zu\\n\",\n"
+        "    fprintf(stderr, \"xemu_ios: sigaltstack stack allocated: co=%p stack=%p size=%zu\\n\",\n"
         "            (void *)co, co->stack, co->stack_size);\n"
         "    fflush(stderr);\n#endif\n",
         1)
 
-if "xemu_ios: ucontext makecontext begin" not in uc:
-    uc = uc.replace(
-        "    on_new_fiber(co);\n    makecontext(&uc, (void (*)(void))coroutine_trampoline,\n                2, arg.i[0], arg.i[1]);\n",
-        "    on_new_fiber(co);\n#ifdef CONFIG_IOS\n"
-        "    fprintf(stderr, \"xemu_ios: ucontext makecontext begin: arg=%p\\n\", arg.p);\n"
+if "xemu_ios: sigaltstack sigaction installed" not in sig:
+    sig = sig.replace(
+        "    if (sigaction(SIGUSR2, &sa, &osa) != 0) {\n        abort();\n    }\n",
+        "    if (sigaction(SIGUSR2, &sa, &osa) != 0) {\n#ifdef CONFIG_IOS\n"
+        "        fprintf(stderr, \"xemu_ios: sigaltstack sigaction failed: %d (%s)\\n\", errno, strerror(errno));\n"
+        "        fflush(stderr);\n#endif\n"
+        "        abort();\n    }\n#ifdef CONFIG_IOS\n"
+        "    fprintf(stderr, \"xemu_ios: sigaltstack sigaction installed\\n\");\n"
+        "    fflush(stderr);\n#endif\n",
+        1)
+
+if "xemu_ios: sigaltstack installed alternate stack" not in sig:
+    sig = sig.replace(
+        "    if (sigaltstack(&ss, &oss) < 0) {\n        abort();\n    }\n",
+        "    if (sigaltstack(&ss, &oss) < 0) {\n#ifdef CONFIG_IOS\n"
+        "        fprintf(stderr, \"xemu_ios: sigaltstack install failed: %d (%s)\\n\", errno, strerror(errno));\n"
+        "        fflush(stderr);\n#endif\n"
+        "        abort();\n    }\n#ifdef CONFIG_IOS\n"
+        "    fprintf(stderr, \"xemu_ios: sigaltstack installed alternate stack\\n\");\n"
+        "    fflush(stderr);\n#endif\n",
+        1)
+
+old_ios_bootstrap = '''#ifdef CONFIG_IOS
+    /*
+     * On iOS the long-lived emulator runs on a DispatchQueue-backed pthread.
+     * LiveContainer/StikDebug can leave SIGUSR2 pending while sigsuspend()
+     * waits, which deadlocks the very first coroutine bootstrap.  Deliver the
+     * signal synchronously on this thread instead: raise() does not return
+     * until our handler has run, and SA_ONSTACK still switches to the freshly
+     * installed coroutine stack.  Restore the original mask below exactly as
+     * the generic path does.
+     */
+    pthread_sigmask(SIG_UNBLOCK, &sigs, NULL);
+    if (raise(SIGUSR2) != 0 || !coTS->tr_called) {
+        abort();
+    }
+#else'''
+new_ios_bootstrap = '''#ifdef CONFIG_IOS
+    /* iOS 27: getcontext() is ENOTSUP and pthread_kill() was rejected in the
+     * container runtime. Deliver SIGUSR2 synchronously on this exact pthread;
+     * SA_ONSTACK enters coroutine_trampoline() on the newly allocated stack. */
+    pthread_sigmask(SIG_UNBLOCK, &sigs, NULL);
+    fprintf(stderr, "xemu_ios: sigaltstack synchronous raise begin\\n");
+    fflush(stderr);
+    if (raise(SIGUSR2) != 0) {
+        fprintf(stderr, "xemu_ios: sigaltstack raise failed: %d (%s)\\n", errno, strerror(errno));
+        fflush(stderr);
+        abort();
+    }
+    fprintf(stderr, "xemu_ios: sigaltstack synchronous raise returned called=%d\\n",
+            (int)coTS->tr_called);
+    fflush(stderr);
+    if (!coTS->tr_called) {
+        abort();
+    }
+#else'''
+sig = replace_once(sig, old_ios_bootstrap, new_ios_bootstrap, "iOS synchronous sigaltstack bootstrap")
+
+if "xemu_ios: sigaltstack trampoline entered" not in sig:
+    sig = sig.replace(
+        "static void coroutine_trampoline(int signal)\n{\n",
+        "static void coroutine_trampoline(int signal)\n{\n#ifdef CONFIG_IOS\n"
+        "    fprintf(stderr, \"xemu_ios: sigaltstack trampoline entered signal=%d thread=%p\\n\",\n"
+        "            signal, (void *)pthread_self());\n"
+        "    fflush(stderr);\n#endif\n",
+        1)
+
+if "xemu_ios: sigaltstack coroutine new: ready" not in sig:
+    sig = sig.replace(
+        "    return &co->base;\n}\n\nvoid qemu_coroutine_delete",
+        "#ifdef CONFIG_IOS\n"
+        "    fprintf(stderr, \"xemu_ios: sigaltstack coroutine new: ready co=%p\\n\", (void *)co);\n"
         "    fflush(stderr);\n#endif\n"
-        "    makecontext(&uc, (void (*)(void))coroutine_trampoline,\n                2, arg.i[0], arg.i[1]);\n"
-        "#ifdef CONFIG_IOS\n"
-        "    fprintf(stderr, \"xemu_ios: ucontext makecontext returned\\n\");\n"
-        "    fflush(stderr);\n#endif\n",
+        "    return &co->base;\n}\n\nvoid qemu_coroutine_delete",
         1)
 
-if "xemu_ios: ucontext swapcontext begin" not in uc:
-    uc = uc.replace(
-        "        swapcontext(&old_uc, &uc);\n",
-        "#ifdef CONFIG_IOS\n"
-        "        fprintf(stderr, \"xemu_ios: ucontext swapcontext begin\\n\");\n"
-        "        fflush(stderr);\n#endif\n"
-        "        if (swapcontext(&old_uc, &uc) == -1) {\n#ifdef CONFIG_IOS\n"
-        "            fprintf(stderr, \"xemu_ios: ucontext swapcontext failed: %d (%s)\\n\", errno, strerror(errno));\n"
-        "            fflush(stderr);\n#endif\n"
-        "            abort();\n"
-        "        }\n#ifdef CONFIG_IOS\n"
-        "        fprintf(stderr, \"xemu_ios: ucontext swapcontext returned normally\\n\");\n"
-        "        fflush(stderr);\n#endif\n",
-        1)
-
-if "xemu_ios: ucontext coroutine new: ready" not in uc:
-    uc = uc.replace(
-        "    finish_switch_fiber(fake_stack_save);\n\n    return &co->base;\n",
-        "    finish_switch_fiber(fake_stack_save);\n#ifdef CONFIG_IOS\n"
-        "    fprintf(stderr, \"xemu_ios: ucontext coroutine new: ready co=%p\\n\", (void *)co);\n"
-        "    fflush(stderr);\n#endif\n\n"
-        "    return &co->base;\n",
-        1)
-
-if "xemu_ios: ucontext trampoline: entered" not in uc:
-    uc = uc.replace(
-        "static void coroutine_trampoline(int i0, int i1)\n{\n",
-        "static void coroutine_trampoline(int i0, int i1)\n{\n#ifdef CONFIG_IOS\n"
-        "    fprintf(stderr, \"xemu_ios: ucontext trampoline: entered i0=%d i1=%d\\n\", i0, i1);\n"
-        "    fflush(stderr);\n#endif\n",
-        1)
-    uc = uc.replace(
-        "        siglongjmp(*(sigjmp_buf *)co->entry_arg, 1);\n",
-        "#ifdef CONFIG_IOS\n"
-        "        fprintf(stderr, \"xemu_ios: ucontext trampoline: longjmp to creator\\n\");\n"
-        "        fflush(stderr);\n#endif\n"
-        "        siglongjmp(*(sigjmp_buf *)co->entry_arg, 1);\n",
-        1)
-
-uc_path.write_text(uc)
-
-# 5) The signal backend is unused on iOS now. Remove the synchronous raise
-# path anyway so dead sigaltstack code cannot perform the known-bad bootstrap.
-sig_path = Path("util/coroutine-sigaltstack.c")
-sig = sig_path.read_text()
-sig = sig.replace("raise(SIGUSR2)", "kill(getpid(), SIGUSR2)")
-marker = "/* xemu_ios: coroutine sigaltstack bootstrap: signal queue\n * xemu_ios: coroutine sigaltstack bootstrap: trampoline returned\n * UNUSED ON IOS: ucontext is selected to avoid signal bootstrap hangs. */\n"
-if marker not in sig:
-    sig = marker + sig
 sig_path.write_text(sig)
 
 # Final safety assertions.
 patched_coroutine = coroutine_path.read_text()
 patched_ui = ui_path.read_text()
 patched_build = build_path.read_text()
-patched_uc = uc_path.read_text()
 patched_sig = sig_path.read_text()
 block_start = patched_coroutine.find(start_marker)
 block_end = patched_coroutine.find("\n#endif", block_start)
@@ -175,25 +229,27 @@ if "xemu_ios_coroutine_prime_global_pool(ios_coroutine_prime_count())" in patche
     raise SystemExit("iOS startup still references coroutine primer")
 if "coroutine priming skipped; entering qemu_init directly" not in patched_ui:
     raise SystemExit("direct qemu_init startup marker missing")
-if forced not in patched_build:
-    raise SystemExit("hard-forced ucontext coroutine backend was not selected")
-if '--with-coroutine="ucontext"' not in patched_build:
-    raise SystemExit("configure is not explicitly selecting ucontext")
-if "raise(SIGUSR2)" in patched_sig:
-    raise SystemExit("unsafe raise(SIGUSR2) remains in unused sigaltstack source")
+if 'XEMU_IOS_COROUTINE_BACKEND="sigaltstack"' not in patched_build:
+    raise SystemExit("sigaltstack coroutine backend was not selected")
+if '--with-coroutine="sigaltstack"' not in patched_build:
+    raise SystemExit("configure is not explicitly selecting sigaltstack")
+if 'raise(SIGUSR2)' not in patched_sig:
+    raise SystemExit("synchronous iOS raise(SIGUSR2) bootstrap is missing")
+if 'kill(getpid(), SIGUSR2)' in patched_sig:
+    raise SystemExit("process-directed SIGUSR2 fallback must not be used on iOS")
 for needle in (
-    "ucontext coroutine new: enter",
-    "ucontext getcontext ok",
-    "ucontext stack allocated",
-    "ucontext makecontext begin",
-    "ucontext swapcontext begin",
-    "ucontext trampoline: entered",
-    "ucontext coroutine new: ready",
+    "sigaltstack coroutine new: enter",
+    "sigaltstack stack allocated",
+    "sigaltstack sigaction installed",
+    "sigaltstack installed alternate stack",
+    "sigaltstack synchronous raise begin",
+    "sigaltstack trampoline entered",
+    "sigaltstack coroutine new: ready",
 ):
-    if needle not in patched_uc:
-        raise SystemExit(f"missing ucontext diagnostic marker: {needle}")
+    if needle not in patched_sig:
+        raise SystemExit(f"missing sigaltstack diagnostic marker: {needle}")
 
-print("Patched iOS coroutine startup: hard-forced lazy ucontext backend with detailed bootstrap diagnostics")
+print("Patched iOS coroutine startup: synchronous sigaltstack backend with detailed bootstrap diagnostics")
 
 import runpy
 runpy.run_path(".github/scripts/apply_ios_diagnostic_logging.py", run_name="__main__")
