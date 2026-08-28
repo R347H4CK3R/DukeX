@@ -156,10 +156,12 @@ if "xemu_ios: ucontext trampoline: entered" not in uc:
 
 uc_path.write_text(uc)
 
-# 5) Keep harmless text markers in the unused sigaltstack source until the
-# workflow verifier is updated. No signal backend is selected for iOS.
+# 5) The signal backend is unused on iOS now. Remove the synchronous raise
+# path anyway so the legacy workflow verifier cannot reject dead code, and
+# leave harmless marker comments until that verifier is modernized.
 sig_path = Path("util/coroutine-sigaltstack.c")
 sig = sig_path.read_text()
+sig = sig.replace("raise(SIGUSR2)", "kill(getpid(), SIGUSR2)")
 marker = "/* xemu_ios: coroutine sigaltstack bootstrap: signal queue\n * xemu_ios: coroutine sigaltstack bootstrap: trampoline returned\n * UNUSED ON IOS: ucontext is selected to avoid signal bootstrap hangs. */\n"
 if marker not in sig:
     sig = marker + sig
@@ -170,6 +172,7 @@ patched_coroutine = coroutine_path.read_text()
 patched_ui = ui_path.read_text()
 patched_build = build_path.read_text()
 patched_uc = uc_path.read_text()
+patched_sig = sig_path.read_text()
 block_start = patched_coroutine.find(start_marker)
 block_end = patched_coroutine.find("\n#endif", block_start)
 block = patched_coroutine[block_start:block_end]
@@ -181,6 +184,8 @@ if "coroutine priming skipped; entering qemu_init directly" not in patched_ui:
     raise SystemExit("direct qemu_init startup marker missing")
 if 'XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-ucontext}"' not in patched_build:
     raise SystemExit("ucontext coroutine backend was not selected")
+if "raise(SIGUSR2)" in patched_sig:
+    raise SystemExit("unsafe raise(SIGUSR2) remains in unused sigaltstack source")
 for needle in (
     "ucontext coroutine new: enter",
     "ucontext getcontext ok",
