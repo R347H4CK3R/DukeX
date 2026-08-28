@@ -35,12 +35,33 @@ jobs:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       HOMEBREW_NO_INSTALL_CLEANUP: "1"
       IOS_DEPLOYMENT_TARGET: "16.0"
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg-binaries
+      XEMU_IOS_BUILD_DIR: ${{ github.workspace }}/build-ios-arm64
+      DUKE_X_DERIVED_DATA: ${{ github.workspace }}/.cache/DukeXDerivedData
 
     steps:
       - name: Checkout DukeX
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/vcpkg-binaries
+          key: vcpkg-arm64-ios-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/build-ios-self-patched.yml') }}
+          restore-keys: |
+            vcpkg-arm64-ios-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Restore incremental core and Xcode build caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            build-ios-arm64
+            .cache/DukeXDerivedData
+          key: dukex-ios-build-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: |
+            dukex-ios-build-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Apply lifecycle fix
         run: python3 .github/scripts/apply_dukex_background_fix.py
@@ -60,20 +81,41 @@ jobs:
           grep -n "UIApplication.willResignActiveNotification" ios/DukeX/DukeX/Runtime/Core/EmulatorCoreRuntime.swift
           grep -n "refusing background SDL_Init" ui/xemu.c
           grep -n "coroutine global pool prime disabled" util/qemu-coroutine.c
+          grep -n "coroutine sigaltstack bootstrap: signal queue" util/coroutine-sigaltstack.c
+          grep -n "coroutine sigaltstack bootstrap: trampoline returned" util/coroutine-sigaltstack.c
+          grep -n 'XEMU_IOS_COROUTINE_BACKEND=.*sigaltstack' ios/scripts/build-core-ios.sh
           if sed -n '/void xemu_ios_coroutine_prime_global_pool/,/^#endif/p' util/qemu-coroutine.c | grep -q 'qemu_coroutine_new();'; then
             echo "Eager coroutine creation is still present in iOS primer" >&2
             exit 1
           fi
+          if grep -q 'raise(SIGUSR2)' util/coroutine-sigaltstack.c; then
+            echo "Unsafe iOS raise(SIGUSR2) coroutine bootstrap is still present" >&2
+            exit 1
+          fi
 
-      - name: Install build tools
+      - name: Install missing build tools
         run: |
-          brew install cmake ninja meson pkg-config autoconf automake libtool nasm
+          packages=()
+          command -v cmake >/dev/null || packages+=(cmake)
+          command -v ninja >/dev/null || packages+=(ninja)
+          command -v meson >/dev/null || packages+=(meson)
+          command -v pkg-config >/dev/null || packages+=(pkg-config)
+          command -v autoconf >/dev/null || packages+=(autoconf)
+          command -v automake >/dev/null || packages+=(automake)
+          command -v libtoolize >/dev/null || packages+=(libtool)
+          command -v nasm >/dev/null || packages+=(nasm)
+          if ((${#packages[@]})); then
+            brew install "${packages[@]}"
+          else
+            echo "Required build tools are already available."
+          fi
 
       - name: Bootstrap vcpkg
         run: |
           git clone --depth 1 https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/vcpkg"
           "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
           echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
 
       - name: Patch vcpkg iOS ports and linker flags
         run: |
@@ -124,10 +166,6 @@ jobs:
                     'set(VCPKG_LINKER_FLAGS_RELEASE "${VCPKG_LINKER_FLAGS_RELEASE} -framework CoreFoundation")\n')
               triplet.write_text(t)
 
-          # The temporary DukeX SDL patch shipped in the vcpkg checkout has
-          # malformed unified-diff hunks. DukeX now applies the iOS SDL
-          # main-thread fix directly to its own source before dependencies are
-          # built, so do not ask vcpkg to apply the broken duplicate patch.
           sdl_port = root / "ports/sdl3/portfile.cmake"
           sp = sdl_port.read_text()
           sp2 = re.sub(r'^\s*dukex-ios-uikit-main-thread\.patch\s*$', '', sp, flags=re.M)
@@ -159,7 +197,7 @@ jobs:
             libpcap:arm64-ios \
             libsamplerate:arm64-ios
 
-      - name: Download MoltenVK
+      - name: Resolve MoltenVK release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -169,14 +207,46 @@ jobs:
             -H "X-GitHub-Api-Version: 2022-11-28" \
             https://api.github.com/repos/KhronosGroup/MoltenVK/releases/latest \
             -o "$RUNNER_TEMP/mvk.json"
-          ASSET_API_URL=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(a["url"] for a in d["assets"] if a["name"].endswith((".tar",".tar.gz",".zip"))))' "$RUNNER_TEMP/mvk.json")
-          ASSET_NAME=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(a["name"] for a in d["assets"] if a["name"].endswith((".tar",".tar.gz",".zip"))))' "$RUNNER_TEMP/mvk.json")
-          echo "Downloading MoltenVK asset: $ASSET_NAME"
-          curl --retry 5 --retry-all-errors -fL -H "Accept: application/octet-stream" -H "Authorization: Bearer $GH_TOKEN" -H "X-GitHub-Api-Version: 2022-11-28" "$ASSET_API_URL" -o "$RUNNER_TEMP/mvk.pkg"
-          mkdir -p "$RUNNER_TEMP/mvk"
-          if file "$RUNNER_TEMP/mvk.pkg" | grep -qi zip; then unzip -q "$RUNNER_TEMP/mvk.pkg" -d "$RUNNER_TEMP/mvk"; else tar -xf "$RUNNER_TEMP/mvk.pkg" -C "$RUNNER_TEMP/mvk"; fi
-          MOLTENVK_ROOT=$(find "$RUNNER_TEMP/mvk" -type f -path '*/include/vulkan/vulkan.h' -print -quit | sed 's#/include/vulkan/vulkan.h##')
-          MOLTENVK_FRAMEWORK=$(find "$RUNNER_TEMP/mvk" -type d -path '*/MoltenVK.xcframework/ios-arm64/MoltenVK.framework' -print -quit)
+          python3 - "$RUNNER_TEMP/mvk.json" >> "$GITHUB_ENV" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          asset = next(a for a in d["assets"] if a["name"].endswith((".tar", ".tar.gz", ".zip")))
+          print("MOLTENVK_TAG=" + d["tag_name"])
+          print("MOLTENVK_ASSET_API_URL=" + asset["url"])
+          print("MOLTENVK_ASSET_NAME=" + asset["name"])
+          PY
+
+      - name: Restore MoltenVK cache
+        id: moltenvk-cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/moltenvk
+          key: moltenvk-ios-${{ runner.os }}-${{ env.MOLTENVK_TAG }}
+
+      - name: Prepare MoltenVK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          MVK_CACHE="$GITHUB_WORKSPACE/.cache/moltenvk/$MOLTENVK_TAG"
+          if ! find "$MVK_CACHE" -type f -path '*/include/vulkan/vulkan.h' -print -quit 2>/dev/null | grep -q .; then
+            rm -rf "$MVK_CACHE"
+            mkdir -p "$MVK_CACHE"
+            echo "Downloading MoltenVK asset: $MOLTENVK_ASSET_NAME"
+            curl --retry 5 --retry-all-errors -fL \
+              -H "Accept: application/octet-stream" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "$MOLTENVK_ASSET_API_URL" -o "$RUNNER_TEMP/mvk.pkg"
+            if file "$RUNNER_TEMP/mvk.pkg" | grep -qi zip; then
+              unzip -q "$RUNNER_TEMP/mvk.pkg" -d "$MVK_CACHE"
+            else
+              tar -xf "$RUNNER_TEMP/mvk.pkg" -C "$MVK_CACHE"
+            fi
+          else
+            echo "Using cached MoltenVK $MOLTENVK_TAG"
+          fi
+          MOLTENVK_ROOT=$(find "$MVK_CACHE" -type f -path '*/include/vulkan/vulkan.h' -print -quit | sed 's#/include/vulkan/vulkan.h##')
+          MOLTENVK_FRAMEWORK=$(find "$MVK_CACHE" -type d -path '*/MoltenVK.xcframework/ios-arm64/MoltenVK.framework' -print -quit)
           test -n "$MOLTENVK_ROOT"
           test -f "$MOLTENVK_FRAMEWORK/MoltenVK"
           echo "MOLTENVK_ROOT=$MOLTENVK_ROOT" >> "$GITHUB_ENV"
@@ -190,8 +260,8 @@ jobs:
 
       - name: Build unsigned app
         run: |
-          xcodebuild -project ios/DukeX/DukeX.xcodeproj -scheme DukeX -configuration Release -sdk iphoneos -destination "generic/platform=iOS" -derivedDataPath "$RUNNER_TEMP/DukeXDerivedData" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
-          APP="$RUNNER_TEMP/DukeXDerivedData/Build/Products/Release-iphoneos/DukeX.app"
+          xcodebuild -project ios/DukeX/DukeX.xcodeproj -scheme DukeX -configuration Release -sdk iphoneos -destination "generic/platform=iOS" -derivedDataPath "$DUKE_X_DERIVED_DATA" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+          APP="$DUKE_X_DERIVED_DATA/Build/Products/Release-iphoneos/DukeX.app"
           test -d "$APP"
           mkdir -p "$APP/Frameworks"
           rm -rf "$APP/Frameworks/MoltenVK.framework"
@@ -207,6 +277,7 @@ jobs:
 
       - name: Package unsigned IPA
         run: |
+          rm -rf Payload DukeX-self-patched-unsigned.ipa
           mkdir Payload
           cp -R "$APP_PATH" Payload/DukeX.app
           find Payload -name '._*' -delete || true
