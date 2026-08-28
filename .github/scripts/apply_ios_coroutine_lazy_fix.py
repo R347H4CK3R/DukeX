@@ -170,3 +170,9 @@ if "coroutine sigaltstack bootstrap: trampoline returned" not in patched_sig:
     raise SystemExit("iOS sigaltstack bootstrap fix missing")
 
 print("Patched iOS coroutine startup: lazy sigaltstack backend with pthread-directed bootstrap")
+
+# Apply the diagnostic-only instrumentation after the functional coroutine fix.
+# Keeping this as a separate script makes it easy to remove or reduce logging
+# later without touching the crash fix itself.
+import runpy
+runpy.run_path(".github/scripts/apply_ios_diagnostic_logging.py", run_name="__main__")
