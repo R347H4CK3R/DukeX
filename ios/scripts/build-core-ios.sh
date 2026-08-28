@@ -8,7 +8,7 @@ IOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-16.0}"
 SDK_NAME="${SDK_NAME:-iphoneos}"
 VCPKG_PREFIX="${XEMU_IOS_VCPKG_PREFIX:-${VCPKG_ROOT:-}/installed/arm64-ios}"
 MOLTENVK_ROOT="${MOLTENVK_ROOT:-}"
-XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-sigaltstack}"
+XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-ucontext}"
 
 for path in "${SOURCE_DIR}" "${BUILD_DIR}"; do
   case "${path}" in
@@ -131,5 +131,18 @@ cd "${BUILD_DIR}"
   --extra-objcflags="${COMMON_FLAGS[*]}" \
   --extra-ldflags="${COMMON_LDFLAGS[*]}" \
   "${EXTRA_CONFIGURE_ARGS[@]+"${EXTRA_CONFIGURE_ARGS[@]}"}"
+
+printf 'Configured coroutine backend: %s\n' "${XEMU_IOS_COROUTINE_BACKEND}"
+if [[ "${XEMU_IOS_COROUTINE_BACKEND}" == "ucontext" ]]; then
+  if ! grep -q 'util/coroutine-ucontext.c' "${BUILD_DIR}/build.ninja"; then
+    printf 'ERROR: requested ucontext backend is absent from build.ninja.\n' >&2
+    exit 1
+  fi
+  if grep -q 'util/coroutine-sigaltstack.c' "${BUILD_DIR}/build.ninja"; then
+    printf 'ERROR: sigaltstack backend was unexpectedly included in the iOS build.\n' >&2
+    exit 1
+  fi
+  printf 'Verified iOS coroutine implementation: util/coroutine-ucontext.c\n'
+fi
 
 ninja -C "${BUILD_DIR}" "${NINJA_TARGETS[@]}" "$@"
