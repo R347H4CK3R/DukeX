@@ -196,7 +196,24 @@ Coroutine *qemu_coroutine_new(void)
      * everything else.
      */
 
+    {
+        static gsize backend_logged;
+
+        if (g_once_init_enter(&backend_logged)) {
+            fprintf(stderr,
+                    "[DukeX][coroutine] backend=ucontext; initializing "
+                    "coroutine stack context\n");
+            g_once_init_leave(&backend_logged, 1);
+        }
+    }
+
+    errno = 0;
     if (getcontext(&uc) == -1) {
+        int saved_errno = errno;
+
+        fprintf(stderr,
+                "[DukeX][coroutine] getcontext failed: errno=%d (%s)\n",
+                saved_errno, strerror(saved_errno));
         abort();
     }
 
