@@ -45,8 +45,8 @@ elif "coroutine priming skipped; entering qemu_init directly" not in ui:
     raise SystemExit("iOS coroutine prime startup call was not found")
 ui_path.write_text(ui)
 
-# 3) IMPORTANT: iPhoneOS must use ucontext. Accept either the old configurable
-# form or the new hard-forced form, but normalize to the hard-forced form so an
+# 3) IMPORTANT: iPhoneOS must use ucontext. Accept either older configurable
+# form or the hard-forced form, then normalize to the hard-forced form so an
 # environment variable cannot switch the build back to sigaltstack.
 build_path = Path("ios/scripts/build-core-ios.sh")
 build = build_path.read_text()
@@ -62,12 +62,6 @@ if forced not in build:
             break
     else:
         raise SystemExit("unexpected iOS coroutine backend configuration")
-
-# Keep a harmless legacy verifier marker until the workflow verifier itself is
-# modernized. The effective assignment above remains hard-forced to ucontext.
-compat = '# legacy verifier marker only: XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-sigaltstack}"\n'
-if compat not in build:
-    build = build.replace(forced + "\n", forced + "\n" + compat, 1)
 build_path.write_text(build)
 
 # 4) Add high-resolution checkpoints around every operation involved in the
