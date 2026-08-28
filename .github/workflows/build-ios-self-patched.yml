@@ -10,6 +10,7 @@ on:
       - '.github/scripts/apply_dukex_background_fix.py'
       - 'ios/**'
       - 'ui/xemu.c'
+      - 'util/coroutine-*.c'
   pull_request:
     branches:
       - master
@@ -18,6 +19,7 @@ on:
       - '.github/scripts/apply_dukex_background_fix.py'
       - 'ios/**'
       - 'ui/xemu.c'
+      - 'util/coroutine-*.c'
 
 permissions:
   contents: read
@@ -48,6 +50,8 @@ jobs:
           grep -n "UIApplication.willResignActiveNotification" ios/DukeX/DukeX/Runtime/Core/EmulatorCoreRuntime.swift
           grep -n "vkCreateInstance returned" hw/xbox/nv2a/pgraph/vk/instance.c
           grep -n "available Vulkan instance extensions" hw/xbox/nv2a/pgraph/vk/instance.c
+          grep -n 'XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-ucontext}"' ios/scripts/build-core-ios.sh
+          grep -n "backend=ucontext" util/coroutine-ucontext.c
 
       - name: Install build tools
         run: |
