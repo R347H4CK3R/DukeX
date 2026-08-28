@@ -285,9 +285,15 @@ Coroutine *qemu_coroutine_new(void)
     }
 
     co->stack_size = COROUTINE_STACK_SIZE;
-    co->stack = qemu_alloc_stack(&co->stack_size);
+    /*
+     * LiveContainer rejects QEMU's guarded mmap stack allocation.  A direct
+     * ARM64 context only needs stable writable storage, so use the iOS heap.
+     */
+    co->stack = g_try_malloc0(co->stack_size);
     if (!co->stack) {
-        fprintf(stderr, "xemu_ios: arm64 coroutine stack allocation failed\n");
+        fprintf(stderr,
+                "xemu_ios: arm64 heap stack allocation failed size=%zu errno=%d (%s)\n",
+                co->stack_size, errno, strerror(errno));
         fflush(stderr);
         abort();
     }
@@ -312,7 +318,7 @@ Coroutine *qemu_coroutine_new(void)
 void qemu_coroutine_delete(Coroutine *co_)
 {
     CoroutineSigAltStack *co = DO_UPCAST(CoroutineSigAltStack, base, co_);
-    qemu_free_stack(co->stack, co->stack_size);
+    g_free(co->stack);
     g_free(co);
 }
 
@@ -367,6 +373,7 @@ for needle in (
     "arm64 coroutine bootstrap entered",
     "ios_context_switch",
     "ios_coroutine_entry_thunk",
+    "g_try_malloc0(co->stack_size)",
 ):
     if needle not in patched_sig:
         raise SystemExit(f"missing ARM64 direct coroutine marker: {needle}")
