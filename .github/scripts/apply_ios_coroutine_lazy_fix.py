@@ -22,8 +22,6 @@ if "qemu_coroutine_new();" not in old and "zero eager coroutines" not in old:
 replacement = r'''#ifdef CONFIG_IOS
 void xemu_ios_coroutine_prime_global_pool(unsigned int count)
 {
-    /* Compatibility entry point only. iOS startup must never pre-create
-     * coroutines from the UIKit path. */
     fprintf(stderr,
             "xemu_ios: coroutine global pool prime disabled "
             "(requested=%u); zero eager coroutines\n",
@@ -34,9 +32,7 @@ void xemu_ios_coroutine_prime_global_pool(unsigned int count)
 
 coroutine_path.write_text(source[:start] + replacement + source[end:])
 
-# 2) Remove the startup call entirely from ui/xemu.c. Keep the count helper in
-# place because ios/scripts/build-core-ios.sh still patches its defaults to zero
-# as a compatibility check. Since nothing calls the helper, no priming occurs.
+# 2) Do not create coroutines from UIKit startup.
 ui_path = Path("ui/xemu.c")
 ui = ui_path.read_text()
 call = "    xemu_ios_coroutine_prime_global_pool(ios_coroutine_prime_count());\n"
@@ -46,8 +42,7 @@ elif "coroutine priming skipped; entering qemu_init directly" not in ui:
     raise SystemExit("iOS coroutine prime startup call was not found")
 ui_path.write_text(ui)
 
-# 3) iPhoneOS exposes ucontext symbols, but getcontext() is not usable in this
-# embedded runtime. Use QEMU's sigaltstack backend for normal lazy creation.
+# 3) Use sigaltstack rather than ucontext on iPhoneOS.
 build_path = Path("ios/scripts/build-core-ios.sh")
 build = build_path.read_text()
 old_backend = 'XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-ucontext}"'
@@ -58,13 +53,11 @@ elif new_backend not in build:
     raise SystemExit("unexpected iOS coroutine backend configuration")
 build_path.write_text(build)
 
-# 4) Fix the iOS sigaltstack bootstrap itself. The previous iOS-only raise()
-# path can return without the SA_ONSTACK trampoline having run under an
-# embedded LiveContainer/StikDebug process. That reaches the explicit abort in
-# qemu_coroutine_new(). Keep SIGUSR2 blocked while queueing it to this pthread,
-# then atomically wait with sigsuspend(), matching QEMU's proven POSIX path.
-# Add stage logging so any remaining platform failure is identifiable directly
-# from the device log rather than only as qemu_coroutine_new()+offset.
+# 4) iOS/LiveContainer can reject pthread_kill() with ENOTSUP (45). Queue the
+# bootstrap signal to this pthread when supported; otherwise fall back to a
+# process-directed kill(). SIGUSR2 is blocked in the creating thread until the
+# sigsuspend below, so the pending signal can run the SA_ONSTACK trampoline
+# when that thread atomically unmasks it. Keep detailed stage logging.
 sig_path = Path("util/coroutine-sigaltstack.c")
 sig = sig_path.read_text()
 old_ios = r'''#ifdef CONFIG_IOS
@@ -89,7 +82,7 @@ old_ios = r'''#ifdef CONFIG_IOS
         sigsuspend(&sigs);
     }
 #endif'''
-new_ios = r'''#ifdef CONFIG_IOS
+previous_ios = r'''#ifdef CONFIG_IOS
     fprintf(stderr, "xemu_ios: coroutine sigaltstack bootstrap: signal queue\n");
     fflush(stderr);
     {
@@ -124,27 +117,63 @@ new_ios = r'''#ifdef CONFIG_IOS
         sigsuspend(&sigs);
     }
 #endif'''
-if old_ios in sig:
+new_ios = r'''#ifdef CONFIG_IOS
+    fprintf(stderr, "xemu_ios: coroutine sigaltstack bootstrap: signal queue\n");
+    fflush(stderr);
+    {
+        int kill_ret = pthread_kill(pthread_self(), SIGUSR2);
+        if (kill_ret != 0) {
+            fprintf(stderr,
+                    "xemu_ios: coroutine sigaltstack pthread_kill unavailable: %d (%s); using process kill fallback\n",
+                    kill_ret, strerror(kill_ret));
+            fflush(stderr);
+            if (kill(getpid(), SIGUSR2) != 0) {
+                fprintf(stderr,
+                        "xemu_ios: coroutine sigaltstack process kill failed: %d (%s)\n",
+                        errno, strerror(errno));
+                fflush(stderr);
+                abort();
+            }
+        }
+    }
+    sigfillset(&sigs);
+    sigdelset(&sigs, SIGUSR2);
+    while (!coTS->tr_called) {
+        int suspend_ret = sigsuspend(&sigs);
+        if (suspend_ret < 0 && errno != EINTR) {
+            fprintf(stderr,
+                    "xemu_ios: coroutine sigaltstack sigsuspend failed: %d (%s)\n",
+                    errno, strerror(errno));
+            fflush(stderr);
+            abort();
+        }
+    }
+    fprintf(stderr, "xemu_ios: coroutine sigaltstack bootstrap: trampoline returned\n");
+    fflush(stderr);
+#else
+    pthread_kill(pthread_self(), SIGUSR2);
+    sigfillset(&sigs);
+    sigdelset(&sigs, SIGUSR2);
+    while (!coTS->tr_called) {
+        sigsuspend(&sigs);
+    }
+#endif'''
+if previous_ios in sig:
+    sig = sig.replace(previous_ios, new_ios, 1)
+elif old_ios in sig:
     sig = sig.replace(old_ios, new_ios, 1)
-elif "coroutine sigaltstack bootstrap: signal queue" not in sig:
+elif "using process kill fallback" not in sig:
     raise SystemExit("expected iOS sigaltstack bootstrap block not found")
 
-# Give the other explicit failure sites useful iOS diagnostics.
 sig = sig.replace(
     '''    if (sigaction(SIGUSR2, &sa, &osa) != 0) {\n        abort();\n    }''',
-    '''    if (sigaction(SIGUSR2, &sa, &osa) != 0) {\n#ifdef CONFIG_IOS\n        fprintf(stderr, "xemu_ios: coroutine sigaction failed: %d (%s)\\n", errno, strerror(errno));\n        fflush(stderr);\n#endif\n        abort();\n    }''',
-    1,
-)
+    '''    if (sigaction(SIGUSR2, &sa, &osa) != 0) {\n#ifdef CONFIG_IOS\n        fprintf(stderr, "xemu_ios: coroutine sigaction failed: %d (%s)\\n", errno, strerror(errno));\n        fflush(stderr);\n#endif\n        abort();\n    }''', 1)
 sig = sig.replace(
     '''    if (sigaltstack(&ss, &oss) < 0) {\n        abort();\n    }''',
-    '''    if (sigaltstack(&ss, &oss) < 0) {\n#ifdef CONFIG_IOS\n        fprintf(stderr, "xemu_ios: coroutine sigaltstack install failed: %d (%s)\\n", errno, strerror(errno));\n        fflush(stderr);\n#endif\n        abort();\n    }''',
-    1,
-)
+    '''    if (sigaltstack(&ss, &oss) < 0) {\n#ifdef CONFIG_IOS\n        fprintf(stderr, "xemu_ios: coroutine sigaltstack install failed: %d (%s)\\n", errno, strerror(errno));\n        fflush(stderr);\n#endif\n        abort();\n    }''', 1)
 sig = sig.replace(
     '''    if (sigaltstack(&ss, NULL) < 0) {\n        abort();\n    }''',
-    '''    if (sigaltstack(&ss, NULL) < 0) {\n#ifdef CONFIG_IOS\n        fprintf(stderr, "xemu_ios: coroutine sigaltstack disable failed: %d (%s)\\n", errno, strerror(errno));\n        fflush(stderr);\n#endif\n        abort();\n    }''',
-    1,
-)
+    '''    if (sigaltstack(&ss, NULL) < 0) {\n#ifdef CONFIG_IOS\n        fprintf(stderr, "xemu_ios: coroutine sigaltstack disable failed: %d (%s)\\n", errno, strerror(errno));\n        fflush(stderr);\n#endif\n        abort();\n    }''', 1)
 sig_path.write_text(sig)
 
 patched_coroutine = coroutine_path.read_text()
@@ -166,13 +195,12 @@ if new_backend not in patched_build:
     raise SystemExit("sigaltstack coroutine backend was not selected")
 if "raise(SIGUSR2)" in patched_sig:
     raise SystemExit("unsafe iOS raise() coroutine bootstrap is still present")
+if "using process kill fallback" not in patched_sig:
+    raise SystemExit("iOS process-directed signal fallback missing")
 if "coroutine sigaltstack bootstrap: trampoline returned" not in patched_sig:
     raise SystemExit("iOS sigaltstack bootstrap fix missing")
 
-print("Patched iOS coroutine startup: lazy sigaltstack backend with pthread-directed bootstrap")
+print("Patched iOS coroutine startup: lazy sigaltstack backend with pthread/process signal fallback")
 
-# Apply the diagnostic-only instrumentation after the functional coroutine fix.
-# Keeping this as a separate script makes it easy to remove or reduce logging
-# later without touching the crash fix itself.
 import runpy
 runpy.run_path(".github/scripts/apply_ios_diagnostic_logging.py", run_name="__main__")
