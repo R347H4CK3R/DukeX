@@ -203,16 +203,23 @@ ninja -C "${BUILD_DIR}" "${NINJA_TARGETS[@]}" "$@"
 
 # Refuse to package a core that accidentally contains the iOS sigaltstack
 # bootstrap again. The ucontext diagnostic marker is injected by the workflow
-# patch and proves the intended backend was linked into the dylib.
+# patch and proves the intended backend was linked into the dylib. Avoid
+# strings|grep pipelines here because pipefail can turn grep -q's early exit
+# into a false negative when strings receives SIGPIPE.
 CORE_DYLIB="${BUILD_DIR}/libxemu-ios-core.dylib"
 if [[ -f "${CORE_DYLIB}" ]]; then
-  if ! strings "${CORE_DYLIB}" | grep -q 'xemu_ios: ucontext coroutine new: enter'; then
+  CORE_STRINGS="${BUILD_DIR}/.dukex-core-strings.txt"
+  strings "${CORE_DYLIB}" > "${CORE_STRINGS}"
+  if ! grep -q 'xemu_ios: ucontext coroutine new: enter' "${CORE_STRINGS}"; then
     printf 'ERROR: built iOS core does not contain the ucontext coroutine backend marker.\n' >&2
+    rm -f "${CORE_STRINGS}"
     exit 1
   fi
-  if strings "${CORE_DYLIB}" | grep -q 'coroutine sigaltstack pthread_kill failed'; then
+  if grep -q 'coroutine sigaltstack pthread_kill failed' "${CORE_STRINGS}"; then
     printf 'ERROR: sigaltstack coroutine bootstrap leaked into the iOS core.\n' >&2
+    rm -f "${CORE_STRINGS}"
     exit 1
   fi
+  rm -f "${CORE_STRINGS}"
   printf 'Verified iOS core coroutine backend: ucontext only.\n'
 fi
