@@ -182,6 +182,68 @@ if "XemuPrepareSDLVideo" not in swift:
     loader_replacement = '''    private func loadPrepareSDLVideo() -> XemuPrepareSDLVideo? {\n        if let prepareSDLVideo { return prepareSDLVideo }\n        guard let handle else { return nil }\n        guard let symbol = dlsym(handle, \"xemu_ios_prepare_sdl_video\") else {\n            NSLog(\"xemu_ios_prepare_sdl_video is not available\")\n            return nil\n        }\n        NSLog(\"Resolved xemu_ios_prepare_sdl_video\")\n        let prepare = unsafeBitCast(symbol, to: XemuPrepareSDLVideo.self)\n        prepareSDLVideo = prepare\n        return prepare\n    }\n\n    private func loadSetApplicationActive() -> XemuSetApplicationActive? {\n'''
     swift = replace_once(swift, loader_anchor, loader_replacement, "Swift SDL preflight loader")
 
+
+# Map switching stops the current core on a worker queue. display_finalize()
+# consequently reaches SDL_Quit() off the UIKit main thread, where SDL's
+# UIKit_SuspendScreenSaver calls BoardServices and traps with SIGTRAP.
+if "xemu_ios_finalize_sdl_video_on_main" not in xemu:
+    xemu = replace_once(
+        xemu,
+        "#ifdef CONFIG_IOS\n#include <SDL3/SDL_metal.h>\n#endif",
+        "#ifdef CONFIG_IOS\n#include <SDL3/SDL_metal.h>\n#include <dispatch/dispatch.h>\n#include <pthread.h>\n#endif",
+        "iOS SDL teardown dispatch headers",
+    )
+
+    finalize_anchor = "static void display_finalize(void)\n{"
+    finalize_helper = r'''#ifdef CONFIG_IOS
+static void xemu_ios_finalize_sdl_video_callback(void *opaque)
+{
+    IOS_LOG("SDL video finalization on main thread begin");
+    SDL_DestroyWindow(m_window);
+    m_window = NULL;
+    SDL_Quit();
+    IOS_LOG("SDL video finalization on main thread complete");
+}
+
+static void xemu_ios_finalize_sdl_video_on_main(void)
+{
+    if (pthread_main_np()) {
+        xemu_ios_finalize_sdl_video_callback(NULL);
+        return;
+    }
+
+    IOS_LOG("dispatching SDL video finalization to main thread");
+    dispatch_sync_f(dispatch_get_main_queue(), NULL,
+                    xemu_ios_finalize_sdl_video_callback);
+}
+#endif
+
+static void display_finalize(void)
+{'''
+    xemu = replace_once(
+        xemu, finalize_anchor, finalize_helper,
+        "iOS SDL main-thread teardown helper",
+    )
+
+    old_finalize = '''    SDL_DestroyWindow(m_window);
+    SDL_Quit();
+}
+
+static QemuDisplay qemu_display_xemu = {'''
+    new_finalize = '''#ifdef CONFIG_IOS
+    xemu_ios_finalize_sdl_video_on_main();
+#else
+    SDL_DestroyWindow(m_window);
+    SDL_Quit();
+#endif
+}
+
+static QemuDisplay qemu_display_xemu = {'''
+    xemu = replace_once(
+        xemu, old_finalize, new_finalize,
+        "display finalization main-thread dispatch",
+    )
+
 xemu_path.write_text(xemu, encoding="utf-8")
 swift_path.write_text(swift, encoding="utf-8")
 install_vcpkg_clone_wrapper()
