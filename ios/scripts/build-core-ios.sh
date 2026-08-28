@@ -9,11 +9,10 @@ SDK_NAME="${SDK_NAME:-iphoneos}"
 VCPKG_PREFIX="${XEMU_IOS_VCPKG_PREFIX:-${VCPKG_ROOT:-}/installed/arm64-ios}"
 MOLTENVK_ROOT="${MOLTENVK_ROOT:-}"
 MOLTENVK_FRAMEWORK="${MOLTENVK_FRAMEWORK:-}"
-# Avoid QEMU's SIGUSR2/sigaltstack bootstrap on iOS. Under LiveContainer/
-# StikDebug the first coroutine can hang before the trampoline completes.
-# ucontext does not depend on process-wide signal delivery and is therefore
-# the safer backend for the embedded iOS core.
-XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-ucontext}"
+# iPhoneOS must never use QEMU's SIGUSR2/sigaltstack coroutine bootstrap.
+# LiveContainer/StikDebug return ENOTSUP from pthread_kill for that path.
+# Force ucontext instead of allowing a workflow/environment override.
+XEMU_IOS_COROUTINE_BACKEND="ucontext"
 
 for path in "${SOURCE_DIR}" "${BUILD_DIR}"; do
   case "${path}" in
@@ -114,9 +113,8 @@ printf 'Embedding core rpath: @loader_path/Frameworks\n'
 printf 'Using iOS coroutine backend: %s\n' "${XEMU_IOS_COROUTINE_BACKEND}"
 
 # The current iOS startup path pre-creates 640 coroutines before qemu_init().
-# On the ucontext backend the first qemu_coroutine_new() is aborting on-device,
-# so compile this build with the priming default disabled. Normal coroutine
-# creation remains available later through QEMU's regular code paths.
+# Keep eager priming disabled; normal coroutine creation remains available
+# later through QEMU's regular code paths.
 "${SYSTEM_PYTHON}" - "${SOURCE_DIR}/ui/xemu.c" <<'PY'
 from pathlib import Path
 import sys
@@ -128,24 +126,42 @@ old = '''    if (!value || !*value) {
 new = '''    if (!value || !*value) {
         return 0;
     }'''
-if old not in s:
+if old in s:
+    s = s.replace(old, new, 1)
+elif new not in s:
     raise SystemExit("Expected iOS coroutine prime default block not found")
-s = s.replace(old, new, 1)
 old2 = '''    if (end == value || parsed > 4096) {
         return 640;
     }'''
 new2 = '''    if (end == value || parsed > 4096) {
         return 0;
     }'''
-if old2 not in s:
+if old2 in s:
+    s = s.replace(old2, new2, 1)
+elif new2 not in s:
     raise SystemExit("Expected iOS coroutine prime fallback block not found")
-p.write_text(s.replace(old2, new2, 1), encoding="utf-8")
+p.write_text(s, encoding="utf-8")
 print("Disabled DukeX iOS coroutine pre-prime default for this build")
 PY
 
 grep -A14 -n "static unsigned int ios_coroutine_prime_count" "${SOURCE_DIR}/ui/xemu.c"
 
+# Cached Meson/Ninja state can preserve the previously selected sigaltstack
+# source even after --with-coroutine changes. A backend stamp makes that
+# impossible: an unstamped/old/sigaltstack build directory is discarded once,
+# while later ucontext builds can still use incremental caching.
+BACKEND_STAMP="${BUILD_DIR}/.dukex-ios-coroutine-backend"
+CACHED_BACKEND=""
+if [[ -f "${BACKEND_STAMP}" ]]; then
+  CACHED_BACKEND="$(cat "${BACKEND_STAMP}" || true)"
+fi
+if [[ -d "${BUILD_DIR}" && "${CACHED_BACKEND}" != "${XEMU_IOS_COROUTINE_BACKEND}" ]]; then
+  printf 'Coroutine backend cache mismatch (%s -> %s); rebuilding core cleanly.\n' \
+    "${CACHED_BACKEND:-unstamped}" "${XEMU_IOS_COROUTINE_BACKEND}"
+  rm -rf "${BUILD_DIR}"
+fi
 mkdir -p "${BUILD_DIR}"
+printf '%s\n' "${XEMU_IOS_COROUTINE_BACKEND}" > "${BACKEND_STAMP}"
 cd "${BUILD_DIR}"
 
 "${SOURCE_DIR}/configure" \
@@ -176,7 +192,7 @@ cd "${BUILD_DIR}"
   --enable-opengl \
   --enable-pixman \
   --audio-drv-list= \
-  --with-coroutine="${XEMU_IOS_COROUTINE_BACKEND}" \
+  --with-coroutine="ucontext" \
   --extra-cflags="${COMMON_FLAGS[*]}" \
   --extra-cxxflags="${COMMON_FLAGS[*]}" \
   --extra-objcflags="${COMMON_FLAGS[*]}" \
@@ -184,3 +200,19 @@ cd "${BUILD_DIR}"
   "${EXTRA_CONFIGURE_ARGS[@]+"${EXTRA_CONFIGURE_ARGS[@]}"}"
 
 ninja -C "${BUILD_DIR}" "${NINJA_TARGETS[@]}" "$@"
+
+# Refuse to package a core that accidentally contains the iOS sigaltstack
+# bootstrap again. The ucontext diagnostic marker is injected by the workflow
+# patch and proves the intended backend was linked into the dylib.
+CORE_DYLIB="${BUILD_DIR}/libxemu-ios-core.dylib"
+if [[ -f "${CORE_DYLIB}" ]]; then
+  if ! strings "${CORE_DYLIB}" | grep -q 'xemu_ios: ucontext coroutine new: enter'; then
+    printf 'ERROR: built iOS core does not contain the ucontext coroutine backend marker.\n' >&2
+    exit 1
+  fi
+  if strings "${CORE_DYLIB}" | grep -q 'coroutine sigaltstack pthread_kill failed'; then
+    printf 'ERROR: sigaltstack coroutine bootstrap leaked into the iOS core.\n' >&2
+    exit 1
+  fi
+  printf 'Verified iOS core coroutine backend: ucontext only.\n'
+fi
