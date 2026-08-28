@@ -112,7 +112,6 @@ printf 'MoltenVK framework will be force-linked for iOS runtime loading: %s\n' "
 printf 'Embedding core rpath: @loader_path/Frameworks\n'
 printf 'Using iOS coroutine backend: %s\n' "${XEMU_IOS_COROUTINE_BACKEND}"
 
-# The current iOS startup path pre-creates 640 coroutines before qemu_init().
 # Keep eager priming disabled; normal coroutine creation remains available
 # later through QEMU's regular code paths.
 "${SYSTEM_PYTHON}" - "${SOURCE_DIR}/ui/xemu.c" <<'PY'
@@ -147,18 +146,19 @@ PY
 grep -A14 -n "static unsigned int ios_coroutine_prime_count" "${SOURCE_DIR}/ui/xemu.c"
 
 # Cached Meson/Ninja state can preserve the previously selected sigaltstack
-# source even after --with-coroutine changes. A backend stamp makes that
-# impossible: an unstamped/old/sigaltstack build directory is discarded once,
-# while later ucontext builds can still use incremental caching.
+# source even after --with-coroutine changes. An unstamped or mismatched build
+# is reset, while preserving helper directories created above.
 BACKEND_STAMP="${BUILD_DIR}/.dukex-ios-coroutine-backend"
 CACHED_BACKEND=""
 if [[ -f "${BACKEND_STAMP}" ]]; then
   CACHED_BACKEND="$(cat "${BACKEND_STAMP}" || true)"
 fi
 if [[ -d "${BUILD_DIR}" && "${CACHED_BACKEND}" != "${XEMU_IOS_COROUTINE_BACKEND}" ]]; then
-  printf 'Coroutine backend cache mismatch (%s -> %s); rebuilding core cleanly.\n' \
+  printf 'Coroutine backend cache mismatch (%s -> %s); resetting compiled core state.\n' \
     "${CACHED_BACKEND:-unstamped}" "${XEMU_IOS_COROUTINE_BACKEND}"
-  rm -rf "${BUILD_DIR}"
+  find "${BUILD_DIR}" -mindepth 1 -maxdepth 1 \
+    ! -name 'host-python-venv' ! -name 'ios-pkgconfig' \
+    -exec rm -rf {} +
 fi
 mkdir -p "${BUILD_DIR}"
 printf '%s\n' "${XEMU_IOS_COROUTINE_BACKEND}" > "${BACKEND_STAMP}"
