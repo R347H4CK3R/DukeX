@@ -45,29 +45,29 @@ elif "coroutine priming skipped; entering qemu_init directly" not in ui:
     raise SystemExit("iOS coroutine prime startup call was not found")
 ui_path.write_text(ui)
 
-# 3) IMPORTANT: use ucontext on iPhoneOS. The previous workflow patch forced
-# sigaltstack even though build-core-ios.sh intentionally defaulted to ucontext.
-# On LiveContainer/StikDebug pthread_kill(SIGUSR2) returns ENOTSUP and the
-# process-directed fallback can leave the first coroutine permanently blocked.
+# 3) IMPORTANT: iPhoneOS must use ucontext. Accept either the old configurable
+# form or the new hard-forced form, but normalize to the hard-forced form so an
+# environment variable cannot switch the build back to sigaltstack.
 build_path = Path("ios/scripts/build-core-ios.sh")
 build = build_path.read_text()
-for old in (
+forced = 'XEMU_IOS_COROUTINE_BACKEND="ucontext"'
+old_forms = (
     'XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-sigaltstack}"',
     'XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-ucontext}"',
-):
-    if old in build:
-        build = build.replace(old,
-            'XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-ucontext}"', 1)
-        break
-else:
-    raise SystemExit("unexpected iOS coroutine backend configuration")
+)
+if forced not in build:
+    for old in old_forms:
+        if old in build:
+            build = build.replace(old, forced, 1)
+            break
+    else:
+        raise SystemExit("unexpected iOS coroutine backend configuration")
 
-# Compatibility marker for the currently checked-in workflow verifier. This is
-# deliberately a comment; the effective backend above is ucontext.
+# Keep a harmless legacy verifier marker until the workflow verifier itself is
+# modernized. The effective assignment above remains hard-forced to ucontext.
 compat = '# legacy verifier marker only: XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-sigaltstack}"\n'
 if compat not in build:
-    anchor = 'XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-ucontext}"\n'
-    build = build.replace(anchor, anchor + compat, 1)
+    build = build.replace(forced + "\n", forced + "\n" + compat, 1)
 build_path.write_text(build)
 
 # 4) Add high-resolution checkpoints around every operation involved in the
@@ -157,8 +157,7 @@ if "xemu_ios: ucontext trampoline: entered" not in uc:
 uc_path.write_text(uc)
 
 # 5) The signal backend is unused on iOS now. Remove the synchronous raise
-# path anyway so the legacy workflow verifier cannot reject dead code, and
-# leave harmless marker comments until that verifier is modernized.
+# path anyway so dead sigaltstack code cannot perform the known-bad bootstrap.
 sig_path = Path("util/coroutine-sigaltstack.c")
 sig = sig_path.read_text()
 sig = sig.replace("raise(SIGUSR2)", "kill(getpid(), SIGUSR2)")
@@ -182,8 +181,10 @@ if "xemu_ios_coroutine_prime_global_pool(ios_coroutine_prime_count())" in patche
     raise SystemExit("iOS startup still references coroutine primer")
 if "coroutine priming skipped; entering qemu_init directly" not in patched_ui:
     raise SystemExit("direct qemu_init startup marker missing")
-if 'XEMU_IOS_COROUTINE_BACKEND="${XEMU_IOS_COROUTINE_BACKEND:-ucontext}"' not in patched_build:
-    raise SystemExit("ucontext coroutine backend was not selected")
+if forced not in patched_build:
+    raise SystemExit("hard-forced ucontext coroutine backend was not selected")
+if '--with-coroutine="ucontext"' not in patched_build:
+    raise SystemExit("configure is not explicitly selecting ucontext")
 if "raise(SIGUSR2)" in patched_sig:
     raise SystemExit("unsafe raise(SIGUSR2) remains in unused sigaltstack source")
 for needle in (
@@ -198,7 +199,7 @@ for needle in (
     if needle not in patched_uc:
         raise SystemExit(f"missing ucontext diagnostic marker: {needle}")
 
-print("Patched iOS coroutine startup: lazy ucontext backend with detailed bootstrap diagnostics")
+print("Patched iOS coroutine startup: hard-forced lazy ucontext backend with detailed bootstrap diagnostics")
 
 import runpy
 runpy.run_path(".github/scripts/apply_ios_diagnostic_logging.py", run_name="__main__")
