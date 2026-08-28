@@ -81,9 +81,10 @@ jobs:
           grep -n "UIApplication.willResignActiveNotification" ios/DukeX/DukeX/Runtime/Core/EmulatorCoreRuntime.swift
           grep -n "refusing background SDL_Init" ui/xemu.c
           grep -n "coroutine global pool prime disabled" util/qemu-coroutine.c
-          grep -n "coroutine sigaltstack bootstrap: signal queue" util/coroutine-sigaltstack.c
-          grep -n "coroutine sigaltstack bootstrap: trampoline returned" util/coroutine-sigaltstack.c
-          grep -n 'XEMU_IOS_COROUTINE_BACKEND=.*sigaltstack' ios/scripts/build-core-ios.sh
+          grep -n "ucontext coroutine new: enter" util/coroutine-ucontext.c
+          grep -n "ucontext swapcontext begin" util/coroutine-ucontext.c
+          grep -n 'XEMU_IOS_COROUTINE_BACKEND="ucontext"' ios/scripts/build-core-ios.sh
+          grep -n -- '--with-coroutine="ucontext"' ios/scripts/build-core-ios.sh
           if sed -n '/void xemu_ios_coroutine_prime_global_pool/,/^#endif/p' util/qemu-coroutine.c | grep -q 'qemu_coroutine_new();'; then
             echo "Eager coroutine creation is still present in iOS primer" >&2
             exit 1
