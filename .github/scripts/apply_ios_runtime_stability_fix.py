@@ -90,7 +90,8 @@ old_acquire = '''    g_main_context_acquire(context);
 new_acquire = '''#if defined(XBOX) && defined(CONFIG_IOS)
     if (!g_main_context_acquire(context)) {
         static unsigned int ios_context_busy_count;
-        unsigned int busy = qatomic_fetch_inc(&ios_context_busy_count) + 1;
+        unsigned int busy =
+            __atomic_add_fetch(&ios_context_busy_count, 1, __ATOMIC_RELAXED);
         if (busy <= 8 || (busy & (busy - 1)) == 0) {
             fprintf(stderr,
                     "xemu_ios: GLib main context busy; skipping poll iteration #%u\\n",
