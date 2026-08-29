@@ -27,7 +27,7 @@ jobs:
       - name: Expand standalone Halo source
         run: |
           set -euxo pipefail
-          base64 --decode halo-native-ios/source-fixed.b64 > "$RUNNER_TEMP/halo-source.tar.gz"
+          base64 -D -i halo-native-ios/source-fixed.b64 -o "$RUNNER_TEMP/halo-source.tar.gz"
           gzip -t "$RUNNER_TEMP/halo-source.tar.gz"
           tar -xzf "$RUNNER_TEMP/halo-source.tar.gz" -C halo-native-ios
           test -f halo-native-ios/project.yml
