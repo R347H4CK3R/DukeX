@@ -3,9 +3,10 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var gameFolder: GameFolderStore
-    @State private var showingFolderImporter = false
     @State private var showingXBEImporter = false
     @State private var importerError: String?
+
+    private static let xbeType = UTType(filenameExtension: "xbe") ?? .data
 
     var body: some View {
         NavigationStack {
@@ -21,29 +22,38 @@ struct ContentView: View {
                     .padding(.horizontal)
 
                 if let importerError {
-                    Text(importerError).font(.caption).foregroundStyle(.red)
-                        .multilineTextAlignment(.center).padding(.horizontal)
+                    Text(importerError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
                 }
+
                 if let folder = gameFolder.folderURL {
-                    Text(folder.lastPathComponent).font(.footnote.monospaced()).lineLimit(2)
+                    Text(folder.lastPathComponent)
+                        .font(.footnote.monospaced())
+                        .lineLimit(2)
                 }
 
-                Button { importerError = nil; showingFolderImporter = true } label: {
-                    Label(gameFolder.folderURL == nil ? "Choose Halo_extracted Folder" : "Choose Different Folder", systemImage: "folder")
+                Button {
+                    importerError = nil
+                    showingXBEImporter = true
+                } label: {
+                    Label("Choose default.xbe", systemImage: "doc.badge.plus")
                         .frame(maxWidth: .infinity)
-                }.buttonStyle(.borderedProminent)
+                }
+                .buttonStyle(.borderedProminent)
 
-                Button { importerError = nil; showingXBEImporter = true } label: {
-                    Label("Select default.xbe Instead", systemImage: "doc")
-                        .frame(maxWidth: .infinity)
-                }.buttonStyle(.bordered)
-
-                Text("Native iOS Files import. If folder selection is unavailable, select default.xbe inside Halo_extracted.")
-                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal)
+                Text("Open Halo_extracted, tap default.xbe, then tap Open. The app will automatically use the folder containing that file and validate the maps directory.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
 
                 if gameFolder.folderURL != nil {
-                    Button("Recheck Game Files") { gameFolder.revalidate() }.buttonStyle(.bordered)
-                    Button("Forget Folder", role: .destructive) { gameFolder.forgetFolder() }
+                    Button("Recheck Game Files") { gameFolder.revalidate() }
+                        .buttonStyle(.bordered)
+                    Button("Forget Game Files", role: .destructive) { gameFolder.forgetFolder() }
                 }
                 Spacer()
             }
@@ -51,20 +61,24 @@ struct ContentView: View {
             .navigationTitle("Halo CE Port")
             .navigationBarTitleDisplayMode(.inline)
         }
-        .fileImporter(isPresented: $showingFolderImporter, allowedContentTypes: [.folder], allowsMultipleSelection: false) { result in
+        .fileImporter(
+            isPresented: $showingXBEImporter,
+            allowedContentTypes: [Self.xbeType, .data, .item],
+            allowsMultipleSelection: false
+        ) { result in
             switch result {
             case .success(let urls):
-                guard let url = urls.first else { importerError = "No folder was returned by Files."; return }
-                gameFolder.select(folder: url)
-            case .failure(let error): importerError = "Folder picker failed: \(error.localizedDescription)"
-            }
-        }
-        .fileImporter(isPresented: $showingXBEImporter, allowedContentTypes: [.data], allowsMultipleSelection: false) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { importerError = "No file was returned by Files."; return }
+                guard let url = urls.first else {
+                    importerError = "Files did not return a selected file."
+                    return
+                }
+                guard url.lastPathComponent.lowercased() == "default.xbe" else {
+                    importerError = "Select the file named default.xbe."
+                    return
+                }
                 gameFolder.select(defaultXBE: url)
-            case .failure(let error): importerError = "File picker failed: \(error.localizedDescription)"
+            case .failure(let error):
+                importerError = "Could not import default.xbe: \(error.localizedDescription)"
             }
         }
     }
