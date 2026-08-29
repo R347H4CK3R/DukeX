@@ -66,6 +66,22 @@ jobs:
       - name: Apply lifecycle fix
         run: python3 .github/scripts/apply_dukex_background_fix.py
 
+      - name: Declare GLib main context for iOS transfer
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('ui/xemu.c')
+          s = p.read_text(encoding='utf-8')
+          marker = 'extern GMainContext *qemu_main_context;'
+          if marker not in s:
+              anchor = '#include "qemu/main-loop.h"\n'
+              if anchor not in s:
+                  raise SystemExit('qemu/main-loop.h include not found')
+              s = s.replace(anchor, anchor + '#ifdef CONFIG_IOS\nextern GMainContext *qemu_main_context;\n#endif\n', 1)
+              p.write_text(s, encoding='utf-8')
+          PY
+          grep -n 'extern GMainContext \*qemu_main_context' ui/xemu.c
+
       - name: Apply iOS SDL main-thread fix
         run: python3 .github/scripts/apply_ios_sdl_mainthread_fix.py
 
