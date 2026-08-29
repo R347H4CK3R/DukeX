@@ -41,29 +41,13 @@ if "loadSetApplicationActive" not in swift:
     new_task = '            Task { @MainActor in\n                let notificationCenter = NotificationCenter.default\n                let resignObserver = notificationCenter.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in setApplicationActive?(0) }\n                let backgroundObserver = notificationCenter.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in setApplicationActive?(0) }\n                let activeObserver = notificationCenter.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in setApplicationActive?(1) }\n                setApplicationActive?(UIApplication.shared.applicationState == .active ? 1 : 0)\n                defer {\n                    notificationCenter.removeObserver(resignObserver)\n                    notificationCenter.removeObserver(backgroundObserver)\n                    notificationCenter.removeObserver(activeObserver)\n                }\n                await XboxPeripheralPermissionPrimer.shared.prepareIfNeeded('
     swift = replace_once(swift, old_task, new_task, "swift lifecycle observers")
     old_loader = '        self.requestShutdown = requestShutdown\n        return requestShutdown\n    }\n\n    private func loadRequestSystemReset() -> QemuSystemResetRequest? {'
-    new_loader = '        self.requestShutdown = requestShutdown\n        return requestShutdown\n    }\n\n    private func loadSetApplicationActive() -> XemuSetApplicationActive? {\n        if let setApplicationActive { return setApplicationActive }\n        guard let handle else { return nil }\n        guard let symbol = dlsym(handle, "xemu_ios_set_application_active") else {\n            NSLog("xemu_ios_set_application_active is not available; background GPU protection disabled")\n            return nil\n        }\n        NSLog("Resolved xemu_ios_set_application_active")\n        let setter = unsafeBitCast(symbol, to: XemuSetApplicationActive.self)\n        setApplicationActive = setter\n        return setter\n    }\n\n    private func loadRequestSystemReset() -> QemuSystemSystemResetRequest? {'
-    new_loader = new_loader.replace('QemuSystemSystemResetRequest', 'QemuSystemResetRequest')
+    new_loader = '        self.requestShutdown = requestShutdown\n        return requestShutdown\n    }\n\n    private func loadSetApplicationActive() -> XemuSetApplicationActive? {\n        if let setApplicationActive { return setApplicationActive }\n        guard let handle else { return nil }\n        guard let symbol = dlsym(handle, "xemu_ios_set_application_active") else {\n            NSLog("xemu_ios_set_application_active is not available; background GPU protection disabled")\n            return nil\n        }\n        NSLog("Resolved xemu_ios_set_application_active")\n        let setter = unsafeBitCast(symbol, to: XemuSetApplicationActive.self)\n        setApplicationActive = setter\n        return setter\n    }\n\n    private func loadRequestSystemReset() -> QemuSystemResetRequest? {'
     swift = replace_once(swift, old_loader, new_loader, "swift symbol loader")
 
 if "DukeX.XemuCore.Execution" not in swift:
-    swift = replace_once(
-        swift,
-        '    private static let qemuShutdownCauseGuestReset: Int32 = 7\n',
-        '    private static let qemuShutdownCauseGuestReset: Int32 = 7\n    private static let coreExecutionQueue = DispatchQueue(label: "DukeX.XemuCore.Execution", qos: .userInitiated)\n',
-        "swift core execution queue"
-    )
-    swift = replace_once(
-        swift,
-        '                let status = Self.invoke(\n',
-        '                let status = await Self.invoke(\n',
-        "swift async core invocation"
-    )
-    swift = replace_once(
-        swift,
-        '        session: NativeMetalPresenterSession\n    ) -> Int32 {',
-        '        session: NativeMetalPresenterSession\n    ) async -> Int32 {',
-        "swift async invoke signature"
-    )
+    swift = replace_once(swift, '    private static let qemuShutdownCauseGuestReset: Int32 = 7\n', '    private static let qemuShutdownCauseGuestReset: Int32 = 7\n    private static let coreExecutionQueue = DispatchQueue(label: "DukeX.XemuCore.Execution", qos: .userInitiated)\n', "swift core execution queue")
+    swift = replace_once(swift, '                let status = Self.invoke(\n', '                let status = await Self.invoke(\n', "swift async core invocation")
+    swift = replace_once(swift, '        session: NativeMetalPresenterSession\n    ) -> Int32 {', '        session: NativeMetalPresenterSession\n    ) async -> Int32 {', "swift async invoke signature")
     old_entry = '''        var mutableArgv = argv
         NativeMetalDiagnostics.log("CORE_ENTRY", "calling xemu_ios_main argc=\\(arguments.count) mainThread=\\(Thread.isMainThread ? 1 : 0)")
         XboxCameraDiagnosticLog.write("calling xemu_ios_main argc=\\(arguments.count)")
@@ -93,11 +77,6 @@ if "DukeX.XemuCore.Execution" not in swift:
 # qemu_init() executes on DukeX.XemuCore.Execution, then qemu_main_loop() moves
 # to the dedicated qemu_main thread. GLib ownership is thread-affine, so release
 # qemu_main_context on the qemu_init thread before transferring QEMU's locks.
-glib_old = '''    IOS_LOG("qemu_init: returned");
-    bql_unlock();
-    qemu_mutex_unlock_main_loop();
-    IOS_LOG("qemu main-loop locks transferred");
-'''
 glib_new = '''    IOS_LOG("qemu_init: returned");
     if (g_main_context_is_owner(qemu_main_context)) {
         g_main_context_release(qemu_main_context);
@@ -109,10 +88,20 @@ glib_new = '''    IOS_LOG("qemu_init: returned");
     qemu_mutex_unlock_main_loop();
     IOS_LOG("qemu main-loop locks transferred");
 '''
-if glib_old in xemu:
-    xemu = xemu.replace(glib_old, glib_new, 1)
-elif "qemu GLib main context released before thread transfer" not in xemu:
-    fail("iOS GLib main-context transfer site not found")
+if "qemu GLib main context released before thread transfer" not in xemu:
+    start = xemu.find('    IOS_LOG("qemu_init: returned");')
+    if start < 0:
+        fail("iOS GLib main-context transfer start not found")
+    thread_create = xemu.find('    qemu_thread_create(&thread, "qemu_main",', start)
+    if thread_create < 0:
+        fail("iOS qemu_main thread-transfer site not found")
+    # Preserve any comments/blank lines between the lock-transfer log and thread creation.
+    lock_log = '    IOS_LOG("qemu main-loop locks transferred");'
+    lock_pos = xemu.find(lock_log, start, thread_create)
+    if lock_pos < 0:
+        fail("iOS qemu main-loop transfer log not found")
+    tail = lock_pos + len(lock_log)
+    xemu = xemu[:start] + glib_new.rstrip('\n') + xemu[tail:]
 
 old_fat_timestamp = '''        let year = max(1980, components.year ?? 1980)
         let date = UInt16(((year - 1980) << 9) | ((components.month ?? 1) << 5) | (components.day ?? 1))
