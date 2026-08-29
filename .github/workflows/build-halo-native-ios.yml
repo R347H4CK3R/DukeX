@@ -5,6 +5,7 @@ on:
     branches:
       - halo-native-ios
     paths:
+      - 'halo-native-ios/**'
       - '.github/workflows/build-halo-native-ios.yml'
   workflow_dispatch:
 
