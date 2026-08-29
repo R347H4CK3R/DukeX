@@ -75,19 +75,51 @@ elif "arm64 coroutine backend new #" not in sig:
     raise SystemExit("expected ARM64 coroutine backend allocation log not found")
 sig_path.write_text(sig, encoding="utf-8")
 
-# 3) Fix the shutdown GLib assertion seen on iOS. g_main_context_acquire()
-# returns FALSE when another thread currently owns the context. The existing
-# XBOX main-loop code ignored that return value and unconditionally released
-# the context, which produces:
-#   g_main_context_release_unlocked: assertion 'context->owner_count > 0' failed
-# On iOS, skip this poll iteration when ownership could not be acquired.
+# 3) qemu_init() runs on DukeX's core execution queue on iOS, but the long-lived
+# qemu_main_loop() is then moved to a dedicated qemu_main thread. GLib main
+# contexts are thread-owned. qemu_init() can leave qemu_main_context acquired by
+# the first worker, so merely transferring QEMU's BQL/main-loop mutex is not
+# enough: the new qemu_main thread can never acquire GLib and spins forever.
+# Explicitly release the GLib context on its owning thread before starting the
+# new QEMU main-loop thread.
+xemu_path = Path("ui/xemu.c")
+xemu = xemu_path.read_text(encoding="utf-8")
+old_transfer = '''    IOS_LOG("qemu_init: returned");
+    bql_unlock();
+    qemu_mutex_unlock_main_loop();
+    IOS_LOG("qemu main-loop locks transferred");
+    qemu_thread_create(&thread, "qemu_main", qemu_main_loop_after_ios_init,
+                       NULL, QEMU_THREAD_JOINABLE);
+'''
+new_transfer = '''    IOS_LOG("qemu_init: returned");
+    if (g_main_context_is_owner(qemu_main_context)) {
+        g_main_context_release(qemu_main_context);
+        IOS_LOG("qemu GLib main context released before thread transfer");
+    } else {
+        IOS_LOG("qemu GLib main context not owned at transfer point");
+    }
+    bql_unlock();
+    qemu_mutex_unlock_main_loop();
+    IOS_LOG("qemu main-loop locks transferred");
+    qemu_thread_create(&thread, "qemu_main", qemu_main_loop_after_ios_init,
+                       NULL, QEMU_THREAD_JOINABLE);
+'''
+if old_transfer in xemu:
+    xemu = xemu.replace(old_transfer, new_transfer, 1)
+elif "qemu GLib main context released before thread transfer" not in xemu:
+    raise SystemExit("expected iOS QEMU thread-transfer site not found")
+xemu_path.write_text(xemu, encoding="utf-8")
+
+# 4) Keep the GLib acquire guard for safety, but do not busy-spin. A transient
+# ownership conflict should yield briefly. The normal startup path should no
+# longer hit this branch after the explicit ownership release above.
 main_loop_path = Path("util/main-loop.c")
 main_loop = main_loop_path.read_text(encoding="utf-8")
 old_acquire = '''    g_main_context_acquire(context);
 
     glib_pollfds_fill(&timeout);
 '''
-new_acquire = '''#if defined(XBOX) && defined(CONFIG_IOS)
+old_busy_guard = '''#if defined(XBOX) && defined(CONFIG_IOS)
     if (!g_main_context_acquire(context)) {
         static unsigned int ios_context_busy_count;
         unsigned int busy =
@@ -106,9 +138,31 @@ new_acquire = '''#if defined(XBOX) && defined(CONFIG_IOS)
 
     glib_pollfds_fill(&timeout);
 '''
-if old_acquire in main_loop:
+new_acquire = '''#if defined(XBOX) && defined(CONFIG_IOS)
+    if (!g_main_context_acquire(context)) {
+        static unsigned int ios_context_busy_count;
+        unsigned int busy =
+            __atomic_add_fetch(&ios_context_busy_count, 1, __ATOMIC_RELAXED);
+        if (busy <= 8 || (busy & (busy - 1)) == 0) {
+            fprintf(stderr,
+                    "xemu_ios: GLib main context busy; yielding poll iteration #%u\\n",
+                    busy);
+            fflush(stderr);
+        }
+        g_usleep(1000);
+        return 0;
+    }
+#else
+    g_main_context_acquire(context);
+#endif
+
+    glib_pollfds_fill(&timeout);
+'''
+if old_busy_guard in main_loop:
+    main_loop = main_loop.replace(old_busy_guard, new_acquire, 1)
+elif old_acquire in main_loop:
     main_loop = main_loop.replace(old_acquire, new_acquire, 1)
-elif "GLib main context busy; skipping poll iteration" not in main_loop:
+elif "GLib main context busy; yielding poll iteration" not in main_loop:
     raise SystemExit("expected GLib main-context acquire site not found")
 main_loop_path.write_text(main_loop, encoding="utf-8")
 
@@ -117,6 +171,7 @@ main_loop_path.write_text(main_loop, encoding="utf-8")
 patched_coroutine = coroutine_path.read_text(encoding="utf-8")
 patched_sig = sig_path.read_text(encoding="utf-8")
 patched_main_loop = main_loop_path.read_text(encoding="utf-8")
+patched_xemu = xemu_path.read_text(encoding="utf-8")
 for marker in (
     "coroutine create volume high",
     "ios_diag_create_count",
@@ -131,9 +186,15 @@ for marker in (
         raise SystemExit(f"missing backend allocation diagnostic marker: {marker}")
 for marker in (
     "if (!g_main_context_acquire(context))",
-    "GLib main context busy; skipping poll iteration",
+    "GLib main context busy; yielding poll iteration",
 ):
     if marker not in patched_main_loop:
         raise SystemExit(f"missing GLib ownership hardening marker: {marker}")
+for marker in (
+    "g_main_context_is_owner(qemu_main_context)",
+    "qemu GLib main context released before thread transfer",
+):
+    if marker not in patched_xemu:
+        raise SystemExit(f"missing GLib transfer marker: {marker}")
 
-print("Applied iOS runtime stability hardening: GLib ownership + coroutine diagnostics")
+print("Applied iOS runtime stability hardening: GLib ownership transfer + coroutine diagnostics")
