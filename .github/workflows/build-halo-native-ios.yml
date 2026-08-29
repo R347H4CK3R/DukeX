@@ -5,7 +5,6 @@ on:
     branches:
       - halo-native-ios
     paths:
-      - 'halo-native-ios/**'
       - '.github/workflows/build-halo-native-ios.yml'
   workflow_dispatch:
 
@@ -24,12 +23,9 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Expand standalone Halo source
+      - name: Verify standalone Halo source
         run: |
           set -euxo pipefail
-          base64 -D -i halo-native-ios/source-fixed.b64 -o "$RUNNER_TEMP/halo-source.tar.gz"
-          gzip -t "$RUNNER_TEMP/halo-source.tar.gz"
-          tar -xzf "$RUNNER_TEMP/halo-source.tar.gz" -C halo-native-ios
           test -f halo-native-ios/project.yml
           test -f halo-native-ios/HaloCEPort/HaloCEPortApp.swift
 
