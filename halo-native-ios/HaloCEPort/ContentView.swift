@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var gameFolder: GameFolderStore
-    @State private var showingPicker = false
+    @State private var importMode: ImportMode?
 
     var body: some View {
         NavigationStack {
@@ -28,12 +28,26 @@ struct ContentView: View {
                 }
 
                 Button {
-                    showingPicker = true
+                    importMode = .folder
                 } label: {
-                    Label(gameFolder.folderURL == nil ? "Choose Halo_extracted" : "Choose Different Folder", systemImage: "folder")
+                    Label(gameFolder.folderURL == nil ? "Choose Halo_extracted Folder" : "Choose Different Folder", systemImage: "folder")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+
+                Button {
+                    importMode = .defaultXBE
+                } label: {
+                    Label("Select default.xbe Instead", systemImage: "doc")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                Text("If iOS will not let you select the folder itself, choose default.xbe inside Halo_extracted. The app will use its parent folder automatically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
 
                 if gameFolder.folderURL != nil {
                     Button("Recheck Game Files") {
@@ -47,24 +61,24 @@ struct ContentView: View {
                 }
 
                 Spacer()
-
-                Text("This launcher keeps the game data outside the IPA and stores permission to the folder you choose in Files. It validates default.xbe and the maps directory without copying your game data.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
             }
             .padding()
             .navigationTitle("Halo CE Port")
             .navigationBarTitleDisplayMode(.inline)
-            .sheet(isPresented: $showingPicker) {
+            .sheet(item: $importMode) { mode in
                 FolderPicker(
+                    mode: mode,
                     onPick: { url in
-                        showingPicker = false
-                        gameFolder.select(folder: url)
+                        importMode = nil
+                        switch mode {
+                        case .folder:
+                            gameFolder.select(folder: url)
+                        case .defaultXBE:
+                            gameFolder.select(defaultXBE: url)
+                        }
                     },
                     onCancel: {
-                        showingPicker = false
+                        importMode = nil
                     }
                 )
             }
