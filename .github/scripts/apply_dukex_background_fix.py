@@ -42,13 +42,9 @@ if "loadSetApplicationActive" not in swift:
     swift = replace_once(swift, old_task, new_task, "swift lifecycle observers")
     old_loader = '        self.requestShutdown = requestShutdown\n        return requestShutdown\n    }\n\n    private func loadRequestSystemReset() -> QemuSystemResetRequest? {'
     new_loader = '        self.requestShutdown = requestShutdown\n        return requestShutdown\n    }\n\n    private func loadSetApplicationActive() -> XemuSetApplicationActive? {\n        if let setApplicationActive { return setApplicationActive }\n        guard let handle else { return nil }\n        guard let symbol = dlsym(handle, "xemu_ios_set_application_active") else {\n            NSLog("xemu_ios_set_application_active is not available; background GPU protection disabled")\n            return nil\n        }\n        NSLog("Resolved xemu_ios_set_application_active")\n        let setter = unsafeBitCast(symbol, to: XemuSetApplicationActive.self)\n        setApplicationActive = setter\n        return setter\n    }\n\n    private func loadRequestSystemReset() -> QemuSystemSystemResetRequest? {'
-    # Keep the exact original type name; split out to make accidental substitutions obvious.
     new_loader = new_loader.replace('QemuSystemSystemResetRequest', 'QemuSystemResetRequest')
     swift = replace_once(swift, old_loader, new_loader, "swift symbol loader")
 
-# xemu_ios_main is a long-lived blocking emulator loop. UIKit/Metal presenter setup
-# must stay on the MainActor, but the core loop itself must not occupy the main
-# thread or iOS can terminate LiveContainer for a blown CoreAnimation fence.
 if "DukeX.XemuCore.Execution" not in swift:
     swift = replace_once(
         swift,
@@ -93,6 +89,30 @@ if "DukeX.XemuCore.Execution" not in swift:
             }
         }'''
     swift = replace_once(swift, old_entry, new_entry, "swift off-main xemu entry")
+
+# qemu_init() executes on DukeX.XemuCore.Execution, then qemu_main_loop() moves
+# to the dedicated qemu_main thread. GLib ownership is thread-affine, so release
+# qemu_main_context on the qemu_init thread before transferring QEMU's locks.
+glib_old = '''    IOS_LOG("qemu_init: returned");
+    bql_unlock();
+    qemu_mutex_unlock_main_loop();
+    IOS_LOG("qemu main-loop locks transferred");
+'''
+glib_new = '''    IOS_LOG("qemu_init: returned");
+    if (g_main_context_is_owner(qemu_main_context)) {
+        g_main_context_release(qemu_main_context);
+        IOS_LOG("qemu GLib main context released before thread transfer");
+    } else {
+        IOS_LOG("qemu GLib main context not owned at transfer point");
+    }
+    bql_unlock();
+    qemu_mutex_unlock_main_loop();
+    IOS_LOG("qemu main-loop locks transferred");
+'''
+if glib_old in xemu:
+    xemu = xemu.replace(glib_old, glib_new, 1)
+elif "qemu GLib main context released before thread transfer" not in xemu:
+    fail("iOS GLib main-context transfer site not found")
 
 old_fat_timestamp = '''        let year = max(1980, components.year ?? 1980)
         let date = UInt16(((year - 1980) << 9) | ((components.month ?? 1) << 5) | (components.day ?? 1))
@@ -151,4 +171,4 @@ xemu_path.write_text(xemu, encoding="utf-8")
 swift_path.write_text(swift, encoding="utf-8")
 fatx_path.write_text(fatx, encoding="utf-8")
 jit_path.write_text(jit, encoding="utf-8")
-print("Self-patch applied or already present.")
+print("Self-patch applied or already present, including iOS GLib ownership transfer.")
