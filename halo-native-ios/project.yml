@@ -1,0 +1,25 @@
+name: HaloCEPort
+options:
+  bundleIdPrefix: com.r347h4ck3r
+  deploymentTarget:
+    iOS: '16.0'
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+targets:
+  HaloCEPort:
+    type: application
+    platform: iOS
+    sources:
+      - path: HaloCEPort
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.r347h4ck3r.haloce.native
+        PRODUCT_NAME: HaloCEPort
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Halo CE Native
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.games
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        TARGETED_DEVICE_FAMILY: '1,2'
+        CODE_SIGN_STYLE: Automatic
