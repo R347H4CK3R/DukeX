@@ -94,6 +94,15 @@ printf 'Using host Python: %s\n' "${PYTHON}"
 printf 'Using host CMake for Meson subprojects: %s\n' "${CMAKE}"
 "${CMAKE}" --version
 
+# The Actions self-patch must have fixed GLib ownership before compiling the
+# iOS core. Failing here is better than shipping an IPA that hot-spins before
+# the guest CPU can boot Halo.
+if ! grep -q 'GLib main context contention; QEMU loop remains live' "${SOURCE_DIR}/util/main-loop.c"; then
+  printf 'ERROR: iOS GLib/QEMU startup starvation fix was not applied.\n' >&2
+  exit 1
+fi
+printf 'Verified iOS GLib/QEMU main-loop starvation fix.\n'
+
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
