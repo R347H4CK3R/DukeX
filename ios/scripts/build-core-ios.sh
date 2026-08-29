@@ -3,6 +3,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 SOURCE_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
+
+# The workflow's coroutine patch also installs broad diagnostics. Normalize
+# those diagnostics and harden GLib context ownership immediately before the
+# core is configured/compiled so the generated source is what gets linked.
+python3 "${SOURCE_DIR}/.github/scripts/apply_ios_runtime_stability_fix.py"
+
 BUILD_DIR="${XEMU_IOS_BUILD_DIR:-${SOURCE_DIR}/build-ios-arm64}"
 IOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-16.0}"
 SDK_NAME="${SDK_NAME:-iphoneos}"
