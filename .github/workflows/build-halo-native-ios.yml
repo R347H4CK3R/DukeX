@@ -1,6 +1,12 @@
 name: Build Halo CE Native iOS IPA
 
 on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'halo-native-ios/**'
+      - '.github/workflows/build-halo-native-ios.yml'
   pull_request:
     branches:
       - master
@@ -31,6 +37,7 @@ jobs:
           test -f halo-native-ios/HaloCEPort/ContentView.swift
           test -f halo-native-ios/HaloCEPort/GameFolderStore.swift
           test -f halo-native-ios/HaloCEPort/FolderPicker.swift
+          test -f halo-native-ios/HaloCEPort/ImportMode.swift
 
       - name: Generate Xcode project
         working-directory: halo-native-ios
