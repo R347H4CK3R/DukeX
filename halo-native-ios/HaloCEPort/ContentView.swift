@@ -1,8 +1,11 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var gameFolder: GameFolderStore
-    @State private var importMode: ImportMode?
+    @State private var showingFolderImporter = false
+    @State private var showingXBEImporter = false
+    @State private var importerError: String?
 
     var body: some View {
         NavigationStack {
@@ -19,6 +22,14 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal)
 
+                if let importerError {
+                    Text(importerError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
+
                 if let folder = gameFolder.folderURL {
                     Text(folder.lastPathComponent)
                         .font(.footnote.monospaced())
@@ -28,7 +39,8 @@ struct ContentView: View {
                 }
 
                 Button {
-                    importMode = .folder
+                    importerError = nil
+                    showingFolderImporter = true
                 } label: {
                     Label(gameFolder.folderURL == nil ? "Choose Halo_extracted Folder" : "Choose Different Folder", systemImage: "folder")
                         .frame(maxWidth: .infinity)
@@ -36,14 +48,15 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
 
                 Button {
-                    importMode = .defaultXBE
+                    importerError = nil
+                    showingXBEImporter = true
                 } label: {
                     Label("Select default.xbe Instead", systemImage: "doc")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
 
-                Text("If iOS will not let you select the folder itself, choose default.xbe inside Halo_extracted. The app will use its parent folder automatically.")
+                Text("The picker now uses SwiftUI's native fileImporter directly. If folder selection is blocked by your Files provider, select default.xbe inside Halo_extracted instead.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -65,23 +78,46 @@ struct ContentView: View {
             .padding()
             .navigationTitle("Halo CE Port")
             .navigationBarTitleDisplayMode(.inline)
-            .sheet(item: $importMode) { mode in
-                FolderPicker(
-                    mode: mode,
-                    onPick: { url in
-                        importMode = nil
-                        switch mode {
-                        case .folder:
-                            gameFolder.select(folder: url)
-                        case .defaultXBE:
-                            gameFolder.select(defaultXBE: url)
-                        }
-                    },
-                    onCancel: {
-                        importMode = nil
-                    }
-                )
+            .fileImporter(
+                isPresented: $showingFolderImporter,
+                allowedContentTypes: [.folder],
+                allowsMultipleSelection: false
+            ) { result in
+                handleFolderImport(result)
             }
+            .fileImporter(
+                isPresented: $showingXBEImporter,
+                allowedContentTypes: [.item, .data],
+                allowsMultipleSelection: false
+            ) { result in
+                handleXBEImport(result)
+            }
+        }
+    }
+
+    private func handleFolderImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else {
+                importerError = "No folder was returned by Files."
+                return
+            }
+            gameFolder.select(folder: url)
+        case .failure(let error):
+            importerError = "Folder picker failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func handleXBEImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else {
+                importerError = "No file was returned by Files."
+                return
+            }
+            gameFolder.select(defaultXBE: url)
+        case .failure(let error):
+            importerError = "File picker failed: \(error.localizedDescription)"
         }
     }
 }
