@@ -3,15 +3,17 @@ import UniformTypeIdentifiers
 import UIKit
 
 struct FolderPicker: UIViewControllerRepresentable {
+    let mode: ImportMode
     let onPick: (URL) -> Void
     let onCancel: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onPick: onPick, onCancel: onCancel)
+        Coordinator(mode: mode, onPick: onPick, onCancel: onCancel)
     }
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let controller = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
+        let types: [UTType] = mode == .folder ? [.folder] : [.item]
+        let controller = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false)
         controller.allowsMultipleSelection = false
         controller.shouldShowFileExtensions = true
         controller.delegate = context.coordinator
@@ -21,10 +23,12 @@ struct FolderPicker: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
 
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let mode: ImportMode
         let onPick: (URL) -> Void
         let onCancel: () -> Void
 
-        init(onPick: @escaping (URL) -> Void, onCancel: @escaping () -> Void) {
+        init(mode: ImportMode, onPick: @escaping (URL) -> Void, onCancel: @escaping () -> Void) {
+            self.mode = mode
             self.onPick = onPick
             self.onCancel = onCancel
         }
