@@ -30,7 +30,7 @@ final class GameFolderStore: ObservableObject {
         }
     }
 
-    private let bookmarkKey = "HaloCEPort.GameFolderBookmark.v1"
+    private let bookmarkKey = "HaloCEPort.GameFolderBookmark.v2"
     private var securityScopedURL: URL?
 
     init() {
@@ -42,16 +42,32 @@ final class GameFolderStore: ObservableObject {
     }
 
     func select(folder url: URL) {
-        stopCurrentAccess()
-        guard url.startAccessingSecurityScopedResource() else {
-            status = .invalid("iOS did not grant access to that folder. Select it again from Files.")
+        useSelectedURL(url, root: url)
+    }
+
+    func select(defaultXBE url: URL) {
+        guard url.lastPathComponent.lowercased() == "default.xbe" else {
+            status = .invalid("Choose the file named default.xbe inside Halo_extracted.")
             return
         }
+        useSelectedURL(url, root: url.deletingLastPathComponent())
+    }
 
-        securityScopedURL = url
-        folderURL = url
-        persistBookmark(for: url)
-        validate(url)
+    private func useSelectedURL(_ selectedURL: URL, root: URL) {
+        stopCurrentAccess()
+
+        // File-provider URLs normally need security-scoped access. Some local Files
+        // locations return false here even though the URL is already readable, so
+        // treat successful access as something to keep alive but do not reject a
+        // readable URL only because startAccessingSecurityScopedResource() returned false.
+        let started = selectedURL.startAccessingSecurityScopedResource()
+        if started {
+            securityScopedURL = selectedURL
+        }
+
+        folderURL = root
+        persistBookmark(for: selectedURL)
+        validate(root)
     }
 
     func forgetFolder() {
@@ -73,13 +89,13 @@ final class GameFolderStore: ObservableObject {
         let fm = FileManager.default
         var isDirectory: ObjCBool = false
         guard fm.fileExists(atPath: root.path, isDirectory: &isDirectory), isDirectory.boolValue else {
-            status = .invalid("The selected item is not a folder.")
+            status = .invalid("The selected Halo location is not readable as a folder.")
             return
         }
 
         let xbe = root.appendingPathComponent("default.xbe", isDirectory: false)
         guard fm.fileExists(atPath: xbe.path) else {
-            status = .invalid("default.xbe is missing. Select the top-level Halo_extracted folder.")
+            status = .invalid("default.xbe is missing. Select the top-level Halo_extracted folder or choose default.xbe directly.")
             return
         }
 
@@ -99,7 +115,7 @@ final class GameFolderStore: ObservableObject {
         let maps = root.appendingPathComponent("maps", isDirectory: true)
         var mapsIsDirectory: ObjCBool = false
         guard fm.fileExists(atPath: maps.path, isDirectory: &mapsIsDirectory), mapsIsDirectory.boolValue else {
-            status = .invalid("The maps folder is missing.")
+            status = .invalid("The maps folder is missing beside default.xbe.")
             return
         }
 
@@ -132,7 +148,7 @@ final class GameFolderStore: ObservableObject {
             let data = try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
             UserDefaults.standard.set(data, forKey: bookmarkKey)
         } catch {
-            status = .invalid("Folder access works for this launch, but iOS could not save it for next time: \(error.localizedDescription)")
+            // Keep the current session usable even if this provider will not create a bookmark.
         }
     }
 
@@ -140,15 +156,22 @@ final class GameFolderStore: ObservableObject {
         guard let data = UserDefaults.standard.data(forKey: bookmarkKey) else { return }
         do {
             var stale = false
-            let url = try URL(resolvingBookmarkData: data, options: [.withoutUI], relativeTo: nil, bookmarkDataIsStale: &stale)
-            guard url.startAccessingSecurityScopedResource() else {
-                UserDefaults.standard.removeObject(forKey: bookmarkKey)
-                return
+            let selectedURL = try URL(resolvingBookmarkData: data, options: [.withoutUI], relativeTo: nil, bookmarkDataIsStale: &stale)
+            let started = selectedURL.startAccessingSecurityScopedResource()
+            if started {
+                securityScopedURL = selectedURL
             }
-            securityScopedURL = url
-            folderURL = url
-            if stale { persistBookmark(for: url) }
-            validate(url)
+
+            let root: URL
+            if selectedURL.lastPathComponent.lowercased() == "default.xbe" {
+                root = selectedURL.deletingLastPathComponent()
+            } else {
+                root = selectedURL
+            }
+
+            folderURL = root
+            if stale { persistBookmark(for: selectedURL) }
+            validate(root)
         } catch {
             UserDefaults.standard.removeObject(forKey: bookmarkKey)
             status = .notSelected
