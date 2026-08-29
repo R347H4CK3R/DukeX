@@ -1,0 +1,78 @@
+name: Build Halo CE Native iOS IPA
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'halo-native-ios/**'
+      - '.github/workflows/build-halo-native-ios.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Expand standalone Halo source
+        run: |
+          tar -xzf halo-native-ios/source.tar.gz -C halo-native-ios
+          test -f halo-native-ios/project.yml
+          test -f halo-native-ios/HaloCEPort/HaloCEPortApp.swift
+
+      - name: Generate Xcode project
+        working-directory: halo-native-ios
+        run: |
+          xcodegen generate
+          test -f HaloCEPort.xcodeproj/project.pbxproj
+
+      - name: Build unsigned iOS app
+        run: |
+          rm -rf "$RUNNER_TEMP/HaloDerivedData"
+          xcodebuild \
+            -project halo-native-ios/HaloCEPort.xcodeproj \
+            -scheme HaloCEPort \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/HaloDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            build
+
+      - name: Verify app
+        run: |
+          APP="$RUNNER_TEMP/HaloDerivedData/Build/Products/Release-iphoneos/HaloCEPort.app"
+          test -d "$APP"
+          test -f "$APP/HaloCEPort"
+          file "$APP/HaloCEPort"
+          echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+
+      - name: Package unsigned IPA
+        run: |
+          rm -rf Payload HaloCE-Native-iOS-unsigned.ipa
+          mkdir Payload
+          cp -R "$APP_PATH" Payload/HaloCEPort.app
+          xattr -cr Payload || true
+          find Payload -name '._*' -delete || true
+          ditto -c -k --sequesterRsrc --keepParent Payload HaloCE-Native-iOS-unsigned.ipa
+          unzip -l HaloCE-Native-iOS-unsigned.ipa | head -60
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: HaloCE-Native-iOS-unsigned-ipa
+          path: HaloCE-Native-iOS-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
