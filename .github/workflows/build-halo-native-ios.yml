@@ -79,3 +79,5 @@ jobs:
           path: HaloCE-Native-iOS-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
+
+# trigger: monitor-and-fix cycle 1
