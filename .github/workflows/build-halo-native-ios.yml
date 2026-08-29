@@ -28,9 +28,8 @@ jobs:
         run: |
           set -euxo pipefail
           file halo-native-ios/source.tar.gz
-          base64 --decode halo-native-ios/source.tar.gz > "$RUNNER_TEMP/halo-source.tar.gz"
-          gzip -t "$RUNNER_TEMP/halo-source.tar.gz"
-          tar -xzf "$RUNNER_TEMP/halo-source.tar.gz" -C halo-native-ios
+          gzip -t halo-native-ios/source.tar.gz
+          tar -xzf halo-native-ios/source.tar.gz -C halo-native-ios
           test -f halo-native-ios/project.yml
           test -f halo-native-ios/HaloCEPort/HaloCEPortApp.swift
 
